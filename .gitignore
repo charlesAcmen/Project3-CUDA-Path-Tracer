@@ -5,6 +5,10 @@
 *.xcodeproj
 build
 
+# IDE and editor specific files
+.vscode/
+CMakeSettings.json
+
 # Created by https://www.gitignore.io/api/linux,osx,sublimetext,windows,jetbrains,vim,emacs,cmake,c++,cuda,visualstudio,webstorm,eclipse,xcode
 
 ### Linux ###
