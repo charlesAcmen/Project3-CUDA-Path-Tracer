@@ -1,4 +1,4 @@
-#include "pathtrace.h"
+﻿#include "pathtrace.h"
 
 #include <cstdio>
 #include <cuda.h>
@@ -240,8 +240,8 @@ __global__ void computeIntersections(
  * - If ray hits a light source: accumulate emitted light and terminate path
  * - If ray hits a surface: scatter ray according to material BSDF
  * - If ray misses all geometry: terminate path (background)
- * this code causes severe wrap divergence:unpredictable branching（different ray path leads to different results）
- * TODO:sort pathSegments by materialId(same material in a group) to reduce divergence and uncoalesced global memory access
+ * this code causes severe wrap divergence: unpredictable branching (different ray path leads to different results)
+ * TODO: sort pathSegments by materialId (same material in a group) to reduce divergence and uncoalesced global memory access
  */
 __global__ void shadeMaterial(
     int iter,
@@ -256,11 +256,22 @@ __global__ void shadeMaterial(
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_paths)
     {
+        PathSegment& pathSegment = pathSegments[idx];
+
+        // Skip paths that have already terminated (hit light or missed geometry).
+        // Without this guard, a path that hits an emissive surface will be
+        // stuck on the same intersection for every remaining bounce - its ray
+        // was never moved - and get multiplied by emittance repeatedly,
+        // causing the image to blow out to white as iterations accumulate.
+        if (pathSegment.remainingBounces <= 0)
+        {
+            return;
+        }
+
         //Register Heavy:ShadeableIntersection+PathSegment+Material+engine
         //the register count of every stream multiprocessor(SM) is limited
         //potentially bringing down the occupancy of SMs by reducing active warps per SM drastically
         ShadeableIntersection intersection = shadeableIntersections[idx];
-        PathSegment& pathSegment = pathSegments[idx];
 
         // Check if ray intersected with scene geometry
         if (intersection.t > 0.0f)

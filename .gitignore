@@ -4,6 +4,7 @@
 *.vcxproj
 *.xcodeproj
 *.ini
+CLAUDE.md
 build
 
 # IDE and editor specific files
