@@ -42,6 +42,12 @@ void checkCUDAErrorFn(const char* msg, const char* file, int line)
 #endif // ERRORCHECK
 }
 
+//index:spatial correlation,ensuring that the different pixels will have different random seeds
+//depth:depth correlation ,ensuring that generated random number in different bounces is independent for a ray
+//iter:temporal correlation,ensuring that the generated random number in different iterations is independent for a pixel
+//iter ensures ray trace is different in every iterations.
+//Note that engine is created whenever determining new ray direction,do NOT fill the engine in the PathSegment struct
+//for optimizing gpu memory bandwidth by utilizing GPU high calculation performance
 __host__ __device__
 thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth)
 {
@@ -226,6 +232,72 @@ __global__ void computeIntersections(
     }
 }
 
+/**
+ * Shader kernel that performs BSDF evaluation and generates new rays.
+ * This kernel handles path termination and ray scattering based on material properties.
+ * 
+ * For each path segment:
+ * - If ray hits a light source: accumulate emitted light and terminate path
+ * - If ray hits a surface: scatter ray according to material BSDF
+ * - If ray misses all geometry: terminate path (background)
+ * this code causes severe wrap divergence:unpredictable branching（different ray path leads to different results）
+ * TODO:sort pathSegments by materialId(same material in a group) to reduce divergence and uncoalesced global memory access
+ */
+__global__ void shadeMaterial(
+    int iter,
+    int num_paths,
+    ShadeableIntersection* shadeableIntersections,
+    PathSegment* pathSegments,
+    Material* materials)
+{
+    //Memory-Bound:Occupancy is limited by the number of registers used per thread
+    //so designing smallest and aligned data structure 
+    //and replacing AoS(Array of Structures) with SoA(Structure of Arrays) is important
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < num_paths)
+    {
+        //Register Heavy:ShadeableIntersection+PathSegment+Material+engine
+        //the register count of every stream multiprocessor(SM) is limited
+        //potentially bringing down the occupancy of SMs by reducing active warps per SM drastically
+        ShadeableIntersection intersection = shadeableIntersections[idx];
+        PathSegment& pathSegment = pathSegments[idx];
+
+        // Check if ray intersected with scene geometry
+        if (intersection.t > 0.0f)
+        {
+            // Setup random number generator for this path
+            thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, pathSegment.remainingBounces);
+
+            // Get material properties at intersection point
+            // material is not sorted,hence leading to uncoalesced global memory access
+            Material material = materials[intersection.materialId];
+
+            // Compute intersection point on the ray
+            glm::vec3 intersectionPoint = getPointOnRay(pathSegment.ray, intersection.t);
+
+            // Check if we hit a light source (emissive material)
+            if (material.emittance > 0.0f)
+            {
+                // Accumulate light contribution and terminate path
+                pathSegment.color *= (material.color * material.emittance);
+                pathSegment.remainingBounces = 0;
+            }
+            else
+            {
+                // Non-emissive surface: scatter ray according to BSDF
+                // This updates the ray direction and attenuates color based on material
+                scatterRay(pathSegment, intersectionPoint, intersection.surfaceNormal, material, rng);
+            }
+        }
+        else
+        {
+            // Ray didn't hit anything - terminate path with background color
+            pathSegment.color = glm::vec3(0.0f);
+            pathSegment.remainingBounces = 0;
+        }
+    }
+}
+
 // LOOK: "fake" shader demonstrating what you might do with the info in
 // a ShadeableIntersection, as well as how to use thrust's random number
 // generator. Observe that since the thrust random number generator basically
@@ -381,6 +453,17 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         // TODO: compare between directly shading the path segments and shading
         // path segments that have been reshuffled to be contiguous in memory.
 
+        // Use real BSDF-based shading kernel
+        shadeMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(
+            iter,
+            num_paths,
+            dev_intersections,
+            dev_paths,
+            dev_materials
+        );
+
+        // Old fake shader (kept for reference)
+        /*
         shadeFakeMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(
             iter,
             num_paths,
@@ -388,7 +471,13 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_paths,
             dev_materials
         );
-        iterationComplete = true; // TODO: should be based off stream compaction results.
+        */
+
+        // Check termination condition:
+        // - All paths have terminated (remainingBounces == 0), OR
+        // - Maximum trace depth reached
+        // TODO: Use stream compaction to remove terminated paths and update num_paths
+        iterationComplete = (depth >= traceDepth);
 
         if (guiData != NULL)
         {

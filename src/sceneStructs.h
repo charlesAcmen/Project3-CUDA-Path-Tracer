@@ -81,7 +81,9 @@ struct PathSegment
 // 2) BSDF evaluation: generate a new ray
 struct ShadeableIntersection
 {
-  float t;
+  float t;// parametric distance along the ray
+  //t > 0.0f: intersection with an object
+  //t < 0.0f: no intersection with an object(initial value)
   glm::vec3 surfaceNormal;
   int materialId;
 };
