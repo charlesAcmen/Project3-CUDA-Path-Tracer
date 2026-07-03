@@ -3,6 +3,7 @@
 *.sln
 *.vcxproj
 *.xcodeproj
+*.ini
 build
 
 # IDE and editor specific files
