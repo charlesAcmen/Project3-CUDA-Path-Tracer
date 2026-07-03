@@ -27,7 +27,14 @@
 //
 // The three modes are mutually exclusive -- exactly one is active.
 // ====================================================================
-#define COMPACT_METHOD  1
+#define COMPACT_METHOD 2
+
+// Predicate functor for Thrust copy_if (used when COMPACT_METHOD == 2)
+struct IsPathActive {
+    __device__ bool operator()(const PathSegment& p) const {
+        return p.remainingBounces > 0;
+    }
+};
 
 #if COMPACT_METHOD == 1
     #include "../stream_compaction/efficient.h"
@@ -43,8 +50,7 @@
 //iter ensures ray trace is different in every iterations.
 //Note that engine is created whenever determining new ray direction,do NOT fill the engine in the PathSegment struct
 //for optimizing gpu memory bandwidth by utilizing GPU high calculation performance
-__host__ __device__
-thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth)
+__host__ __device__ thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth)
 {
     int h = utilhash((1 << 31) | (depth << 22) | iter) ^ utilhash(index);
     return thrust::default_random_engine(h);
@@ -491,9 +497,7 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
         thrust::device,
         dev_paths, dev_paths + num_paths,
         dev_paths_compacted,
-        [] __device__ (const PathSegment& p) {
-            return p.remainingBounces > 0;
-        });
+        IsPathActive());
 
     // 3. Ping-pong the buffer pointers.
     PathSegment* tmp = dev_paths;
