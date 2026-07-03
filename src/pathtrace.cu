@@ -44,6 +44,21 @@ struct IsPathActive {
     #error "COMPACT_METHOD must be 0 (disabled), 1 (custom), or 2 (Thrust)"
 #endif
 
+// Material sorting toggle -- groups path segments by material ID before
+// shading to reduce warp divergence and improve memory coalescing.
+//
+// When enabled, dev_paths and dev_intersections are permuted so that paths
+// hitting the same material become contiguous.  Threads in the same warp
+// then follow identical emissive/diffuse/specular branches instead of
+// diverging across all three.
+#define SORT_BY_MATERIAL  1  // 0 = disabled, 1 = enabled
+
+#if SORT_BY_MATERIAL
+    #include <thrust/sort.h>
+    #include <thrust/gather.h>
+    #include <thrust/sequence.h>
+#endif
+
 //index:spatial correlation,ensuring that the different pixels will have different random seeds
 //depth:depth correlation ,ensuring that generated random number in different bounces is independent for a ray
 //iter:temporal correlation,ensuring that the generated random number in different iterations is independent for a pixel
@@ -89,6 +104,10 @@ static PathSegment* dev_paths = NULL;
 static ShadeableIntersection* dev_intersections = NULL;
 // Temporary buffer for stream compaction
 static PathSegment* dev_paths_compacted = NULL;
+// Buffers for material-based sorting
+static int* dev_sortKeys = NULL;
+static int* dev_sortIndices = NULL;
+static ShadeableIntersection* dev_intersections_sorted = NULL;
 // TODO: static variables for device memory, any extra info you need, etc
 // ...
 
@@ -121,6 +140,11 @@ void pathtraceInit(Scene* scene)
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     // TODO: initialize any extra device memeory you need
+#if SORT_BY_MATERIAL
+    cudaMalloc(&dev_sortKeys, pixelcount * sizeof(int));
+    cudaMalloc(&dev_sortIndices, pixelcount * sizeof(int));
+    cudaMalloc(&dev_intersections_sorted, pixelcount * sizeof(ShadeableIntersection));
+#endif
 
     checkCUDAError("pathtraceInit");
 }
@@ -133,6 +157,11 @@ void pathtraceFree()
     cudaFree(dev_geoms);
     cudaFree(dev_materials);
     cudaFree(dev_intersections);
+#if SORT_BY_MATERIAL
+    cudaFree(dev_sortKeys);
+    cudaFree(dev_sortIndices);
+    cudaFree(dev_intersections_sorted);
+#endif
     // TODO: clean up any extra device memory you created
 
     checkCUDAError("pathtraceFree");
@@ -424,8 +453,78 @@ __global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment*
 }
 
 // ---------------------------------------------------------------------------
-// Host-side helper
+// Host-side helpers
 // ---------------------------------------------------------------------------
+
+#if SORT_BY_MATERIAL
+/**
+ * Permutes dev_paths and dev_intersections so that paths hitting the same
+ * material become contiguous in memory.
+ *
+ * Why this helps:
+ *   shadeMaterial branches on material.emittance > 0 (light vs. surface) and
+ *   material type (diffuse vs. specular vs. refractive).  Without sorting,
+ *   threads within a warp hit different materials and take divergent paths,
+ *   serialising execution.  After sorting, same-material paths cluster
+ *   together, so most warps execute a single branch path.
+ *
+ *   Additionally, materials[id] reads become coalesced: adjacent threads
+ *   load adjacent Material structs instead of scattering across the array.
+ *
+ * Algorithm (Thrust-based, in-place via ping-pong):
+ *   1. Extract materialId from dev_intersections -> dev_sortKeys
+ *   2. Fill dev_sortIndices = [0, 1, 2, ...]
+ *   3. sort_by_key(keys, indices)  -- indices now map sorted_pos -> original_pos
+ *   4. gather paths    via indices -> dev_paths_compacted  (reuses compaction buffer)
+ *   5. gather intersections via indices -> dev_intersections_sorted
+ *   6. Swap pointers so dev_paths / dev_intersections point to sorted data
+ */
+static void sortPathsByMaterial(int num_paths)
+{
+    if (num_paths <= 1) return;
+
+    // 1. Extract sort keys (materialId from each intersection)
+    thrust::transform(thrust::device,
+        dev_intersections, dev_intersections + num_paths,
+        dev_sortKeys,
+        [] __device__ (const ShadeableIntersection& isect) {
+            return isect.materialId;
+        });
+
+    // 2. Initialise permutation indices: [0, 1, 2, ..., n-1]
+    thrust::sequence(thrust::device,
+        dev_sortIndices, dev_sortIndices + num_paths);
+
+    // 3. Sort indices by material ID (stable radix sort)
+    thrust::sort_by_key(thrust::device,
+        dev_sortKeys, dev_sortKeys + num_paths,
+        dev_sortIndices);
+    // dev_sortIndices[sorted_pos] now gives the original position
+
+    // 4. Gather path segments into sorted order
+    //    Reuses dev_paths_compacted as the gather destination; its previous
+    //    contents (from stream compaction) are stale and safe to overwrite.
+    thrust::gather(thrust::device,
+        dev_sortIndices, dev_sortIndices + num_paths,
+        dev_paths,               // input  (unsorted)
+        dev_paths_compacted);    // output (sorted)
+
+    // 5. Gather intersections into sorted order (separate temp buffer)
+    thrust::gather(thrust::device,
+        dev_sortIndices, dev_sortIndices + num_paths,
+        dev_intersections,        // input  (unsorted)
+        dev_intersections_sorted);// output (sorted)
+
+    // 6. Swap pointers -- the sorted arrays are now the "live" ones
+    { PathSegment* tmp = dev_paths;
+      dev_paths = dev_paths_compacted;
+      dev_paths_compacted = tmp; }
+
+    { ShadeableIntersection* tmp = dev_intersections;
+      dev_intersections = dev_intersections_sorted;
+      dev_intersections_sorted = tmp; }
+}
+#endif // SORT_BY_MATERIAL
 
 /**
  * Gathers terminated path colors into dev_image, then stream-compacts the path
@@ -519,8 +618,9 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
 //   generateRayFromCamera          primary rays -> PathSegment buffer
 //   for each bounce:
 //       computeIntersections        ray <-> scene test
+//       [sortPathsByMaterial]       group by materialId for coalesced shading  (optional)
 //       shadeMaterial               BSDF eval, color attenuation / emission
-//       compactActivePaths          gather dead paths -> compact -> ping-pong
+//       compactActivePaths          gather dead paths -> compact -> ping-pong  (optional)
 //   finalGather                     remaining paths -> accumulation buffer
 //   sendImageToPBO                  tone-map -> OpenGL display
 //
@@ -590,6 +690,10 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         checkCUDAError("trace one bounce");
         cudaDeviceSynchronize();
         depth++;
+
+#if SORT_BY_MATERIAL
+        sortPathsByMaterial(num_paths);
+#endif
 
         shadeMaterial<<<numBlocks, blockSize1d>>>(
             iter, num_paths,
