@@ -10,13 +10,8 @@
 #include <chrono>
 #include <stdexcept>
 
-#define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
-#define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
-
-/**
- * Check for CUDA errors; print and exit if there was a problem.
- */
-void checkCUDAErrorFn(const char *msg, const char *file = NULL, int line = -1);
+// Use unified CUDA error checking from utilities module
+#include "../src/utilities.h"
 
 inline int ilog2(int x) {
     int lg = 0;

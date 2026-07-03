@@ -33,3 +33,12 @@ namespace utilityCore
     extern std::string convertIntToString(int number);
     extern std::istream& safeGetline(std::istream& is, std::string& t); //Thanks to http://stackoverflow.com/a/6089413
 }
+
+// CUDA error checking utilities
+// Available only when compiling with NVCC
+#ifdef __CUDACC__
+    #define ERRORCHECK 1
+    #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+    #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
+    void checkCUDAErrorFn(const char* msg, const char* file = nullptr, int line = -1);
+#endif

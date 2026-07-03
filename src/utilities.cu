@@ -1,7 +1,7 @@
 //  UTILITYCORE- A Utility Library by Yining Karl Li
 //  This file is part of UTILITYCORE, Copyright (c) 2012 Yining Karl Li
 //
-//  File: utilities.cpp
+//  File: utilities.cu (renamed from utilities.cpp for CUDA support)
 //  A collection/kitchen sink of generally useful functions
 
 #include "utilities.h"
@@ -11,6 +11,39 @@
 
 #include <cstdio>
 #include <iostream>
+
+#ifdef __CUDACC__
+#include <cuda.h>
+#include <cuda_runtime.h>
+
+/**
+ * Check for CUDA errors and print diagnostic information.
+ * This version includes cudaDeviceSynchronize for thorough error checking.
+ * Can be disabled by setting ERRORCHECK to 0.
+ */
+void checkCUDAErrorFn(const char* msg, const char* file, int line)
+{
+#if ERRORCHECK
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (cudaSuccess == err)
+    {
+        return;
+    }
+
+    fprintf(stderr, "CUDA error");
+    if (file)
+    {
+        fprintf(stderr, " (%s:%d)", file, line);
+    }
+    fprintf(stderr, ": %s: %s\n", msg, cudaGetErrorString(err));
+#ifdef _WIN32
+    getchar();
+#endif // _WIN32
+    exit(EXIT_FAILURE);
+#endif // ERRORCHECK
+}
+#endif // __CUDACC__
 
 float utilityCore::clamp(float f, float min, float max)
 {
