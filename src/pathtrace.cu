@@ -18,7 +18,7 @@
 // Note: checkCUDAError and checkCUDAErrorFn are now defined in utilities.h/cu
 
 // Stream compaction toggle
-#define STREAM_COMPACTION 0  // 0=disabled, 1=enabled (using custom implementation)
+#define STREAM_COMPACTION 1  // 0=disabled, 1=enabled (using custom implementation)
 
 // Include stream compaction implementation
 #include "../stream_compaction/efficient.h"
@@ -372,13 +372,116 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 }
 
 /**
- * Wrapper for the __global__ call that sets up the kernel calls and does a ton
- * of memory management
+ * Gathers the accumulated color of TERMINATED paths (remainingBounces <= 0)
+ * into the accumulation image BEFORE stream compaction discards them.
+ *
+ * This is critical for correctness with stream compaction:
+ * - When a path hits a light, its color *= emittance is the final result for that
+ *   sample, and it must be recorded in the accumulation buffer.
+ * - When a path exhausts all bounces without hitting a light, its attenuated color
+ *   is also a valid sample and must be recorded.
+ * - Without this pre-compaction gather, these terminated paths are removed by
+ *   compaction before finalGather can collect their contributions, resulting in
+ *   a black image.
+ *
+ * Active paths (remainingBounces > 0) are NOT gathered here -- they will continue
+ * bouncing and their final color will be gathered when they eventually terminate.
  */
+__global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment* paths)
+{
+    int index = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+    if (index < nPaths)
+    {
+        PathSegment path = paths[index];
+        // Only collect contributions from paths that have finished their journey.
+        // Active paths are skipped -- they will contribute when they terminate.
+        if (path.remainingBounces <= 0)
+        {
+            image[path.pixelIndex] += path.color;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Host-side helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Gathers terminated path colors into dev_image, then stream-compacts the path
+ * array to remove entries with remainingBounces <= 0.
+ *
+ * WHY before compaction:
+ *   After shadeMaterial, paths that hit a light carry their final radiance in
+ *   pathSegment.color.  If we compact first, those contributions are discarded
+ *   and the accumulation buffer stays empty --> black image.
+ *
+ *   Active paths (remainingBounces > 0) are deliberately skipped here -- they
+ *   continue bouncing and contribute when they eventually terminate.
+ *
+ * Uses ping-pong buffers (dev_paths <-> dev_paths_compacted) to avoid a
+ * separate allocation per bounce.
+ *
+ * @param num_paths    [in/out]  Active path count; set to survivors after compaction.
+ * @param blockSize1d            1D block size for kernel launches.
+ * @return                       true if every path terminated (caller should
+ *                               exit the bounce loop immediately).
+ */
+static bool compactActivePaths(int& num_paths, int blockSize1d)
+{
+#if STREAM_COMPACTION
+    dim3 numBlocks((num_paths + blockSize1d - 1) / blockSize1d);
+
+    // 1. Bank terminated-path colors before they disappear.
+    gatherTerminatedPaths<<<numBlocks, blockSize1d>>>(
+        num_paths, dev_image, dev_paths);
+    checkCUDAError("gatherTerminatedPaths");
+
+    // 2. Compact: keep only paths with remainingBounces > 0.
+    int survivors = StreamCompaction::Efficient::compactPathSegments(
+        num_paths,
+        dev_paths_compacted,   // output
+        dev_paths);            // input
+
+    // 3. Ping-pong the buffer pointers.
+    PathSegment* tmp = dev_paths;
+    dev_paths = dev_paths_compacted;
+    dev_paths_compacted = tmp;
+
+    num_paths = survivors;
+    return (num_paths == 0);
+
+    // Alternative one-liner with Thrust (no Project-2 implementation credit):
+    //   PathSegment* end = thrust::copy_if(thrust::device,
+    //       dev_paths, dev_paths + num_paths, dev_paths_compacted,
+    //       [] __device__ (const PathSegment& p) { return p.remainingBounces > 0; });
+    //   std::swap(dev_paths, dev_paths_compacted);
+    //   num_paths = end - dev_paths;
+    //   return (num_paths == 0);
+#else
+    (void)num_paths; (void)blockSize1d;
+    return false;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Main path-tracing entry point (called once per frame / iteration)
+// ---------------------------------------------------------------------------
+//
+// Pipeline overview (one iteration = one sample per pixel):
+//
+//   generateRayFromCamera          primary rays -> PathSegment buffer
+//   for each bounce:
+//       computeIntersections        ray <-> scene test
+//       shadeMaterial               BSDF eval, color attenuation / emission
+//       compactActivePaths          gather dead paths -> compact -> ping-pong
+//   finalGather                     remaining paths -> accumulation buffer
+//   sendImageToPBO                  tone-map -> OpenGL display
+//
 void pathtrace(uchar4* pbo, int frame, int iter)
 {
     const int traceDepth = hst_scene->state.traceDepth;
-    const Camera& cam = hst_scene->state.camera;
+    const Camera& cam    = hst_scene->state.camera;
     const int pixelcount = cam.resolution.x * cam.resolution.y;
 
     // 2D block for generating ray from camera
@@ -386,7 +489,6 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     const dim3 blocksPerGrid2d(
         (cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
         (cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
-
     // 1D block for path tracing
     const int blockSize1d = 128;
 
@@ -421,133 +523,54 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
     // TODO: perform one iteration of path tracing
 
-    generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(cam, iter, traceDepth, dev_paths);
+    // ---- 1. Primary rays ------------------------------------------------
+    generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(
+        cam, iter, traceDepth, dev_paths);
     checkCUDAError("generate camera ray");
 
-    int depth = 0;
-    PathSegment* dev_path_end = dev_paths + pixelcount;
-    int num_paths = dev_path_end - dev_paths;
+    int  depth     = 0;
+    int  num_paths = pixelcount;
+    bool done      = false;
 
-    // --- PathSegment Tracing Stage ---
-    // Shoot ray into scene, bounce between objects, push shading chunks
-
-    bool iterationComplete = false;
-    while (!iterationComplete)
+    // ---- 2. Bounce loop -------------------------------------------------
+    while (!done)
     {
-        // clean shading chunks
         cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
-        // tracing
-        dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
-        computeIntersections<<<numblocksPathSegmentTracing, blockSize1d>>> (
-            depth,
-            num_paths,
-            dev_paths,
-            dev_geoms,
-            hst_scene->geoms.size(),
-            dev_intersections
-        );
+        dim3 numBlocks((num_paths + blockSize1d - 1) / blockSize1d);
+        computeIntersections<<<numBlocks, blockSize1d>>>(
+            depth, num_paths, dev_paths,
+            dev_geoms, hst_scene->geoms.size(), dev_intersections);
         checkCUDAError("trace one bounce");
         cudaDeviceSynchronize();
         depth++;
 
-        // TODO:
-        // --- Shading Stage ---
-        // Shade path segments based on intersections and generate new rays by
-        // evaluating the BSDF.
-        // Start off with just a big kernel that handles all the different
-        // materials you have in the scenefile.
-        // TODO: compare between directly shading the path segments and shading
-        // path segments that have been reshuffled to be contiguous in memory.
+        shadeMaterial<<<numBlocks, blockSize1d>>>(
+            iter, num_paths,
+            dev_intersections, dev_paths, dev_materials);
 
-        // Use real BSDF-based shading kernel
-        shadeMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(
-            iter,
-            num_paths,
-            dev_intersections,
-            dev_paths,
-            dev_materials
-        );
-
-        // Old fake shader (kept for reference)
-        /*
-        shadeFakeMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(
-            iter,
-            num_paths,
-            dev_intersections,
-            dev_paths,
-            dev_materials
-        );
-        */
-
-        // ====================================================================
-        // Stream Compaction: Remove terminated paths to improve efficiency
-        // ====================================================================
-#if STREAM_COMPACTION
-        // Use custom stream compaction implementation from Project 2
-        int compactedSize = StreamCompaction::Efficient::compactPathSegments(
-            num_paths,
-            dev_paths_compacted,  // output: compacted array
-            dev_paths              // input: array with terminated paths
-        );
-        
-        // Swap pointers so dev_paths points to compacted data
-        PathSegment* temp = dev_paths;
-        dev_paths = dev_paths_compacted;
-        dev_paths_compacted = temp;
-        
-        num_paths = compactedSize;
-        
-        // Early termination: if all paths are done, exit loop
-        if (num_paths == 0) {
-            iterationComplete = true;
-        }
-        
-        /* Alternative: Use Thrust for stream compaction (comment out custom version above)
-        // Thrust version - simpler but doesn't show Project 2 implementation
-        #include <thrust/partition.h>
-        
-        PathSegment* new_end = thrust::partition(
-            thrust::device,
-            dev_paths,
-            dev_paths + num_paths,
-            [] __device__ (const PathSegment& path) {
-                return path.remainingBounces > 0;
-            }
-        );
-        num_paths = new_end - dev_paths;
-        
-        if (num_paths == 0) {
-            iterationComplete = true;
-        }
-        */
-#endif // STREAM_COMPACTION
-
-        // Check termination condition:
-        // - All paths have terminated (remainingBounces == 0), OR
-        // - Maximum trace depth reached
-        if (!iterationComplete) {
-            iterationComplete = (depth >= traceDepth);
-        }
+        bool allDead = compactActivePaths(num_paths, blockSize1d);
+        done = allDead || (depth >= traceDepth);
 
         if (guiData != NULL)
-        {
             guiData->TracedDepth = depth;
-        }
     }
 
-    // Assemble this iteration and apply it to the image
-    dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-    finalGather<<<numBlocksPixels, blockSize1d>>>(num_paths, dev_image, dev_paths);
+    // ---- 3. Accumulation ------------------------------------------------
+    // Survivors (paths that reached traceDepth without terminating) also
+    // carry valid attenuated colors and must contribute.
+    {
+        dim3 numBlocks((pixelcount + blockSize1d - 1) / blockSize1d);
+        finalGather<<<numBlocks, blockSize1d>>>(
+            num_paths, dev_image, dev_paths);
+    }
 
-    ///////////////////////////////////////////////////////////////////////////
+    // ---- 4. Display -----------------------------------------------------
+    sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(
+        pbo, cam.resolution, iter, dev_image);
 
-    // Send results to OpenGL buffer for rendering
-    sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, iter, dev_image);
-
-    // Retrieve image from GPU
     cudaMemcpy(hst_scene->state.image.data(), dev_image,
-        pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+               pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
     checkCUDAError("pathtrace");
 }
