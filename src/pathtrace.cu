@@ -17,11 +17,25 @@
 
 // Note: checkCUDAError and checkCUDAErrorFn are now defined in utilities.h/cu
 
-// Stream compaction toggle
-#define STREAM_COMPACTION 1  // 0=disabled, 1=enabled (using custom implementation)
+// ====================================================================
+// Stream Compaction: compile-time method selection
+// ====================================================================
+//   0 = disabled (paths are never compacted; terminated paths are
+//       guarded by the remainingBounces check in shadeMaterial)
+//   1 = custom work-efficient scan-based compaction (Project 2)
+//   2 = Thrust copy_if (reference / baseline; requires extended lambdas)
+//
+// The three modes are mutually exclusive -- exactly one is active.
+// ====================================================================
+#define COMPACT_METHOD  1
 
-// Include stream compaction implementation
-#include "../stream_compaction/efficient.h"
+#if COMPACT_METHOD == 1
+    #include "../stream_compaction/efficient.h"
+#elif COMPACT_METHOD == 2
+    #include <thrust/copy.h>
+#elif COMPACT_METHOD != 0
+    #error "COMPACT_METHOD must be 0 (disabled), 1 (custom), or 2 (Thrust)"
+#endif
 
 //index:spatial correlation,ensuring that the different pixels will have different random seeds
 //depth:depth correlation ,ensuring that generated random number in different bounces is independent for a ray
@@ -429,7 +443,17 @@ __global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment*
  */
 static bool compactActivePaths(int& num_paths, int blockSize1d)
 {
-#if STREAM_COMPACTION
+    // Nothing to do when compaction is disabled -- terminated paths are
+    // already guarded by the remainingBounces check in shadeMaterial, and
+    // finalGather collects every path at the end of the bounce loop.
+#if COMPACT_METHOD == 0
+    (void)num_paths; (void)blockSize1d;
+    return false;
+
+    // ====================================================================
+    // Custom work-efficient compaction (Project 2)
+    // ====================================================================
+#elif COMPACT_METHOD == 1
     dim3 numBlocks((num_paths + blockSize1d - 1) / blockSize1d);
 
     // 1. Bank terminated-path colors before they disappear.
@@ -451,16 +475,34 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
     num_paths = survivors;
     return (num_paths == 0);
 
-    // Alternative one-liner with Thrust (no Project-2 implementation credit):
-    //   PathSegment* end = thrust::copy_if(thrust::device,
-    //       dev_paths, dev_paths + num_paths, dev_paths_compacted,
-    //       [] __device__ (const PathSegment& p) { return p.remainingBounces > 0; });
-    //   std::swap(dev_paths, dev_paths_compacted);
-    //   num_paths = end - dev_paths;
-    //   return (num_paths == 0);
-#else
-    (void)num_paths; (void)blockSize1d;
-    return false;
+    // ====================================================================
+    // Thrust copy_if (reference / baseline)
+    // ====================================================================
+#elif COMPACT_METHOD == 2
+    dim3 numBlocks((num_paths + blockSize1d - 1) / blockSize1d);
+
+    // 1. Bank terminated-path colors before they disappear.
+    gatherTerminatedPaths<<<numBlocks, blockSize1d>>>(
+        num_paths, dev_image, dev_paths);
+    checkCUDAError("gatherTerminatedPaths");
+
+    // 2. Compact: keep only paths with remainingBounces > 0.
+    PathSegment* end = thrust::copy_if(
+        thrust::device,
+        dev_paths, dev_paths + num_paths,
+        dev_paths_compacted,
+        [] __device__ (const PathSegment& p) {
+            return p.remainingBounces > 0;
+        });
+
+    // 3. Ping-pong the buffer pointers.
+    PathSegment* tmp = dev_paths;
+    dev_paths = dev_paths_compacted;
+    dev_paths_compacted = tmp;
+
+    num_paths = static_cast<int>(end - dev_paths);
+    return (num_paths == 0);
+
 #endif
 }
 
