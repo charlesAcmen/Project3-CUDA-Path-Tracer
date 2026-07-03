@@ -17,6 +17,12 @@
 
 // Note: checkCUDAError and checkCUDAErrorFn are now defined in utilities.h/cu
 
+// Stream compaction toggle
+#define STREAM_COMPACTION 0  // 0=disabled, 1=enabled (using custom implementation)
+
+// Include stream compaction implementation
+#include "../stream_compaction/efficient.h"
+
 //index:spatial correlation,ensuring that the different pixels will have different random seeds
 //depth:depth correlation ,ensuring that generated random number in different bounces is independent for a ray
 //iter:temporal correlation,ensuring that the generated random number in different iterations is independent for a pixel
@@ -61,6 +67,8 @@ static Geom* dev_geoms = NULL;
 static Material* dev_materials = NULL;
 static PathSegment* dev_paths = NULL;
 static ShadeableIntersection* dev_intersections = NULL;
+// Temporary buffer for stream compaction
+static PathSegment* dev_paths_compacted = NULL;
 // TODO: static variables for device memory, any extra info you need, etc
 // ...
 
@@ -81,6 +89,8 @@ void pathtraceInit(Scene* scene)
 
     cudaMalloc(&dev_paths, pixelcount * sizeof(PathSegment));
 
+    cudaMalloc(&dev_paths_compacted, pixelcount * sizeof(PathSegment));
+
     cudaMalloc(&dev_geoms, scene->geoms.size() * sizeof(Geom));
     cudaMemcpy(dev_geoms, scene->geoms.data(), scene->geoms.size() * sizeof(Geom), cudaMemcpyHostToDevice);
 
@@ -99,6 +109,7 @@ void pathtraceFree()
 {
     cudaFree(dev_image);  // no-op if dev_image is null
     cudaFree(dev_paths);
+    cudaFree(dev_paths_compacted);
     cudaFree(dev_geoms);
     cudaFree(dev_materials);
     cudaFree(dev_intersections);
@@ -469,11 +480,55 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         );
         */
 
+        // ====================================================================
+        // Stream Compaction: Remove terminated paths to improve efficiency
+        // ====================================================================
+#if STREAM_COMPACTION
+        // Use custom stream compaction implementation from Project 2
+        int compactedSize = StreamCompaction::Efficient::compactPathSegments(
+            num_paths,
+            dev_paths_compacted,  // output: compacted array
+            dev_paths              // input: array with terminated paths
+        );
+        
+        // Swap pointers so dev_paths points to compacted data
+        PathSegment* temp = dev_paths;
+        dev_paths = dev_paths_compacted;
+        dev_paths_compacted = temp;
+        
+        num_paths = compactedSize;
+        
+        // Early termination: if all paths are done, exit loop
+        if (num_paths == 0) {
+            iterationComplete = true;
+        }
+        
+        /* Alternative: Use Thrust for stream compaction (comment out custom version above)
+        // Thrust version - simpler but doesn't show Project 2 implementation
+        #include <thrust/partition.h>
+        
+        PathSegment* new_end = thrust::partition(
+            thrust::device,
+            dev_paths,
+            dev_paths + num_paths,
+            [] __device__ (const PathSegment& path) {
+                return path.remainingBounces > 0;
+            }
+        );
+        num_paths = new_end - dev_paths;
+        
+        if (num_paths == 0) {
+            iterationComplete = true;
+        }
+        */
+#endif // STREAM_COMPACTION
+
         // Check termination condition:
         // - All paths have terminated (remainingBounces == 0), OR
         // - Maximum trace depth reached
-        // TODO: Use stream compaction to remove terminated paths and update num_paths
-        iterationComplete = (depth >= traceDepth);
+        if (!iterationComplete) {
+            iterationComplete = (depth >= traceDepth);
+        }
 
         if (guiData != NULL)
         {

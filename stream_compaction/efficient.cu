@@ -3,6 +3,9 @@
 #include "common.h"
 #include "efficient.h"
 
+// Include PathSegment definition (need full definition, not just forward declaration)
+#include "../src/sceneStructs.h"
+
 namespace StreamCompaction {
     namespace Efficient {
         using StreamCompaction::Common::PerformanceTimer;
@@ -195,6 +198,112 @@ namespace StreamCompaction {
             cudaFree(dev_bools);
             cudaFree(dev_indices);
             cudaFree(dev_odata);
+
+            return count;
+        }
+
+        // ========================================================================
+        // PathSegment-specific stream compaction kernels
+        // ========================================================================
+
+        /**
+         * Maps PathSegment array to boolean array.
+         * Paths with remainingBounces > 0 map to 1, others map to 0.
+         */
+        __global__ void kernMapPathSegmentToBoolean(int n, int *bools, const PathSegment *paths) {
+            int index = threadIdx.x + (blockIdx.x * blockDim.x);
+            
+            if (index >= n) {
+                return;
+            }
+            
+            // Keep paths that still have bounces remaining
+            bools[index] = (paths[index].remainingBounces > 0) ? 1 : 0;
+        }
+
+        /**
+         * Scatters PathSegment array based on boolean and indices arrays.
+         * Only paths where bools[idx] == 1 are copied to output.
+         */
+        __global__ void kernScatterPathSegment(int n, PathSegment *odata,
+                const PathSegment *idata, const int *bools, const int *indices) {
+            int index = threadIdx.x + (blockIdx.x * blockDim.x);
+            
+            if (index >= n) {
+                return;
+            }
+            
+            if (bools[index] == 1) {
+                odata[indices[index]] = idata[index];
+            }
+        }
+
+        /**
+         * Performs stream compaction on PathSegment arrays (device memory version).
+         * Removes paths with remainingBounces <= 0.
+         * 
+         * This function operates entirely on GPU memory - no host-device copies.
+         * Both input and output must be device pointers.
+         *
+         * @param n           The number of PathSegments in dev_idata.
+         * @param dev_odata   Device pointer to output array (must be pre-allocated).
+         * @param dev_idata   Device pointer to input array.
+         * @returns           The number of active paths remaining after compaction.
+         */
+        int compactPathSegments(int n, PathSegment *dev_odata, const PathSegment *dev_idata) {
+            // Round up to next power of 2 for scan
+            int paddedN = 1 << ilog2ceil(n);
+            
+            // Allocate device memory for intermediate arrays
+            int *dev_bools, *dev_indices;
+            cudaMalloc((void**)&dev_bools, n * sizeof(int));
+            cudaMalloc((void**)&dev_indices, paddedN * sizeof(int));
+            checkCUDAError("cudaMalloc failed in compactPathSegments");
+
+            // Step 1: Map PathSegments to boolean array
+            dim3 fullBlocksPerGrid((n + blockSize - 1) / blockSize);
+            kernMapPathSegmentToBoolean<<<fullBlocksPerGrid, blockSize>>>(n, dev_bools, dev_idata);
+            checkCUDAError("kernMapPathSegmentToBoolean failed");
+            
+            // Copy bools to indices array and pad with zeros
+            cudaMemcpy(dev_indices, dev_bools, n * sizeof(int), cudaMemcpyDeviceToDevice);
+            if (paddedN > n) {
+                cudaMemset(dev_indices + n, 0, (paddedN - n) * sizeof(int));
+            }
+            
+            // Step 2: Exclusive scan (prefix sum) on indices
+            // Up-sweep phase
+            for (int d = 0; d < ilog2ceil(paddedN); d++) {
+                int numThreads = paddedN / (1 << (d + 1));
+                dim3 blocks((numThreads + blockSize - 1) / blockSize);
+                kernUpSweep<<<blocks, blockSize>>>(paddedN, d, dev_indices);
+                checkCUDAError("kernUpSweep failed in compactPathSegments");
+            }
+            
+            // Set root to zero
+            cudaMemset(dev_indices + paddedN - 1, 0, sizeof(int));
+            
+            // Down-sweep phase
+            for (int d = ilog2ceil(paddedN) - 1; d >= 0; d--) {
+                int numThreads = paddedN / (1 << (d + 1));
+                dim3 blocks((numThreads + blockSize - 1) / blockSize);
+                kernDownSweep<<<blocks, blockSize>>>(paddedN, d, dev_indices);
+                checkCUDAError("kernDownSweep failed in compactPathSegments");
+            }
+            
+            // Step 3: Scatter PathSegments to output array
+            kernScatterPathSegment<<<fullBlocksPerGrid, blockSize>>>(n, dev_odata, dev_idata, dev_bools, dev_indices);
+            checkCUDAError("kernScatterPathSegment failed");
+
+            // Calculate the count of active paths
+            int lastBool, lastIndex;
+            cudaMemcpy(&lastBool, dev_bools + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&lastIndex, dev_indices + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            int count = lastIndex + lastBool;
+
+            // Free intermediate device memory
+            cudaFree(dev_bools);
+            cudaFree(dev_indices);
 
             return count;
         }
