@@ -141,6 +141,9 @@ __host__ __device__ void scatterRay(
     // - Increase to 1e-4 if seeing shadow acne (black speckles on surfaces)
     // - Decrease to 1e-6 for scenes with very thin geometry (< 0.01 units)
     // - For large-scale scenes (>1000 units), scale proportionally
+    
+    //Note that since only Refraction always requires opposite direction offset
+    //Let's leave sign judging to future release.i.e.TODO:judge sign by dot product of normal and newDirection
     pathSegment.ray.origin = intersect + normal * EPSILON;
     pathSegment.ray.direction = newDirection;
     

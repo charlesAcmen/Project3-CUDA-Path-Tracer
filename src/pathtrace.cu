@@ -273,9 +273,9 @@ __global__ void shadeMaterial(
             Material material = materials[intersection.materialId];
 
             // Compute intersection point on the ray
-            glm::vec3 intersectionPoint = getPointOnRay(pathSegment.ray, intersection.t);
-
-            // Check if we hit a light source (emissive material)
+            glm::vec3 intersectionPoint = getExactPointOnRay(pathSegment.ray, intersection.t);
+            
+            // Check if we hit a light source (emissive material)   
             if (material.emittance > 0.0f)
             {
                 // Accumulate light contribution and terminate path
