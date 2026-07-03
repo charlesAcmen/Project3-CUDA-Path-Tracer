@@ -145,6 +145,9 @@ __host__ __device__ void scatterRay(
     pathSegment.ray.direction = newDirection;
     
     // Apply diffuse material color (energy attenuation)
+    //multiplier = fr * cos theta/pdf(omega)
+    //where pdf(omega) = coos theta / π
+    //BSDF of diffuse reflection：fr = R / π
     pathSegment.color *= m.color;
     
     // Decrement remaining bounces
