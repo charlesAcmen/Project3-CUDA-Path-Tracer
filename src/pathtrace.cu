@@ -36,6 +36,13 @@ struct IsPathActive {
     }
 };
 
+// Functor for extracting materialId from ShadeableIntersection (used in material sorting)
+struct ExtractMaterialId {
+    __device__ int operator()(const ShadeableIntersection& isect) const {
+        return isect.materialId;
+    }
+};
+
 #if COMPACT_METHOD == 1
     #include "../stream_compaction/efficient.h"
 #elif COMPACT_METHOD == 2
@@ -487,9 +494,7 @@ static void sortPathsByMaterial(int num_paths)
     thrust::transform(thrust::device,
         dev_intersections, dev_intersections + num_paths,
         dev_sortKeys,
-        [] __device__ (const ShadeableIntersection& isect) {
-            return isect.materialId;
-        });
+        ExtractMaterialId());
 
     // 2. Initialise permutation indices: [0, 1, 2, ..., n-1]
     thrust::sequence(thrust::device,
