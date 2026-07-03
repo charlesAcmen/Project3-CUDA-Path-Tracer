@@ -1,7 +1,11 @@
 set(headers
+    common.h
+    efficient.h
     )
 
 set(sources
+    common.cu
+    efficient.cu
     )
 
 list(SORT headers)
