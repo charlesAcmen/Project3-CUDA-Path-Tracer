@@ -30,22 +30,22 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     // STEP 1: Polar Coordinate Sampling (Inverse Transform Sampling)
     // ----------------------------------------------------------------
     // To achieve cosine-weighted distribution, we use the probability density function:
-    // p(θ) = cos(θ) * sin(θ), where θ is the polar angle from the normal
+    // p(theta) = cos(theta) * sin(theta), where theta is the polar angle from the normal
     // 
-    // The cumulative distribution function (CDF) is: CDF(θ) = sin²(θ)
-    // Inverting the CDF gives: θ = arcsin(√ξ₁), where ξ₁ is a uniform random variable
+    // The cumulative distribution function (CDF) is: CDF(theta) = sin^2(theta)
+    // Inverting the CDF gives: theta = arcsin(sqrt(xi_1)), where xi_1 is a uniform random variable
     // 
     // This simplifies to:
-    //   cos(θ) = √ξ₁         (vertical component, weighted toward normal)
-    //   sin(θ) = √(1 - ξ₁)   (horizontal component, from Pythagorean identity)
+    //   cos(theta) = sqrt(xi_1)         (vertical component, weighted toward normal)
+    //   sin(theta) = sqrt(1 - xi_1)     (horizontal component, from Pythagorean identity)
     
     float up = sqrt(u01(rng)); // cos(theta) - probability of sampling decreases with angle from normal
-    float over = sqrt(1 - up * up); // sin(theta) - derived from trigonometric identity sin²θ + cos²θ = 1
-    float around = u01(rng) * TWO_PI; // phi - azimuthal angle, uniformly distributed in [0, 2π]
+    float over = sqrt(1 - up * up); // sin(theta) - derived from trigonometric identity sin^2(theta) + cos^2(theta) = 1
+    float around = u01(rng) * TWO_PI; // phi - azimuthal angle, uniformly distributed in [0, 2*PI]
 
-    // At this point, we have spherical coordinates (θ, φ) that represent a direction
+    // At this point, we have spherical coordinates (theta, phi) that represent a direction
     // in a LOCAL coordinate system where the normal is aligned with the Z-axis:
-    //   Local coordinates: (sin(θ)cos(φ), sin(θ)sin(φ), cos(θ))
+    //   Local coordinates: (sin(theta)cos(phi), sin(theta)sin(phi), cos(theta))
 
     // STEP 2: Construct Orthonormal Basis (ONB)
     // ------------------------------------------
@@ -53,9 +53,9 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     // where the normal becomes the "up" direction (local Z-axis), and we need two
     // perpendicular vectors to complete the basis (local X and Y axes).
     // 
-    // Peter Kutz's Trick: Since the normal is a unit vector (x² + y² + z² = 1),
+    // Peter Kutz's Trick: Since the normal is a unit vector (x^2 + y^2 + z^2 = 1),
     // it's mathematically impossible for all three components to have absolute values
-    // greater than √(1/3) ≈ 0.577. At least one component must be smaller.
+    // greater than sqrt(1/3) ~= 0.577. At least one component must be smaller.
     // 
     // By selecting the axis corresponding to the smallest component, we guarantee
     // that the cross product won't degenerate to zero (which would happen if the
@@ -95,11 +95,11 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     //   - perpendicularDirection2 (V): bitangent direction (local Y-axis)
     // 
     // Our sampled direction in local coordinates is:
-    //   local_dir = (sin(θ)cos(φ), sin(θ)sin(φ), cos(θ))
+    //   local_dir = (sin(theta)cos(phi), sin(theta)sin(phi), cos(theta))
     //             = (over * cos(around), over * sin(around), up)
     // 
     // To transform to world space, we compute the linear combination:
-    //   world_dir = cos(θ) * N + sin(θ)cos(φ) * U + sin(θ)sin(φ) * V
+    //   world_dir = cos(theta) * N + sin(theta)cos(phi) * U + sin(theta)sin(phi) * V
     //             = up * normal + cos(around) * over * U + sin(around) * over * V
     // 
     // This gives us our final cosine-weighted random direction in world space.
@@ -129,13 +129,13 @@ __host__ __device__ void scatterRay(
     // Common mistake: offsetting along newDirection instead of normal
     // - When newDirection is nearly parallel to the surface (grazing angle),
     //   offset along newDirection has almost zero normal component
-    // - This causes the ray to start below the surface → self-intersection → shadow acne
+    // - This causes the ray to start below the surface -> self-intersection -> shadow acne
     // 
     // Why 1e-5 works for this scene:
-    // - Scene scale: [-5, 10] → typical values around 1-10 units
-    // - Float precision: ~1e-7 relative error
-    // - Accumulated error after transforms: ~1e-6 to 1e-5
-    // - Safety margin: 1e-5 is ~10x the expected numerical error
+    // - Scene scale: [-5, 10] -> typical values around 1-10 units
+    // - Float precision: approx 1e-7 relative error
+    // - Accumulated error after transforms: approx 1e-6 to 1e-5
+    // - Safety margin: 1e-5 is approx 10x the expected numerical error
     // 
     // When to adjust epsilon:
     // - Increase to 1e-4 if seeing shadow acne (black speckles on surfaces)
@@ -143,14 +143,14 @@ __host__ __device__ void scatterRay(
     // - For large-scale scenes (>1000 units), scale proportionally
     
     //Note that since only Refraction always requires opposite direction offset
-    //Let's leave sign judging to future release.i.e.TODO:judge sign by dot product of normal and newDirection
+    //Let's leave sign judging to future release.i.e.TODO: judge sign by dot product of normal and newDirection
     pathSegment.ray.origin = intersect + normal * EPSILON;
     pathSegment.ray.direction = newDirection;
     
     // Apply diffuse material color (energy attenuation)
-    //multiplier = fr * cos theta/pdf(omega)
-    //where pdf(omega) = coos theta / π
-    //BSDF of diffuse reflection：fr = R / π
+    // multiplier = fr * cos theta/pdf(omega)
+    // where pdf(omega) = cos theta / PI
+    // BSDF of diffuse reflection: fr = R / PI
     pathSegment.color *= m.color;
     
     // Decrement remaining bounces
