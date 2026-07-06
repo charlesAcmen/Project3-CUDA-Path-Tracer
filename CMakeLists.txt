@@ -54,6 +54,7 @@ set(headers
     src/intersections.h
     src/glslUtility.hpp
     src/pathtrace.h
+    src/profiler.h
     src/scene.h
     src/sceneStructs.h
     src/utilities.h
@@ -65,6 +66,7 @@ set(sources
     src/image.cpp
     src/glslUtility.cpp
     src/pathtrace.cu
+    src/profiler.cu
     src/intersections.cu
     src/interactions.cu
     src/scene.cpp
@@ -107,7 +109,7 @@ source_group("ImGui\\Sources" FILES ${imgui_sources})
 add_subdirectory(stream_compaction)
 
 # Helper function to create path tracer executable with specific configuration
-function(add_pathtracer_executable target_name sort_by_material)
+function(add_pathtracer_executable target_name sort_by_material_default compact_method_default)
     add_executable(${target_name} ${sources} ${headers} ${imgui_sources} ${imgui_headers})
     target_link_libraries(${target_name}
         ${GL_LIBRARIES}
@@ -115,9 +117,12 @@ function(add_pathtracer_executable target_name sort_by_material)
     )
     set_target_properties(${target_name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     set_target_properties(${target_name} PROPERTIES CUDA_ARCHITECTURES native)
-    
-    # Define SORT_BY_MATERIAL macro
-    target_compile_definitions(${target_name} PRIVATE SORT_BY_MATERIAL=${sort_by_material})
+
+    # Runtime-configurable defaults (overridable at runtime via --compact=N --sort=N)
+    target_compile_definitions(${target_name} PRIVATE
+        COMPACT_METHOD_DEFAULT=${compact_method_default}
+        SORT_BY_MATERIAL_DEFAULT=${sort_by_material_default}
+    )
     
     target_compile_options(${target_name} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
     target_compile_options(${target_name} PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo;-src-in-ptx>")
@@ -134,8 +139,10 @@ endfunction()
 # Create two executables: one with material sorting enabled (default), one disabled.
 # The default target (cis565_path_tracer) is the sorted version -- use it for
 # normal rendering.  The _unsorted variant exists for performance comparisons.
-add_pathtracer_executable(${CMAKE_PROJECT_NAME}             1)   # sorted (default)
-add_pathtracer_executable(${CMAKE_PROJECT_NAME}_unsorted    0)   # unsorted
+# Both use Thrust compaction by default (COMPACT_METHOD_DEFAULT=2).
+# Runtime overrides: --benchmark --compact=N --sort=N
+add_pathtracer_executable(${CMAKE_PROJECT_NAME}             1 2)   # sorted, Thrust compact
+add_pathtracer_executable(${CMAKE_PROJECT_NAME}_unsorted    0 2)   # unsorted, Thrust compact
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
 

@@ -1,6 +1,7 @@
 #include "glslUtility.hpp"
 #include "image.h"
 #include "pathtrace.h"
+#include "profiler.h"
 #include "scene.h"
 #include "sceneStructs.h"
 #include "utilities.h"
@@ -286,6 +287,16 @@ void RenderImGui()
     //ImGui::Text("counter = %d", counter);
     ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+
+    if (g_profiler().enabled()) {
+        ImGui::Separator();
+        ImGui::Text("Per-Kernel Timing (last frame):");
+        ImGui::Text("  ShadeMaterial:        %.3f ms", imguiData->perKernelMs[0]);
+        ImGui::Text("  GatherTerminatedPaths: %.3f ms", imguiData->perKernelMs[1]);
+        ImGui::Text("  SortByMaterial:        %.3f ms", imguiData->perKernelMs[2]);
+        ImGui::Text("  CompactPaths:          %.3f ms", imguiData->perKernelMs[3]);
+        ImGui::Text("Bounces Last Frame: %d", imguiData->lastBounceCount);
+    }
     ImGui::End();
 
 
@@ -349,6 +360,41 @@ int main(int argc, char** argv)
     }
 
     const char* sceneFile = argv[1];
+
+    // ---- Parse CLI arguments (after scene file) ----
+    ProfilerConfig profCfg;
+    profCfg.sceneName = sceneFile;
+    // Strip path and extension to get a clean scene name
+    {
+        std::string s = sceneFile;
+        size_t slash = s.find_last_of("/\\");
+        size_t dot   = s.find_last_of('.');
+        if (slash != std::string::npos) s = s.substr(slash + 1);
+        if (dot   != std::string::npos) s = s.substr(0, dot);
+        profCfg.sceneName = s;
+    }
+
+    for (int i = 2; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--benchmark") {
+            profCfg.enabled = true;
+        } else if (arg.rfind("--compact=", 0) == 0) {
+            profCfg.compactMethod = std::stoi(arg.substr(10));
+            setCompactMethod(profCfg.compactMethod);
+        } else if (arg.rfind("--sort=", 0) == 0) {
+            profCfg.sortByMaterial = (std::stoi(arg.substr(7)) != 0);
+            setSortByMaterial(profCfg.sortByMaterial);
+        } else if (arg.rfind("--warmup=", 0) == 0) {
+            profCfg.warmupIters = std::stoi(arg.substr(9));
+        }
+    }
+
+    g_profiler().init(profCfg);
+
+    // Graceful CSV write on any exit path (Esc key, completion, etc.)
+    if (profCfg.enabled) {
+        atexit([]() { g_profiler().shutdown(); });
+    }
 
     // Load scene file
     scene = new Scene(sceneFile);

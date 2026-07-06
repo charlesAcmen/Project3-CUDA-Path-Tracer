@@ -14,24 +14,35 @@
 #include "utilities.h"
 #include "intersections.h"
 #include "interactions.h"
+#include "profiler.h"
 
 // Note: checkCUDAError and checkCUDAErrorFn are now defined in utilities.h/cu
 
 // ====================================================================
-// Stream Compaction: compile-time method selection
+// Stream Compaction & Material Sorting: runtime-configurable toggles
 // ====================================================================
-//   0 = disabled (paths are never compacted; terminated paths are
-//       guarded by the remainingBounces check in shadeMaterial)
-//   1 = custom work-efficient scan-based compaction (Project 2)
-//   2 = Thrust copy_if (reference / baseline; requires extended lambdas)
+//   COMPACT_METHOD:  0 = disabled, 1 = custom scan, 2 = Thrust copy_if
+//   SORT_BY_MATERIAL:  true = group paths by materialId before shading
 //
-// The three modes are mutually exclusive -- exactly one is active.
+// Compile-time defaults set by CMake; override at runtime via:
+//   --compact=N  --sort=0/1  (requires --benchmark)
 // ====================================================================
-#ifndef COMPACT_METHOD
-    #define COMPACT_METHOD 2  // default: Thrust
+#ifndef COMPACT_METHOD_DEFAULT
+    #define COMPACT_METHOD_DEFAULT 2
+#endif
+#ifndef SORT_BY_MATERIAL_DEFAULT
+    #define SORT_BY_MATERIAL_DEFAULT 1
 #endif
 
-// Predicate functor for Thrust copy_if (used when COMPACT_METHOD == 2)
+// Always include all dependencies -- runtime branching replaces the old
+// #if guards so a single executable supports every combination.
+#include "../stream_compaction/efficient.h"
+#include <thrust/copy.h>
+#include <thrust/sort.h>
+#include <thrust/gather.h>
+#include <thrust/sequence.h>
+
+// Predicate functor for Thrust copy_if (used when g_compactMethod == 2)
 struct IsPathActive {
     __device__ bool operator()(const PathSegment& p) const {
         return p.remainingBounces > 0;
@@ -45,35 +56,14 @@ struct ExtractMaterialId {
     }
 };
 
-#if COMPACT_METHOD == 1
-    #include "../stream_compaction/efficient.h"
-#elif COMPACT_METHOD == 2
-    #include <thrust/copy.h>
-#elif COMPACT_METHOD != 0
-    #error "COMPACT_METHOD must be 0 (disabled), 1 (custom), or 2 (Thrust)"
-#endif
+// Runtime configuration (defaults from CMake, overridable via setCompactMethod / setSortByMaterial)
+static int  g_compactMethod  = COMPACT_METHOD_DEFAULT;
+static bool g_sortByMaterial = (SORT_BY_MATERIAL_DEFAULT != 0);
 
-// Material sorting toggle -- groups path segments by material ID before
-// shading to reduce warp divergence and improve memory coalescing.
-//
-// When enabled, dev_paths and dev_intersections are permuted so that paths
-// hitting the same material become contiguous.  Threads in the same warp
-// then follow identical emissive/diffuse/specular branches instead of
-// diverging across all three.
-//
-// Note: SORT_BY_MATERIAL is now defined via CMake compilation flags.
-// Do NOT manually define it here. Use the appropriate build target instead:
-//   - cis565_path_tracer_sorted   (SORT_BY_MATERIAL=1)
-//   - cis565_path_tracer_unsorted (SORT_BY_MATERIAL=0)
-#ifndef SORT_BY_MATERIAL
-    #define SORT_BY_MATERIAL 1  // Default fallback if not defined by build system
-#endif
-
-#if SORT_BY_MATERIAL
-    #include <thrust/sort.h>
-    #include <thrust/gather.h>
-    #include <thrust/sequence.h>
-#endif
+void setCompactMethod(int method)   { g_compactMethod = method; }
+void setSortByMaterial(bool enable) { g_sortByMaterial = enable; }
+int  getCompactMethod()             { return g_compactMethod; }
+bool getSortByMaterial()            { return g_sortByMaterial; }
 
 //index:spatial correlation,ensuring that the different pixels will have different random seeds
 //depth:depth correlation ,ensuring that generated random number in different bounces is independent for a ray
@@ -158,11 +148,12 @@ void pathtraceInit(Scene* scene)
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     // TODO: initialize any extra device memeory you need
-#if SORT_BY_MATERIAL
+
+    // Sort buffers -- always allocated (overhead is negligible); the sorting
+    // function early-returns when g_sortByMaterial is false at runtime.
     cudaMalloc(&dev_sortKeys, pixelcount * sizeof(int));
     cudaMalloc(&dev_sortIndices, pixelcount * sizeof(int));
     cudaMalloc(&dev_intersections_sorted, pixelcount * sizeof(ShadeableIntersection));
-#endif
 
     checkCUDAError("pathtraceInit");
 }
@@ -175,11 +166,9 @@ void pathtraceFree()
     cudaFree(dev_geoms);
     cudaFree(dev_materials);
     cudaFree(dev_intersections);
-#if SORT_BY_MATERIAL
     cudaFree(dev_sortKeys);
     cudaFree(dev_sortIndices);
     cudaFree(dev_intersections_sorted);
-#endif
     // TODO: clean up any extra device memory you created
 
     checkCUDAError("pathtraceFree");
@@ -508,7 +497,6 @@ __global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment*
 // Host-side helpers
 // ---------------------------------------------------------------------------
 
-#if SORT_BY_MATERIAL
 /**
  * Permutes dev_paths and dev_intersections so that paths hitting the same
  * material become contiguous in memory.
@@ -530,9 +518,13 @@ __global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment*
  *   4. gather paths    via indices -> dev_paths_compacted  (reuses compaction buffer)
  *   5. gather intersections via indices -> dev_intersections_sorted
  *   6. Swap pointers so dev_paths / dev_intersections point to sorted data
+ *
+ * When g_sortByMaterial is false this function returns immediately (runtime
+ * toggle -- no rebuild needed for performance comparisons).
  */
 static void sortPathsByMaterial(int num_paths)
 {
+    if (!g_sortByMaterial) return;   // runtime toggle
     if (num_paths <= 1) return;
 
     // 1. Extract sort keys (materialId from each intersection)
@@ -577,7 +569,6 @@ static void sortPathsByMaterial(int num_paths)
       dev_intersections = dev_intersections_sorted;
       dev_intersections_sorted = tmp; }
 }
-#endif // SORT_BY_MATERIAL
 
 /**
  * Gathers terminated path colors into dev_image, then stream-compacts the path
@@ -601,65 +592,60 @@ static void sortPathsByMaterial(int num_paths)
  */
 static bool compactActivePaths(int& num_paths, int blockSize1d)
 {
-    // Nothing to do when compaction is disabled -- terminated paths are
-    // already guarded by the remainingBounces check in shadeMaterial, and
-    // finalGather collects every path at the end of the bounce loop.
-#if COMPACT_METHOD == 0
-    (void)num_paths; (void)blockSize1d;
-    return false;
+    Profiler& prof = g_profiler();
 
-    // ====================================================================
-    // Custom work-efficient compaction (Project 2)
-    // ====================================================================
-#elif COMPACT_METHOD == 1
+    // Compaction disabled at runtime -- terminated paths are guarded by the
+    // remainingBounces check in shadeMaterial; finalGather collects everything.
+    if (g_compactMethod == 0) {
+        (void)num_paths; (void)blockSize1d;
+        return false;
+    }
+
     dim3 numBlocks((num_paths + blockSize1d - 1) / blockSize1d);
 
     // 1. Bank terminated-path colors before they disappear.
+    prof.gpuStart(ProfilerOp::GatherTerminatedPaths);
     gatherTerminatedPaths<<<numBlocks, blockSize1d>>>(
         num_paths, dev_image, dev_paths);
+    prof.gpuStop(ProfilerOp::GatherTerminatedPaths);
     checkCUDAError("gatherTerminatedPaths");
 
     // 2. Compact: keep only paths with remainingBounces > 0.
-    int survivors = StreamCompaction::Efficient::compactPathSegments(
-        num_paths,
-        dev_paths_compacted,   // output
-        dev_paths);            // input
+    prof.cpuStart(ProfilerOp::CompactPaths);
 
-    // 3. Ping-pong the buffer pointers.
-    PathSegment* tmp = dev_paths;
-    dev_paths = dev_paths_compacted;
-    dev_paths_compacted = tmp;
+    if (g_compactMethod == 1)
+    {
+        // Custom work-efficient scan-based compaction (Project 2)
+        int survivors = StreamCompaction::Efficient::compactPathSegments(
+            num_paths,
+            dev_paths_compacted,   // output
+            dev_paths);            // input
 
-    num_paths = survivors;
-    return (num_paths == 0);
+        PathSegment* tmp = dev_paths;
+        dev_paths = dev_paths_compacted;
+        dev_paths_compacted = tmp;
 
-    // ====================================================================
-    // Thrust copy_if (reference / baseline)
-    // ====================================================================
-#elif COMPACT_METHOD == 2
-    dim3 numBlocks((num_paths + blockSize1d - 1) / blockSize1d);
+        num_paths = survivors;
 
-    // 1. Bank terminated-path colors before they disappear.
-    gatherTerminatedPaths<<<numBlocks, blockSize1d>>>(
-        num_paths, dev_image, dev_paths);
-    checkCUDAError("gatherTerminatedPaths");
+        prof.cpuStop(ProfilerOp::CompactPaths);
+        return (num_paths == 0);
+    }
 
-    // 2. Compact: keep only paths with remainingBounces > 0.
+    // Default: g_compactMethod == 2 (Thrust copy_if)
     PathSegment* end = thrust::copy_if(
         thrust::device,
         dev_paths, dev_paths + num_paths,
         dev_paths_compacted,
         IsPathActive());
 
-    // 3. Ping-pong the buffer pointers.
     PathSegment* tmp = dev_paths;
     dev_paths = dev_paths_compacted;
     dev_paths_compacted = tmp;
 
     num_paths = static_cast<int>(end - dev_paths);
-    return (num_paths == 0);
 
-#endif
+    prof.cpuStop(ProfilerOp::CompactPaths);
+    return (num_paths == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -722,6 +708,9 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
     // TODO: perform one iteration of path tracing
 
+    Profiler& prof = g_profiler();
+    prof.beginIteration(iter);
+
     // ---- 1. Primary rays ------------------------------------------------
     generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(
         cam, iter, traceDepth, dev_paths);
@@ -736,6 +725,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     {
         cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
+        prof.recordBounce(depth, num_paths);
+
         dim3 numBlocks((num_paths + blockSize1d - 1) / blockSize1d);
         computeIntersections<<<numBlocks, blockSize1d>>>(
             depth, num_paths, dev_paths,
@@ -744,25 +735,25 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         cudaDeviceSynchronize();
         depth++;
 
-#if SORT_BY_MATERIAL
-        sortPathsByMaterial(num_paths);
-#endif
+        prof.cpuStart(ProfilerOp::SortByMaterial);
+        sortPathsByMaterial(num_paths);  // no-op when g_sortByMaterial==false
+        prof.cpuStop(ProfilerOp::SortByMaterial);
 
+        prof.gpuStart(ProfilerOp::ShadeMaterial);
         shadeMaterial<<<numBlocks, blockSize1d>>>(
             iter, num_paths,
             dev_intersections, dev_paths, dev_materials,
             traceDepth, hst_scene->state.rrMinBounces);
+        prof.gpuStop(ProfilerOp::ShadeMaterial);
 
         bool allDead = compactActivePaths(num_paths, blockSize1d);
         done = allDead || (depth >= traceDepth);
 
         // Debug: print per-bounce path survival to verify RR is working.
-        // Set to 1, rebuild, and watch the console.  With RR enabled
-        // (rrMinBounces=3), num_paths should drop sharply after bounce 3.
-        // With RR disabled (rrMinBounces >= traceDepth), it stays high.
-#if 0
-        printf("  iter=%d depth=%d paths=%d\n", iter, depth, num_paths);
-#endif
+        // Enabled automatically when --benchmark is passed.
+        if (g_profiler().enabled()) {
+            printf("  iter=%d depth=%d paths=%d\n", iter, depth, num_paths);
+        }
 
         if (guiData != NULL)
             guiData->TracedDepth = depth;
@@ -785,4 +776,13 @@ void pathtrace(uchar4* pbo, int frame, int iter)
                pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
     checkCUDAError("pathtrace");
+
+    prof.endIteration();
+
+    // Flush CSV output on the final iteration.
+    // runCuda() increments 'iteration' before calling pathtrace(), so the
+    // last frame passes iter == renderState->iterations.
+    if (prof.enabled() && iter == hst_scene->state.iterations) {
+        prof.shutdown();
+    }
 }

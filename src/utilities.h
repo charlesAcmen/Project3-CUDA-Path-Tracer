@@ -22,6 +22,11 @@ class GuiDataContainer
 public:
     GuiDataContainer() : TracedDepth(0) {}
     int TracedDepth;
+
+    // Per-frame timing summary (populated by profiler, displayed by ImGui)
+    float lastFrameTotalMs = 0.0f;
+    float perKernelMs[4] = {};  // ShadeMaterial, GatherTerminatedPaths, SortByMaterial, CompactPaths
+    int   lastBounceCount = 0;
 };
 
 namespace utilityCore
