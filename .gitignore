@@ -10,7 +10,9 @@
 /.github
 *.launch
 GNUmakefile
-CLAUDE.md
+*.md
+!README.md
+!INSTRUCTION.md
 build
 
 # IDE and editor specific files
