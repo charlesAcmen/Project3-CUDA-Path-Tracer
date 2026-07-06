@@ -309,7 +309,9 @@ __global__ void shadeMaterial(
     int num_paths,
     ShadeableIntersection* shadeableIntersections,
     PathSegment* pathSegments,
-    Material* materials)
+    Material* materials,
+    int traceDepth,
+    int rrMinBounces)
 {
     //Memory-Bound:Occupancy is limited by the number of registers used per thread
     //so designing smallest and aligned data structure 
@@ -359,6 +361,38 @@ __global__ void shadeMaterial(
                 // Non-emissive surface: scatter ray according to BSDF
                 // This updates the ray direction and attenuates color based on material
                 scatterRay(pathSegment, intersectionPoint, intersection.surfaceNormal, material, rng);
+
+                // Russian roulette: probabilistically terminate paths whose
+                // throughput has dropped below a useful level.  Only applies
+                // after rrMinBounces guaranteed bounces.
+                //
+                // Survival probability p = max(R,G,B) clamped to [RR_P_MIN, RR_P_MAX].
+                //   - Using max component is conservative (highest survival chance
+                //     among the three channels -> fewest fireflies).
+                //   - RR_P_MIN prevents extreme compensation factors (max 1/0.2 = 5x).
+                //   - RR_P_MAX = 1.0 means paths with full throughput always survive.
+                //
+                // Unbiased: survivors have throughput /= p.
+                // Terminated paths keep their color intact -- gatherTerminatedPaths
+                // collects it during the next compaction pass.
+                if (pathSegment.remainingBounces > 0 &&
+                    pathSegment.remainingBounces <= traceDepth - rrMinBounces)
+                {
+                    float p = fmaxf(fmaxf(pathSegment.color.r,
+                                           pathSegment.color.g),
+                                           pathSegment.color.b);
+                    p = fminf(fmaxf(p, RR_P_MIN), RR_P_MAX);
+
+                    thrust::uniform_real_distribution<float> u01(0, 1);
+                    if (u01(rng) < p)
+                    {
+                        pathSegment.color /= p;    // unbiased compensation
+                    }
+                    else
+                    {
+                        pathSegment.remainingBounces = 0;  // terminate
+                    }
+                }
             }
         }
         else
@@ -714,7 +748,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         shadeMaterial<<<numBlocks, blockSize1d>>>(
             iter, num_paths,
-            dev_intersections, dev_paths, dev_materials);
+            dev_intersections, dev_paths, dev_materials,
+            traceDepth, hst_scene->state.rrMinBounces);
 
         bool allDead = compactActivePaths(num_paths, blockSize1d);
         done = allDead || (depth >= traceDepth);
