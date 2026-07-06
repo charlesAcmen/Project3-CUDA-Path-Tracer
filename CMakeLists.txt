@@ -106,6 +106,36 @@ source_group("ImGui\\Sources" FILES ${imgui_sources})
 #add_subdirectory(src/ImGui)
 add_subdirectory(stream_compaction)
 
+# Helper function to create path tracer executable with specific configuration
+function(add_pathtracer_executable target_name sort_by_material)
+    add_executable(${target_name} ${sources} ${headers} ${imgui_sources} ${imgui_headers})
+    target_link_libraries(${target_name}
+        ${GL_LIBRARIES}
+        stream_compaction
+    )
+    set_target_properties(${target_name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    set_target_properties(${target_name} PROPERTIES CUDA_ARCHITECTURES native)
+    
+    # Define SORT_BY_MATERIAL macro
+    target_compile_definitions(${target_name} PRIVATE SORT_BY_MATERIAL=${sort_by_material})
+    
+    target_compile_options(${target_name} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
+    target_compile_options(${target_name} PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo;-src-in-ptx>")
+    
+    # Force UTF-8 encoding for all source files on Windows/MSVC.
+    if(MSVC)
+        target_compile_options(${target_name} PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
+            "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>"
+        )
+    endif()
+endfunction()
+
+# Create two executables: one with material sorting enabled, one disabled
+add_pathtracer_executable(${CMAKE_PROJECT_NAME}_sorted 1)
+add_pathtracer_executable(${CMAKE_PROJECT_NAME}_unsorted 0)
+
+# Default target for convenience (sorted version)
 add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers} ${imgui_sources} ${imgui_headers})
 target_link_libraries(${CMAKE_PROJECT_NAME}
     ${GL_LIBRARIES}
@@ -113,6 +143,9 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 )
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES native)
+
+# Default to sorted version
+target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE SORT_BY_MATERIAL=1)
 
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo;-src-in-ptx>")

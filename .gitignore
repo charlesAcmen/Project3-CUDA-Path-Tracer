@@ -4,12 +4,12 @@
 *.vcxproj
 *.xcodeproj
 *.ini
+*.png
 .cproject
 .project
 /.github
 *.launch
 GNUmakefile
-
 CLAUDE.md
 build
 

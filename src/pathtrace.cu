@@ -58,7 +58,14 @@ struct ExtractMaterialId {
 // hitting the same material become contiguous.  Threads in the same warp
 // then follow identical emissive/diffuse/specular branches instead of
 // diverging across all three.
-#define SORT_BY_MATERIAL  1  // 0 = disabled, 1 = enabled
+//
+// Note: SORT_BY_MATERIAL is now defined via CMake compilation flags.
+// Do NOT manually define it here. Use the appropriate build target instead:
+//   - cis565_path_tracer_sorted   (SORT_BY_MATERIAL=1)
+//   - cis565_path_tracer_unsorted (SORT_BY_MATERIAL=0)
+#ifndef SORT_BY_MATERIAL
+    #define SORT_BY_MATERIAL 1  // Default fallback if not defined by build system
+#endif
 
 #if SORT_BY_MATERIAL
     #include <thrust/sort.h>
@@ -112,7 +119,9 @@ static ShadeableIntersection* dev_intersections = NULL;
 // Temporary buffer for stream compaction
 static PathSegment* dev_paths_compacted = NULL;
 // Buffers for material-based sorting
+// store the materialId of each intersection for sorting
 static int* dev_sortKeys = NULL;
+// store the original index of each intersection for sorting
 static int* dev_sortIndices = NULL;
 static ShadeableIntersection* dev_intersections_sorted = NULL;
 // TODO: static variables for device memory, any extra info you need, etc
@@ -491,7 +500,7 @@ static void sortPathsByMaterial(int num_paths)
     if (num_paths <= 1) return;
 
     // 1. Extract sort keys (materialId from each intersection)
-    thrust::transform(thrust::device,
+    thrust::transform(thrust::device,//transform in GPU
         dev_intersections, dev_intersections + num_paths,
         dev_sortKeys,
         ExtractMaterialId());
@@ -513,6 +522,9 @@ static void sortPathsByMaterial(int num_paths)
         dev_sortIndices, dev_sortIndices + num_paths,
         dev_paths,               // input  (unsorted)
         dev_paths_compacted);    // output (sorted)
+    //for (i = 0 to n-1):
+    //output[i] = input[indices[i]]
+
 
     // 5. Gather intersections into sorted order (separate temp buffer)
     thrust::gather(thrust::device,
