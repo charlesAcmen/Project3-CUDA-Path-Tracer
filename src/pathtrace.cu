@@ -27,7 +27,9 @@
 //
 // The three modes are mutually exclusive -- exactly one is active.
 // ====================================================================
-#define COMPACT_METHOD 2
+#ifndef COMPACT_METHOD
+    #define COMPACT_METHOD 2  // default: Thrust
+#endif
 
 // Predicate functor for Thrust copy_if (used when COMPACT_METHOD == 2)
 struct IsPathActive {

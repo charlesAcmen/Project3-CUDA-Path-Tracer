@@ -131,34 +131,11 @@ function(add_pathtracer_executable target_name sort_by_material)
     endif()
 endfunction()
 
-# Create two executables: one with material sorting enabled, one disabled
-add_pathtracer_executable(${CMAKE_PROJECT_NAME}_sorted 1)
-add_pathtracer_executable(${CMAKE_PROJECT_NAME}_unsorted 0)
-
-# Default target for convenience (sorted version)
-add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers} ${imgui_sources} ${imgui_headers})
-target_link_libraries(${CMAKE_PROJECT_NAME}
-    ${GL_LIBRARIES}
-    stream_compaction
-)
-set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES native)
-
-# Default to sorted version
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE SORT_BY_MATERIAL=1)
-
-target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
-target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo;-src-in-ptx>")
-
-# Force UTF-8 encoding for all source files on Windows/MSVC.
-# Without this, nvcc uses the system locale (e.g. CP936 on Chinese Windows)
-# and rejects non-ASCII characters like arrows or em-dashes in comments.
-if(MSVC)
-    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
-        "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>"
-    )
-endif()
+# Create two executables: one with material sorting enabled (default), one disabled.
+# The default target (cis565_path_tracer) is the sorted version -- use it for
+# normal rendering.  The _unsorted variant exists for performance comparisons.
+add_pathtracer_executable(${CMAKE_PROJECT_NAME}             1)   # sorted (default)
+add_pathtracer_executable(${CMAKE_PROJECT_NAME}_unsorted    0)   # unsorted
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
 
