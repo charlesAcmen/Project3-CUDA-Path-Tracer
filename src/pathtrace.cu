@@ -756,6 +756,14 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         bool allDead = compactActivePaths(num_paths, blockSize1d);
         done = allDead || (depth >= traceDepth);
 
+        // Debug: print per-bounce path survival to verify RR is working.
+        // Set to 1, rebuild, and watch the console.  With RR enabled
+        // (rrMinBounces=3), num_paths should drop sharply after bounce 3.
+        // With RR disabled (rrMinBounces >= traceDepth), it stays high.
+#if 0
+        printf("  iter=%d depth=%d paths=%d\n", iter, depth, num_paths);
+#endif
+
         if (guiData != NULL)
             guiData->TracedDepth = depth;
     }
