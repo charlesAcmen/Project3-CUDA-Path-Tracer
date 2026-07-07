@@ -572,3 +572,4 @@ xcuserdata
 *.xccheckout
 *.moved-aside
 *.xcuserstate
+scripts/__pycache__
