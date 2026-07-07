@@ -26,6 +26,7 @@ const char* profilerOpName(ProfilerOp op);
 // ---------------------------------------------------------------------------
 struct ProfilerConfig {
     bool        enabled        = false;
+    bool        verbose        = false;    // Control debug printf output
     int         warmupIters    = 3;
     std::string sceneName      = "unknown";
     int         compactMethod  = 2;       // 0=none, 1=custom, 2=Thrust
@@ -86,6 +87,7 @@ public:
     // ---- Accessors ----
     const ProfilerConfig& config() const { return m_cfg; }
     bool enabled() const { return m_cfg.enabled; }
+    bool verbose() const { return m_cfg.verbose; }
 
     // ---- GUI data update ----
     void updateGuiData(class GuiDataContainer* guiData);

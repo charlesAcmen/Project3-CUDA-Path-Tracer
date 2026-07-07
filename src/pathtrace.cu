@@ -758,8 +758,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         done = allDead || (depth >= traceDepth);
 
         // Debug: print per-bounce path survival to verify RR is working.
-        // Enabled automatically when --benchmark is passed.
-        if (g_profiler().enabled()) {
+        // Enabled only when --verbose flag is passed (separate from --benchmark).
+        if (g_profiler().verbose()) {
             printf("  iter=%d depth=%d paths=%d\n", iter, depth, num_paths);
         }
 

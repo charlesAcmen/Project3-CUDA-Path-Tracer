@@ -383,7 +383,11 @@ int main(int argc, char** argv)
 
     for (int i = 2; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg.rfind("--compact=", 0) == 0) {
+        if (arg == "--benchmark") {
+            profCfg.enabled = true;
+        } else if (arg == "--verbose") {
+            profCfg.verbose = true;
+        } else if (arg.rfind("--compact=", 0) == 0) {
             profCfg.compactMethod = std::stoi(arg.substr(10));
             setCompactMethod(profCfg.compactMethod);
         } else if (arg.rfind("--sort=", 0) == 0) {
@@ -497,10 +501,15 @@ void runCuda()
     // Map OpenGL buffer object for writing from CUDA on a single GPU
     // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
 
+    static bool pathtraceInitialized = false;
     if (iteration == 0)
+    {
+        if (pathtraceInitialized)
         {
             pathtraceFree();
+        }
         pathtraceInit(scene);
+        pathtraceInitialized = true;
     }
 
     if (iteration < renderState->iterations)
