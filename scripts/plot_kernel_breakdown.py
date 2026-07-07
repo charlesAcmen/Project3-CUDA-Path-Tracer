@@ -67,11 +67,17 @@ def main():
     parser = argparse.ArgumentParser(description="Stacked bar chart of per-kernel timing per bounce")
     parser.add_argument("timing_csv", help="Path to timing CSV")
     parser.add_argument("--output", "-o", default=None,
-                        help="Output PNG path (default: derived from CSV name)")
+                        help="Output PNG path (default: <CSV_stem>/kernel_breakdown.png)")
     args = parser.parse_args()
     if args.output is None:
-        stem = Path(args.timing_csv).stem  # e.g. "cornell_20260707_110700_timing"
-        args.output = f"kernel_breakdown_{stem}.png"
+        stem = Path(args.timing_csv).stem
+        for suffix in ("_timing", "_path_survival", "_summary"):
+            if stem.endswith(suffix):
+                stem = stem[: -len(suffix)]
+                break
+        out_dir = Path(args.timing_csv).parent / stem
+        out_dir.mkdir(parents=True, exist_ok=True)
+        args.output = str(out_dir / "kernel_breakdown.png")
     main_raw(args.timing_csv, args.output)
 
 

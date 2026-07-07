@@ -86,9 +86,14 @@ def main():
     args = parser.parse_args()
 
     if args.output is None:
-        stem_a = Path(args.csv_a).stem.replace("_timing", "")
-        stem_b = Path(args.csv_b).stem.replace("_timing", "")
-        args.output = f"comparison_{stem_a}_vs_{stem_b}.png"
+        stem_a = Path(args.csv_a).stem
+        stem_b = Path(args.csv_b).stem
+        for suf in ("_timing", "_path_survival", "_summary"):
+            if stem_a.endswith(suf): stem_a = stem_a[: -len(suf)]
+            if stem_b.endswith(suf): stem_b = stem_b[: -len(suf)]
+        out_dir = Path(args.csv_a).parent / f"{stem_a}_vs_{stem_b}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        args.output = str(out_dir / "comparison.png")
 
     main_raw(args.csv_a, args.csv_b, args.output, list(args.labels) if args.labels else None)
 
