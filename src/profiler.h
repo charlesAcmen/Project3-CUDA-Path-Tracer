@@ -29,7 +29,7 @@ struct ProfilerConfig {
     int         warmupIters    = 3;
     std::string sceneName      = "unknown";
     int         compactMethod  = 2;       // 0=none, 1=custom, 2=Thrust
-    bool        sortByMaterial = true;
+    bool        sortByMaterial = false;   // overridden by --sort=0/1 at runtime
 };
 
 // ---------------------------------------------------------------------------
@@ -86,6 +86,9 @@ public:
     // ---- Accessors ----
     const ProfilerConfig& config() const { return m_cfg; }
     bool enabled() const { return m_cfg.enabled; }
+
+    // ---- GUI data update ----
+    void updateGuiData(class GuiDataContainer* guiData);
 
 private:
     ProfilerConfig m_cfg;

@@ -1,4 +1,5 @@
 #include "profiler.h"
+#include "utilities.h"  // for GuiDataContainer
 
 #include <cstdio>
 #include <ctime>
@@ -130,6 +131,7 @@ void Profiler::beginIteration(int iter)
 void Profiler::endIteration()
 {
     // per-iteration flush not needed; everything stays in vectors
+    // However, we should update GUI data here if available
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +208,34 @@ void Profiler::recordBounce(int bounce, int num_paths)
         bounce,
         num_paths
     });
+}
+
+// ---------------------------------------------------------------------------
+// GUI data update
+// ---------------------------------------------------------------------------
+void Profiler::updateGuiData(GuiDataContainer* guiData)
+{
+    if (!m_cfg.enabled || !guiData) return;
+
+    // Reset timing array
+    for (int i = 0; i < 4; ++i) {
+        guiData->perKernelMs[i] = 0.0f;
+    }
+
+    // Sum up all timing records from the current iteration
+    for (const auto& rec : m_timingRecords) {
+        if (rec.iteration == m_currentIteration) {
+            int idx = static_cast<int>(rec.op);
+            if (idx >= 0 && idx < 4) {
+                guiData->perKernelMs[idx] += rec.time_ms;
+            }
+        }
+    }
+
+    // Update bounce count from the last recorded bounce
+    if (!m_pathCounts.empty()) {
+        guiData->lastBounceCount = s_lastBounce + 1; // +1 because bounce is 0-indexed
+    }
 }
 
 // ---------------------------------------------------------------------------
