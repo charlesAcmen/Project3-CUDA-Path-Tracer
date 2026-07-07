@@ -391,6 +391,8 @@ int main(int argc, char** argv)
             setSortByMaterial(profCfg.sortByMaterial);
         } else if (arg.rfind("--warmup=", 0) == 0) {
             profCfg.warmupIters = std::stoi(arg.substr(9));
+        } else if (arg == "--save") {
+            setAutoSave(true);
         }
     }
 
@@ -516,7 +518,9 @@ void runCuda()
     }
     else
     {
-        saveImage();
+        if (getAutoSave()) {
+            saveImage();
+        }
         pathtraceFree();
         // Null out the PBO so the atexit(cleanupCuda) handler doesn't try
         // cudaGLUnregisterBufferObject after the context was destroyed.

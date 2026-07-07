@@ -50,14 +50,17 @@ struct ExtractMaterialId {
     }
 };
 
-// Runtime configuration (defaults below, overridable via setCompactMethod / setSortByMaterial)
+// Runtime configuration (defaults below, overridable via setCompactMethod / setSortByMaterial / setAutoSave)
 static int  g_compactMethod  = 2;     // Thrust copy_if
 static bool g_sortByMaterial = false; // sorting OFF by default — use --sort=1 to enable
+static bool g_autoSave       = false; // auto-save OFF by default — use --save to enable
 
 void setCompactMethod(int method)   { g_compactMethod = method; }
 void setSortByMaterial(bool enable) { g_sortByMaterial = enable; }
 int  getCompactMethod()             { return g_compactMethod; }
 bool getSortByMaterial()            { return g_sortByMaterial; }
+void setAutoSave(bool enable)       { g_autoSave = enable; }
+bool getAutoSave()                  { return g_autoSave; }
 
 //index:spatial correlation,ensuring that the different pixels will have different random seeds
 //depth:depth correlation ,ensuring that generated random number in different bounces is independent for a ray

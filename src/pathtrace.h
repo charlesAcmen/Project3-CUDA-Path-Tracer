@@ -13,3 +13,5 @@ void setCompactMethod(int method);
 void setSortByMaterial(bool enable);
 int  getCompactMethod();
 bool getSortByMaterial();
+void setAutoSave(bool enable);
+bool getAutoSave();
