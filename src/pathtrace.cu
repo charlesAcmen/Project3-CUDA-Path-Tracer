@@ -24,15 +24,9 @@
 //   COMPACT_METHOD:  0 = disabled, 1 = custom scan, 2 = Thrust copy_if
 //   SORT_BY_MATERIAL:  true = group paths by materialId before shading
 //
-// Compile-time defaults set by CMake; override at runtime via:
+// Defaults set here (not from CMake).  Override at runtime via:
 //   --compact=N  --sort=0/1  (requires --benchmark)
 // ====================================================================
-#ifndef COMPACT_METHOD_DEFAULT
-    #define COMPACT_METHOD_DEFAULT 2
-#endif
-#ifndef SORT_BY_MATERIAL_DEFAULT
-    #define SORT_BY_MATERIAL_DEFAULT 1
-#endif
 
 // Always include all dependencies -- runtime branching replaces the old
 // #if guards so a single executable supports every combination.
@@ -56,9 +50,9 @@ struct ExtractMaterialId {
     }
 };
 
-// Runtime configuration (defaults from CMake, overridable via setCompactMethod / setSortByMaterial)
-static int  g_compactMethod  = COMPACT_METHOD_DEFAULT;
-static bool g_sortByMaterial = (SORT_BY_MATERIAL_DEFAULT != 0);
+// Runtime configuration (defaults below, overridable via setCompactMethod / setSortByMaterial)
+static int  g_compactMethod  = 2;     // Thrust copy_if
+static bool g_sortByMaterial = false; // sorting OFF by default — use --sort=1 to enable
 
 void setCompactMethod(int method)   { g_compactMethod = method; }
 void setSortByMaterial(bool enable) { g_sortByMaterial = enable; }
@@ -789,6 +783,11 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     checkCUDAError("pathtrace");
 
     prof.endIteration();
+
+    // Update GUI timing display
+    if (prof.enabled() && guiData != NULL) {
+        prof.updateGuiData(guiData);
+    }
 
     // Flush CSV output on the final iteration.
     // runCuda() increments 'iteration' before calling pathtrace(), so the
