@@ -1,0 +1,102 @@
+{
+    "Materials":
+    {
+        "light_warm":
+        {
+            "TYPE":"Emitting",
+            "RGB":[1.0, 0.92, 0.75],
+            "EMITTANCE":8.0
+        },
+        "light_cool":
+        {
+            "TYPE":"Emitting",
+            "RGB":[0.65, 0.85, 1.0],
+            "EMITTANCE":5.0
+        },
+        "diffuse_wall":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.78, 0.78, 0.82]
+        },
+        "diffuse_floor":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.55, 0.50, 0.40]
+        },
+        "diffuse_white":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.92, 0.92, 0.94]
+        },
+        "diffuse_red":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.78, 0.22, 0.22]
+        },
+        "diffuse_blue":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.22, 0.38, 0.80]
+        },
+        "diffuse_green":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.25, 0.72, 0.25]
+        },
+        "diffuse_yellow":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.90, 0.85, 0.15]
+        },
+        "diffuse_cyan":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.15, 0.72, 0.72]
+        },
+        "specular_white":
+        {
+            "TYPE":"Specular",
+            "RGB":[0.98, 0.98, 0.98],
+            "ROUGHNESS":0.0
+        }
+    },
+    "Camera":
+    {
+        "RES":[800,800],
+        "FOVY":50.0,
+        "ITERATIONS":200,
+        "DEPTH":10,
+        "RR_DEPTH":3,
+        "FILE":"courtyard",
+        "EYE":[0.0,5.0,9.0],
+        "LOOKAT":[0.0,4.0,-1.0],
+        "UP":[0.0,1.0,0.0]
+    },
+    "Objects":
+    [
+        {"TYPE":"cube","MATERIAL":"light_warm","TRANS":[-2.0,11.8,0.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[3.0,0.2,3.0]},
+        {"TYPE":"cube","MATERIAL":"light_cool","TRANS":[3.0,11.8,-3.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[2.0,0.2,2.0]},
+
+        {"TYPE":"cube","MATERIAL":"diffuse_floor","TRANS":[0.0,0.0,0.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[18.0,0.01,18.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_wall","TRANS":[0.0,6.0,-9.0],"ROTAT":[0.0,90.0,0.0],"SCALE":[0.01,12.0,18.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_wall","TRANS":[0.0,6.0,9.0],"ROTAT":[0.0,90.0,0.0],"SCALE":[0.01,12.0,18.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_red","TRANS":[-9.0,6.0,0.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[0.01,12.0,18.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_blue","TRANS":[9.0,6.0,0.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[0.01,12.0,18.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_wall","TRANS":[0.0,12.0,0.0],"ROTAT":[0.0,0.0,90.0],"SCALE":[0.01,18.0,18.0]},
+
+        {"TYPE":"cube","MATERIAL":"diffuse_white","TRANS":[0.0,2.0,0.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[4.0,4.0,4.0]},
+        {"TYPE":"sphere","MATERIAL":"specular_white","TRANS":[0.0,6.0,0.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[1.8,1.8,1.8]},
+
+        {"TYPE":"cube","MATERIAL":"diffuse_yellow","TRANS":[-5.0,1.5,2.5],"ROTAT":[0.0,20.0,0.0],"SCALE":[2.0,3.0,2.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_cyan","TRANS":[5.0,1.2,-3.0],"ROTAT":[0.0,-15.0,0.0],"SCALE":[1.6,2.4,1.6]},
+
+        {"TYPE":"sphere","MATERIAL":"diffuse_green","TRANS":[-4.0,1.0,-4.5],"ROTAT":[0.0,0.0,0.0],"SCALE":[2.0,2.0,2.0]},
+        {"TYPE":"sphere","MATERIAL":"diffuse_red","TRANS":[4.5,0.8,3.5],"ROTAT":[0.0,0.0,0.0],"SCALE":[1.6,1.6,1.6]},
+
+        {"TYPE":"sphere","MATERIAL":"diffuse_blue","TRANS":[-3.0,0.6,5.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[1.2,1.2,1.2]},
+        {"TYPE":"sphere","MATERIAL":"diffuse_cyan","TRANS":[3.0,0.6,5.5],"ROTAT":[0.0,0.0,0.0],"SCALE":[1.2,1.2,1.2]},
+
+        {"TYPE":"cube","MATERIAL":"diffuse_green","TRANS":[-6.0,0.5,-3.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[1.0,1.0,1.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_red","TRANS":[6.5,0.5,-2.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[1.0,1.0,1.0]}
+    ]
+}

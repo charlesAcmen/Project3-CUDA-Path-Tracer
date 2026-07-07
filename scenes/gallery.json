@@ -1,0 +1,94 @@
+{
+    "Materials":
+    {
+        "light_warm":
+        {
+            "TYPE":"Emitting",
+            "RGB":[1.0, 0.85, 0.6],
+            "EMITTANCE":8.0
+        },
+        "light_cool":
+        {
+            "TYPE":"Emitting",
+            "RGB":[0.6, 0.8, 1.0],
+            "EMITTANCE":6.0
+        },
+        "diffuse_white":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.92, 0.92, 0.94]
+        },
+        "diffuse_red":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.80, 0.25, 0.25]
+        },
+        "diffuse_blue":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.25, 0.40, 0.80]
+        },
+        "diffuse_green":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.30, 0.75, 0.30]
+        },
+        "diffuse_yellow":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.90, 0.85, 0.20]
+        },
+        "diffuse_purple":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.65, 0.30, 0.70]
+        },
+        "diffuse_teal":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.20, 0.70, 0.70]
+        },
+        "specular_white":
+        {
+            "TYPE":"Specular",
+            "RGB":[0.98, 0.98, 0.98],
+            "ROUGHNESS":0.0
+        }
+    },
+    "Camera":
+    {
+        "RES":[800,800],
+        "FOVY":50.0,
+        "ITERATIONS":200,
+        "DEPTH":10,
+        "RR_DEPTH":3,
+        "FILE":"gallery",
+        "EYE":[0.0,5.0,5.0],
+        "LOOKAT":[0.0,4.0,-3.0],
+        "UP":[0.0,1.0,0.0]
+    },
+    "Objects":
+    [
+        {"TYPE":"cube","MATERIAL":"light_warm","TRANS":[-3.0,9.8,0.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[2.5,0.2,2.5]},
+        {"TYPE":"cube","MATERIAL":"light_cool","TRANS":[3.5,9.8,-3.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[2.0,0.2,2.0]},
+
+        {"TYPE":"cube","MATERIAL":"diffuse_white","TRANS":[0.0,0.0,0.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[14.0,0.01,14.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_white","TRANS":[0.0,10.0,0.0],"ROTAT":[0.0,0.0,90.0],"SCALE":[0.01,14.0,14.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_white","TRANS":[0.0,5.0,-7.0],"ROTAT":[0.0,90.0,0.0],"SCALE":[0.01,10.0,14.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_white","TRANS":[0.0,5.0,7.0],"ROTAT":[0.0,90.0,0.0],"SCALE":[0.01,10.0,14.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_red","TRANS":[-7.0,5.0,0.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[0.01,10.0,14.0]},
+        {"TYPE":"cube","MATERIAL":"diffuse_blue","TRANS":[7.0,5.0,0.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[0.01,10.0,14.0]},
+
+        {"TYPE":"cube","MATERIAL":"diffuse_white","TRANS":[0.0,1.8,1.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[2.6,0.6,2.6]},
+        {"TYPE":"sphere","MATERIAL":"specular_white","TRANS":[0.0,3.8,1.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[1.6,1.6,1.6]},
+
+        {"TYPE":"cube","MATERIAL":"diffuse_green","TRANS":[-4.0,2.0,3.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[1.4,4.0,1.4]},
+        {"TYPE":"cube","MATERIAL":"diffuse_yellow","TRANS":[4.5,1.8,-2.5],"ROTAT":[0.0,30.0,0.0],"SCALE":[1.6,3.6,1.6]},
+
+        {"TYPE":"sphere","MATERIAL":"diffuse_teal","TRANS":[-3.5,1.0,-4.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[2.0,2.0,2.0]},
+        {"TYPE":"sphere","MATERIAL":"diffuse_purple","TRANS":[4.0,0.8,-4.5],"ROTAT":[0.0,0.0,0.0],"SCALE":[1.6,1.6,1.6]},
+
+        {"TYPE":"sphere","MATERIAL":"diffuse_green","TRANS":[-5.0,0.6,1.0],"ROTAT":[0.0,0.0,0.0],"SCALE":[1.2,1.2,1.2]},
+        {"TYPE":"sphere","MATERIAL":"diffuse_red","TRANS":[5.5,0.5,2.5],"ROTAT":[0.0,0.0,0.0],"SCALE":[1.0,1.0,1.0]}
+    ]
+}
