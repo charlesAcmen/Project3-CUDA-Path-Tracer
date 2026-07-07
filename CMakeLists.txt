@@ -136,13 +136,14 @@ function(add_pathtracer_executable target_name sort_by_material_default compact_
     endif()
 endfunction()
 
-# Create two executables: one with material sorting enabled (default), one disabled.
-# The default target (cis565_path_tracer) is the sorted version -- use it for
-# normal rendering.  The _unsorted variant exists for performance comparisons.
-# Both use Thrust compaction by default (COMPACT_METHOD_DEFAULT=2).
-# Runtime overrides: --benchmark --compact=N --sort=N
-add_pathtracer_executable(${CMAKE_PROJECT_NAME}             1 2)   # sorted, Thrust compact
-add_pathtracer_executable(${CMAKE_PROJECT_NAME}_unsorted    0 2)   # unsorted, Thrust compact
+# Single executable — all tuning flags are controlled at runtime:
+#   --compact=N  (0=off, 1=custom scan, 2=Thrust copy_if)
+#   --sort=0/1   (disable/enable material sorting before shade)
+#   --benchmark  (enable CSV profiler output)
+#
+# Compile-time defaults only matter when no -- flag is passed.
+# Default: Thrust compaction ON, material sorting OFF.
+add_pathtracer_executable(${CMAKE_PROJECT_NAME} 0 2)
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
 
