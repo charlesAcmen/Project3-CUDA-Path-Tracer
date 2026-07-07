@@ -5,6 +5,7 @@ Usage:
 """
 import argparse
 import sys
+from pathlib import Path
 from collections import defaultdict
 import matplotlib.pyplot as plt
 import numpy as np
@@ -55,8 +56,12 @@ def main_raw(path_survival_csv: str, output: str) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Path survival line chart")
     parser.add_argument("path_survival_csv", help="Path to path_survival CSV")
-    parser.add_argument("--output", "-o", default="path_survival.png", help="Output PNG path")
+    parser.add_argument("--output", "-o", default=None,
+                        help="Output PNG path (default: derived from CSV name)")
     args = parser.parse_args()
+    if args.output is None:
+        stem = Path(args.path_survival_csv).stem
+        args.output = f"path_survival_{stem}.png"
     main_raw(args.path_survival_csv, args.output)
 
 

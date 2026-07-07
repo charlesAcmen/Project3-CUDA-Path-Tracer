@@ -5,6 +5,7 @@ Usage:
 """
 import argparse
 import sys
+from pathlib import Path
 from collections import defaultdict
 import matplotlib.pyplot as plt
 import profiler_utils as pu
@@ -65,8 +66,12 @@ def main_raw(timing_csv: str, output: str) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Stacked bar chart of per-kernel timing per bounce")
     parser.add_argument("timing_csv", help="Path to timing CSV")
-    parser.add_argument("--output", "-o", default="kernel_breakdown.png", help="Output PNG path")
+    parser.add_argument("--output", "-o", default=None,
+                        help="Output PNG path (default: derived from CSV name)")
     args = parser.parse_args()
+    if args.output is None:
+        stem = Path(args.timing_csv).stem  # e.g. "cornell_20260707_110700_timing"
+        args.output = f"kernel_breakdown_{stem}.png"
     main_raw(args.timing_csv, args.output)
 
 

@@ -6,6 +6,7 @@ Usage:
 """
 import argparse
 import sys
+from pathlib import Path
 from collections import defaultdict
 import numpy as np
 import matplotlib.pyplot as plt
@@ -79,9 +80,16 @@ def main():
     parser = argparse.ArgumentParser(description="A/B comparison grouped bar chart")
     parser.add_argument("csv_a", help="Config A timing CSV")
     parser.add_argument("csv_b", help="Config B timing CSV")
-    parser.add_argument("--output", "-o", default="comparison.png", help="Output PNG path")
+    parser.add_argument("--output", "-o", default=None,
+                        help="Output PNG path (default: derived from CSV names)")
     parser.add_argument("--labels", nargs=2, default=None, help="Labels for config A and B")
     args = parser.parse_args()
+
+    if args.output is None:
+        stem_a = Path(args.csv_a).stem.replace("_timing", "")
+        stem_b = Path(args.csv_b).stem.replace("_timing", "")
+        args.output = f"comparison_{stem_a}_vs_{stem_b}.png"
+
     main_raw(args.csv_a, args.csv_b, args.output, list(args.labels) if args.labels else None)
 
 
