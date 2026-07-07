@@ -172,6 +172,12 @@ void cleanupCuda()
 
 void initCuda()
 {
+    // On newer CUDA + driver combos the GL stack may have already implicitly
+    // initialised a CUDA context (e.g. through GLFW/GLEW), causing the
+    // deprecated cudaGLSetGLDevice(0) to leave a stale cudaErrorSetOnActiveProcess.
+    // Drain any such error so it doesn't surface at the first checkCUDAError call.
+    cudaGetLastError();
+
     cudaGLSetGLDevice(0);
 
     // Clean up on program exit
@@ -194,6 +200,7 @@ void initPBO()
     // Allocate data for the buffer. 4-channel 8-bit image
     glBufferData(GL_PIXEL_UNPACK_BUFFER, size_tex_data, NULL, GL_DYNAMIC_COPY);
     cudaGLRegisterBufferObject(pbo);
+    cudaGetLastError(); // drain stale error, same reasoning as initCuda()
 }
 
 void errorCallback(int error, const char* description)
@@ -491,8 +498,8 @@ void runCuda()
     // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
 
     if (iteration == 0)
-    {
-        pathtraceFree();
+        {
+            pathtraceFree();
         pathtraceInit(scene);
     }
 
@@ -513,6 +520,9 @@ void runCuda()
     {
         saveImage();
         pathtraceFree();
+        // Null out the PBO so the atexit(cleanupCuda) handler doesn't try
+        // cudaGLUnregisterBufferObject after the context was destroyed.
+        pbo = 0;
         cudaDeviceReset();
         exit(EXIT_SUCCESS);
     }

@@ -119,6 +119,10 @@ static ShadeableIntersection* dev_intersections_sorted = NULL;
 // TODO: static variables for device memory, any extra info you need, etc
 // ...
 
+// Tracks whether pathtraceInit has been called at least once.
+// Avoids calling pathtraceFree() on uninitialised pointers.
+static bool s_initialized = false;
+
 void InitDataContainer(GuiDataContainer* imGuiData)
 {
     guiData = imGuiData;
@@ -155,11 +159,18 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_sortIndices, pixelcount * sizeof(int));
     cudaMalloc(&dev_intersections_sorted, pixelcount * sizeof(ShadeableIntersection));
 
+    s_initialized = true;
+
     checkCUDAError("pathtraceInit");
 }
 
 void pathtraceFree()
 {
+    if (!s_initialized)
+        return;
+
+    s_initialized = false;
+
     cudaFree(dev_image);  // no-op if dev_image is null
     cudaFree(dev_paths);
     cudaFree(dev_paths_compacted);
