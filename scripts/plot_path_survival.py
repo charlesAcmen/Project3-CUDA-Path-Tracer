@@ -35,7 +35,7 @@ def main_raw(path_survival_csv: str, output: str) -> None:
     # Plot mean path survival curve
     ax.plot(bounces, mean_counts, color="#4C78A8", linewidth=2.5, marker='o', markersize=6, label="Active Paths")
 
-    ax.set_xlabel("Bounce Depth")
+    ax.set_xlabel("Bounce Depth (0 = Primary Rays)")
     ax.set_ylabel("Active Paths")
     ax.set_title(f"Path Survival Curve — {label}")
     ax.legend()
