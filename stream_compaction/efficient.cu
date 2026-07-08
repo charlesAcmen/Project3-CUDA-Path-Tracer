@@ -22,6 +22,30 @@ namespace StreamCompaction {
             return info;
         }
 
+        // ========================================================================
+        // Forward Declarations of Internal Kernels
+        // ========================================================================
+        
+        // Global memory scan kernels
+        __global__ void kernUpSweep(int n, int d, int *data);
+        __global__ void kernDownSweep(int n, int d, int *data);
+        
+        // PathSegment-specific kernels
+        __global__ void kernMapPathSegmentToBoolean(int n, int *bools, const PathSegment *paths);
+        __global__ void kernScatterPathSegment(int n, PathSegment *odata,
+                const PathSegment *idata, const int *bools, const int *indices);
+        
+        // Shared memory scan kernels
+        __global__ void kernBlockExclusiveScan(int n, int *odata, const int *idata, int *blockSums);
+        __global__ void kernAddBlockOffsets(int n, int *data, const int *blockOffsets);
+        
+        // Helper function
+        static void scanExclusiveSharedMemoryDevice(int n, int *dev_odata, const int *dev_idata);
+
+        // ========================================================================
+        // Global Memory Scan Kernels (Original Implementation)
+        // ========================================================================
+
         /**
          * Up-sweep (reduce) phase of work-efficient scan
          * Builds a balanced binary tree on the input data
@@ -129,8 +153,7 @@ namespace StreamCompaction {
             checkCUDAError("cudaMalloc failed in compactPathSegments");
 
             // Step 1: Map PathSegments to boolean array
-            KernelConfig configMap(n);
-            kernMapPathSegmentToBoolean<<<configMap.gridSize, configMap.blockSize>>>(n, dev_bools, dev_idata);
+            LAUNCH_KERNEL_AUTO(kernMapPathSegmentToBoolean, n, n, dev_bools, dev_idata);
             checkCUDAError("kernMapPathSegmentToBoolean failed");
             
             // Copy bools to indices array and pad with zeros
@@ -143,8 +166,7 @@ namespace StreamCompaction {
             // Up-sweep phase
             for (int d = 0; d < ilog2ceil(paddedN); d++) {
                 int numThreads = paddedN / (1 << (d + 1));
-                KernelConfig config(numThreads);
-                kernUpSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_indices);
+                LAUNCH_KERNEL_AUTO(kernUpSweep, numThreads, paddedN, d, dev_indices);
                 checkCUDAError("kernUpSweep failed in compactPathSegments");
             }
             
@@ -154,14 +176,12 @@ namespace StreamCompaction {
             // Down-sweep phase
             for (int d = ilog2ceil(paddedN) - 1; d >= 0; d--) {
                 int numThreads = paddedN / (1 << (d + 1));
-                KernelConfig config(numThreads);
-                kernDownSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_indices);
+                LAUNCH_KERNEL_AUTO(kernDownSweep, numThreads, paddedN, d, dev_indices);
                 checkCUDAError("kernDownSweep failed in compactPathSegments");
             }
             
             // Step 3: Scatter PathSegments to output array
-            KernelConfig configScatter(n);
-            kernScatterPathSegment<<<configScatter.gridSize, configScatter.blockSize>>>(n, dev_odata, dev_idata, dev_bools, dev_indices);
+            LAUNCH_KERNEL_AUTO(kernScatterPathSegment, n, n, dev_odata, dev_idata, dev_bools, dev_indices);
             checkCUDAError("kernScatterPathSegment failed");
 
             // Calculate the count of active paths
@@ -189,17 +209,13 @@ namespace StreamCompaction {
             cudaMalloc((void**)&dev_indices, n * sizeof(int));
             checkCUDAError("cudaMalloc failed in compactPathSegmentsSharedMemory");
 
-            KernelConfig configMap(n);
-            kernMapPathSegmentToBoolean<<<configMap.gridSize, configMap.blockSize>>>(
-                n, dev_bools, dev_idata);
+            LAUNCH_KERNEL_AUTO(kernMapPathSegmentToBoolean, n, n, dev_bools, dev_idata);
             checkCUDAError("kernMapPathSegmentToBoolean failed");
 
             cudaMemcpy(dev_indices, dev_bools, n * sizeof(int), cudaMemcpyDeviceToDevice);
             scanExclusiveSharedMemoryDevice(n, dev_indices, dev_indices);
 
-            KernelConfig configScatter(n);
-            kernScatterPathSegment<<<configScatter.gridSize, configScatter.blockSize>>>(
-                n, dev_odata, dev_idata, dev_bools, dev_indices);
+            LAUNCH_KERNEL_AUTO(kernScatterPathSegment, n, n, dev_odata, dev_idata, dev_bools, dev_indices);
             checkCUDAError("kernScatterPathSegment failed");
 
             int lastBool, lastIndex;
@@ -221,6 +237,11 @@ namespace StreamCompaction {
         // are scanned recursively and propagated as cross-block offsets.
         // ========================================================================
 
+        /**
+         * Configuration constants for shared memory scan.
+         * SCAN_BLOCK_SIZE: Number of threads per block (256 chosen for good occupancy)
+         * SCAN_BLOCK_ELEMENTS: Each thread processes 2 elements to reduce kernel launches
+         */
         static const int SCAN_BLOCK_SIZE = 256;
         static const int SCAN_BLOCK_ELEMENTS = SCAN_BLOCK_SIZE * 2;
 
