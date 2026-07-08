@@ -539,7 +539,9 @@ void runCuda()
 
         // execute the kernel
         int frame = 0;
+        g_profiler().beginFrame();
         pathtrace(pbo_dptr, frame, iteration);
+        g_profiler().endFrame();
 
         // unmap buffer object
         cudaGLUnmapBufferObject(pbo);

@@ -778,10 +778,6 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     bool done      = false;
 
     // ---- 2. Bounce loop -------------------------------------------------
-    // Frame timing measures wall time of the bounce loop ONLY.
-    // finalGather / sendImageToPBO / cudaMemcpy are display scaffolding
-    // and are excluded from the performance metric.
-    prof.beginFrame();
     while (!done)
     {
         // Note: No need to zero out dev_intersections here.
@@ -833,7 +829,6 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         if (guiData != NULL)
             guiData->TracedDepth = depth;
     }
-    prof.endFrame();
 
     // ---- 3. Accumulation ------------------------------------------------
     // Survivors (paths that reached traceDepth without terminating) also

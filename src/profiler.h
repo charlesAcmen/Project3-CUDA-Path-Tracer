@@ -71,12 +71,13 @@ struct PathCountRecord {
 };
 
 // ---------------------------------------------------------------------------
-// Per-iteration frame time (bounce loop only, excludes finalGather / PBO /
-// cudaMemcpy — those are display scaffolding, not path-tracing logic).
+// Per-iteration render-frame time (full pathtrace() call: primary rays →
+// bounce loop → finalGather → sendImageToPBO → cudaMemcpy D2H).
+// This is the wall-clock cost of one rendered iteration.
 // ---------------------------------------------------------------------------
 struct FrameTimeRecord {
     int   iteration;
-    float frame_time_ms;   // wall time of the bounce loop
+    float frame_time_ms;
 };
 
 // ---------------------------------------------------------------------------
