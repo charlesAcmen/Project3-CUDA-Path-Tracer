@@ -199,20 +199,32 @@ namespace StreamCompaction {
         int compactPathSegmentsSharedMemory(
             int n, PathSegment *dev_odata, const PathSegment *dev_idata)
         {
+            // Round up to next power of 2 so the shared-mem scan operates on
+            // a padded array whose size is a multiple of SCAN_BLOCK_ELEMENTS.
+            // Without padding, the last block processes a partial batch whose
+            // out-of-bounds reads can corrupt the scan result.
+            int paddedN = 1 << ilog2ceil(n);
+
             int *dev_bools, *dev_indices;
             cudaMalloc((void**)&dev_bools, n * sizeof(int));
-            cudaMalloc((void**)&dev_indices, n * sizeof(int));
+            cudaMalloc((void**)&dev_indices, paddedN * sizeof(int));
             checkCUDAError("cudaMalloc failed in compactPathSegmentsSharedMemory");
 
             LAUNCH_KERNEL_AUTO(kernMapPathSegmentToBoolean, n, n, dev_bools, dev_idata);
             checkCUDAError("kernMapPathSegmentToBoolean failed");
 
+            // Copy bools to indices and zero-pad the tail
             cudaMemcpy(dev_indices, dev_bools, n * sizeof(int), cudaMemcpyDeviceToDevice);
-            scanExclusiveSharedMemoryDevice(n, dev_indices, dev_indices);
+            if (paddedN > n) {
+                cudaMemset(dev_indices + n, 0, (paddedN - n) * sizeof(int));
+            }
+
+            scanExclusiveSharedMemoryDevice(paddedN, dev_indices, dev_indices);
 
             LAUNCH_KERNEL_AUTO(kernScatterPathSegment, n, n, dev_odata, dev_idata, dev_bools, dev_indices);
             checkCUDAError("kernScatterPathSegment failed");
 
+            // Count survivors: exclusive-scan result at last active element + its bool
             int lastBool, lastIndex;
             cudaMemcpy(&lastBool, dev_bools + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
             cudaMemcpy(&lastIndex, dev_indices + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
@@ -265,7 +277,11 @@ namespace StreamCompaction {
             temp[2 * thid]     = (index0 < n) ? idata[index0] : 0;
             temp[2 * thid + 1] = (index1 < n) ? idata[index1] : 0;
 
-            for (int d = SCAN_BLOCK_SIZE >> 1; d > 0; d >>= 1)
+            // Up-sweep: log2(2*SCAN_BLOCK_SIZE) levels.
+            // The tree has 2*SCAN_BLOCK_SIZE leaves (= SCAN_BLOCK_ELEMENTS),
+            // so the first level pairs elements (0,1), (2,3), ..., requiring
+            // SCAN_BLOCK_SIZE threads (all threads in the block).
+            for (int d = SCAN_BLOCK_SIZE; d > 0; d >>= 1)
             {
                 __syncthreads();
                 if (thid < d)
@@ -283,7 +299,8 @@ namespace StreamCompaction {
                 temp[2 * SCAN_BLOCK_SIZE - 1] = 0;
             }
 
-            for (int d = 1; d < SCAN_BLOCK_SIZE; d <<= 1)
+            // Down-sweep: same number of levels as up-sweep.
+            for (int d = 1; d < SCAN_BLOCK_ELEMENTS; d <<= 1)
             {
                 offset >>= 1;
                 __syncthreads();
