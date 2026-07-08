@@ -603,6 +603,13 @@ static void sortPathsByMaterial(int num_paths)
  * Uses ping-pong buffers (dev_paths <-> dev_paths_compacted) to avoid a
  * separate allocation per bounce.
  *
+ * Implicit Host-Device Synchronization:
+ *   This function returns the survivor count (num_paths) to the CPU, which is
+ *   used to determine loop termination: done = (num_paths == 0 || depth >= max).
+ *   The cudaMemcpy operations inside the stream compaction implementations
+ *   (to retrieve the final count) implicitly synchronize the device, ensuring
+ *   all prior GPU work completes before the CPU reads the result.
+ *
  * @param num_paths    [in/out]  Active path count; set to survivors after compaction.
  * @param blockSize1d            1D block size for kernel launches.
  * @return                       true if every path terminated (caller should
@@ -639,6 +646,7 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
             dev_paths_compacted,   // output
             dev_paths);            // input
 
+        // Swap buffers: compacted array becomes the active one
         PathSegment* tmp = dev_paths;
         dev_paths = dev_paths_compacted;
         dev_paths_compacted = tmp;
@@ -648,8 +656,26 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
         prof.cpuStop(ProfilerOp::CompactPaths);
         return (num_paths == 0);
     }
+    else if (g_compactMethod == 2)
+    {
+        // Method 2: Thrust copy_if (simple and portable)
+        PathSegment* end = thrust::copy_if(
+            thrust::device,
+            dev_paths, dev_paths + num_paths,
+            dev_paths_compacted,
+            IsPathActive());
 
-    if (g_compactMethod == 3)
+        // Swap buffers
+        PathSegment* tmp = dev_paths;
+        dev_paths = dev_paths_compacted;
+        dev_paths_compacted = tmp;
+
+        num_paths = static_cast<int>(end - dev_paths);
+
+        prof.cpuStop(ProfilerOp::CompactPaths);
+        return (num_paths == 0);
+    }
+    else if (g_compactMethod == 3)
     {
         // Shared-memory multi-block scan-based compaction (GPU Gems 3, Ch. 39)
         int survivors = StreamCompaction::Efficient::compactPathSegmentsSharedMemory(
@@ -657,6 +683,7 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
             dev_paths_compacted,
             dev_paths);
 
+        // Swap buffers
         PathSegment* tmp = dev_paths;
         dev_paths = dev_paths_compacted;
         dev_paths_compacted = tmp;
@@ -666,22 +693,14 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
         prof.cpuStop(ProfilerOp::CompactPaths);
         return (num_paths == 0);
     }
-
-    // g_compactMethod == 2 (Thrust copy_if)
-    PathSegment* end = thrust::copy_if(
-        thrust::device,
-        dev_paths, dev_paths + num_paths,
-        dev_paths_compacted,
-        IsPathActive());
-
-    PathSegment* tmp = dev_paths;
-    dev_paths = dev_paths_compacted;
-    dev_paths_compacted = tmp;
-
-    num_paths = static_cast<int>(end - dev_paths);
-
-    prof.cpuStop(ProfilerOp::CompactPaths);
-    return (num_paths == 0);
+    else
+    {
+        // Invalid compact method - should never happen if validated at startup
+        fprintf(stderr, "ERROR: Invalid compact method %d. Falling back to no compaction.\n",
+                g_compactMethod);
+        prof.cpuStop(ProfilerOp::CompactPaths);
+        return false;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -759,7 +778,9 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     // ---- 2. Bounce loop -------------------------------------------------
     while (!done)
     {
-        cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+        // Note: No need to zero out dev_intersections here.
+        // computeIntersections will overwrite all active path entries completely.
+        // cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
         prof.recordBounce(depth, num_paths);
 
@@ -768,7 +789,9 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             depth, num_paths, dev_paths,
             dev_geoms, hst_scene->geoms.size(), dev_intersections);
         checkCUDAError("trace one bounce");
-        cudaDeviceSynchronize();
+        // Note: No explicit cudaDeviceSynchronize() needed here.
+        // The subsequent operations (Thrust calls in sortPathsByMaterial and
+        // compactActivePaths) will implicitly synchronize when necessary.
         depth++;
 
         prof.gpuStart(ProfilerOp::SortByMaterial);
