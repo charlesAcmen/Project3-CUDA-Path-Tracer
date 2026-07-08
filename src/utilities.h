@@ -25,7 +25,7 @@ public:
 
     // Per-frame timing summary (populated by profiler, displayed by ImGui)
     float lastFrameTotalMs = 0.0f;
-    float perKernelMs[4] = {};  // ShadeMaterial, GatherTerminatedPaths, SortByMaterial, CompactPaths
+    float perKernelMs[5] = {};  // ShadeMaterial, GatherTerminatedPaths, SortByMaterial, CompactPaths, ComputeIntersections
     int   lastBounceCount = 0;
 };
 

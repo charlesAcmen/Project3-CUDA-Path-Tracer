@@ -6,16 +6,20 @@
 #include <cuda_runtime.h>
 
 // ---------------------------------------------------------------------------
-// Enumeration of every measurable user-written operation.
-// Only operations the user added/modified are tracked; starter-code kernels
-// (generateRayFromCamera, computeIntersections, finalGather, sendImageToPBO)
-// are intentionally excluded.
+// Enumeration of every measurable operation.
+// Starter-code kernels previously excluded are now measured when they are
+// needed to quantify cross-cutting optimisations such as stream compaction.
 // ---------------------------------------------------------------------------
 enum class ProfilerOp : int {
-    ShadeMaterial = 0,         // GPU kernel -- user-modified (RR, remainingBounces guard)
-    GatherTerminatedPaths,     // GPU kernel -- user-written
-    SortByMaterial,            // host-side Thrust -- user-written
-    CompactPaths,              // host-side Thrust -- user-written
+    ShadeMaterial = 0,         // GPU kernel -- GPU timer (user-modified)
+    GatherTerminatedPaths,     // GPU kernel -- GPU timer (user-written)
+    SortByMaterial,            // async Thrust -- GPU timer (user-written)
+                               //   Thrust transform/sequence/sort_by_key/gather are
+                               //   all asynchronous; CPU timer would miss GPU work.
+    CompactPaths,              // Thrust copy_if/scan -- CPU timer (user-written)
+                               //   copy_if returns a host-visible iterator, forcing
+                               //   an internal sync; CPU timer naturally captures it.
+    ComputeIntersections,      // GPU kernel -- GPU timer (starter code)
     COUNT
 };
 

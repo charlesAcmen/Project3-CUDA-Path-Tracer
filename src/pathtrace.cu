@@ -787,15 +787,25 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         prof.recordBounce(depth, num_paths);
 
         dim3 numBlocks((num_paths + blockSize1d - 1) / blockSize1d);
+
+        prof.gpuStart(ProfilerOp::ComputeIntersections);
         computeIntersections<<<numBlocks, blockSize1d>>>(
             depth, num_paths, dev_paths,
             dev_geoms, hst_scene->geoms.size(), dev_intersections);
+        prof.gpuStop(ProfilerOp::ComputeIntersections);
         checkCUDAError("trace one bounce");
-        // Note: No explicit cudaDeviceSynchronize() needed here.
-        // The subsequent operations (Thrust calls in sortPathsByMaterial and
-        // compactActivePaths) will implicitly synchronize when necessary.
         depth++;
 
+        // GPU timer: sortPathsByMaterial consists of asynchronous Thrust calls
+        // (transform, sequence, sort_by_key, gather×2).  None of these implicitly
+        // synchronise — they launch GPU kernels and return immediately.  A CPU
+        // timer would only capture launch overhead (~µs), missing the actual GPU
+        // work.  Using cudaEvent captures true GPU execution time and the
+        // cudaEventSynchronize inside gpuStop provides the sync point.
+        //
+        // Contrast with compactPaths (Thrust copy_if): that returns a host-visible
+        // iterator, so Thrust internally syncs to count survivors.  CPU timer is
+        // correct there because it naturally captures the full blocking cost.
         prof.gpuStart(ProfilerOp::SortByMaterial);
         sortPathsByMaterial(num_paths);  // no-op when g_sortByMaterial==false
         prof.gpuStop(ProfilerOp::SortByMaterial);

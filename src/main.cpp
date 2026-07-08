@@ -298,7 +298,8 @@ void RenderImGui()
     if (g_profiler().enabled()) {
         ImGui::Separator();
         ImGui::Text("Per-Kernel Timing (last frame):");
-        ImGui::Text("  ShadeMaterial:        %.3f ms", imguiData->perKernelMs[0]);
+        ImGui::Text("  ComputeIntersections:  %.3f ms", imguiData->perKernelMs[4]);
+        ImGui::Text("  ShadeMaterial:         %.3f ms", imguiData->perKernelMs[0]);
         ImGui::Text("  GatherTerminatedPaths: %.3f ms", imguiData->perKernelMs[1]);
         ImGui::Text("  SortByMaterial:        %.3f ms", imguiData->perKernelMs[2]);
         ImGui::Text("  CompactPaths:          %.3f ms", imguiData->perKernelMs[3]);
