@@ -23,6 +23,7 @@ from pathlib import Path
 import plot_kernel_breakdown
 import plot_path_survival
 import plot_comparison
+import plot_fps
 import profiler_utils as pu
 
 # ---- Configuration matrix ----
@@ -55,6 +56,7 @@ def find_latest_csvs(output_dir: str, scene_name: str) -> list[str]:
         f"{latest_dir}/timing.csv",
         f"{latest_dir}/path_survival.csv",
         f"{latest_dir}/summary.csv",
+        f"{latest_dir}/frame_times.csv",
     ]
 
 
@@ -179,6 +181,26 @@ def main():
             f"{args.output_dir}/compare_open_vs_closed.png",
             ["Open (Cornell)", "Closed (Cornell)"],
         )
+
+    # FPS comparison: all open-scene configs side by side
+    fps_csvs = []
+    fps_labels = []
+    for cfg_name, compact, sort_val in configs:
+        key = f"open_{cfg_name}"
+        if key in results and len(results[key]) >= 4:
+            fps_csvs.append(results[key][3])   # frame_times.csv
+            fps_labels.append(f"compact={compact} sort={sort_val}")
+    if len(fps_csvs) >= 2:
+        plot_fps.main_raw(fps_csvs, fps_labels,
+                          f"{args.output_dir}/fps_open.png")
+
+    # FPS: open vs closed (baseline config only)
+    if open_key in results and closed_key in results:
+        if len(results[open_key]) >= 4 and len(results[closed_key]) >= 4:
+            plot_fps.main_raw(
+                [results[open_key][3], results[closed_key][3]],
+                ["Open (Cornell)", "Closed (Cornell)"],
+                f"{args.output_dir}/fps_open_vs_closed.png")
 
     print(f"\nAll done. Plots saved to {args.output_dir}/")
 

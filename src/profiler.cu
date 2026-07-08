@@ -97,6 +97,8 @@ void Profiler::init(const ProfilerConfig& cfg)
     m_timingRecords.reserve(8192);
     m_pathCounts.clear();
     m_pathCounts.reserve(1024);
+    m_frameTimes.clear();
+    m_frameTimes.reserve(256);
 
     std::string expDir = getExperimentDir(m_cfg.sceneName, m_timestamp);
     printf("[Profiler] Enabled. Output directory: %s/\n", expDir.c_str());
@@ -121,6 +123,12 @@ void Profiler::shutdown()
         printf("[Profiler] Wrote %zu path survival records.\n", m_pathCounts.size());
     }
 
+    if (!m_frameTimes.empty())
+    {
+        writeFrameTimesCSV(expDir + "/frame_times.csv");
+        printf("[Profiler] Wrote %zu frame time records.\n", m_frameTimes.size());
+    }
+
     // Destroy CUDA events while the context is still alive.
     // If this is deferred to the destructor (~Profiler), it would run after
     // cudaDeviceReset() has already torn down the context, causing errors.
@@ -129,6 +137,7 @@ void Profiler::shutdown()
 
     m_timingRecords.clear();
     m_pathCounts.clear();
+    m_frameTimes.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +229,27 @@ void Profiler::recordBounce(int bounce, int num_paths)
         m_currentIteration,
         bounce,
         num_paths
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Frame timing (bounce-loop wall time → iterations per second)
+// ---------------------------------------------------------------------------
+void Profiler::beginFrame()
+{
+    if (!m_cfg.enabled) return;
+    m_frameStartTime = std::chrono::high_resolution_clock::now();
+}
+
+void Profiler::endFrame()
+{
+    if (!m_cfg.enabled) return;
+    auto endTime = std::chrono::high_resolution_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(
+        endTime - m_frameStartTime).count();
+    m_frameTimes.push_back({
+        m_currentIteration,
+        static_cast<float>(ms)
     });
 }
 
@@ -375,5 +405,26 @@ void Profiler::writeSummaryCSV(const std::string& filepath)
           << s.minVal << ","
           << s.maxVal << ","
           << s.count << "\n";
+    }
+}
+
+void Profiler::writeFrameTimesCSV(const std::string& filepath)
+{
+    if (m_frameTimes.empty()) return;
+
+    std::ofstream f(filepath);
+    if (!f.is_open()) {
+        printf("[Profiler] ERROR: cannot write %s\n", filepath.c_str());
+        return;
+    }
+
+    f << "iteration,frame_time_ms,compact_method,sort_by_material\n";
+
+    for (const auto& r : m_frameTimes)
+    {
+        f << r.iteration << ","
+          << r.frame_time_ms << ","
+          << m_cfg.compactMethod << ","
+          << (m_cfg.sortByMaterial ? 1 : 0) << "\n";
     }
 }

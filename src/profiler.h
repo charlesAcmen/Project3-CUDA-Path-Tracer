@@ -71,6 +71,15 @@ struct PathCountRecord {
 };
 
 // ---------------------------------------------------------------------------
+// Per-iteration frame time (bounce loop only, excludes finalGather / PBO /
+// cudaMemcpy — those are display scaffolding, not path-tracing logic).
+// ---------------------------------------------------------------------------
+struct FrameTimeRecord {
+    int   iteration;
+    float frame_time_ms;   // wall time of the bounce loop
+};
+
+// ---------------------------------------------------------------------------
 // Profiler singleton
 // ---------------------------------------------------------------------------
 class Profiler {
@@ -101,6 +110,10 @@ public:
     // ---- Per-bounce data ----
     void recordBounce(int bounce, int num_paths);
 
+    // ---- Frame timing (bounce-loop wall time → FPS) ----
+    void beginFrame();
+    void endFrame();
+
     // ---- Accessors ----
     const ProfilerConfig& config() const { return m_cfg; }
     bool enabled() const { return m_cfg.enabled; }
@@ -123,9 +136,13 @@ private:
     // Accumulated records
     std::vector<TimingRecord>    m_timingRecords;
     std::vector<PathCountRecord> m_pathCounts;
+    std::vector<FrameTimeRecord> m_frameTimes;
 
     // Current iteration context
     int m_currentIteration = 0;
+
+    // Frame timing state
+    std::chrono::high_resolution_clock::time_point m_frameStartTime;
 
     // Timestamp for output filename deduplication
     std::string m_timestamp;
@@ -134,6 +151,7 @@ private:
     void writeTimingCSV(const std::string& filepath);
     void writePathSurvivalCSV(const std::string& filepath);
     void writeSummaryCSV(const std::string& filepath);
+    void writeFrameTimesCSV(const std::string& filepath);
 };
 
 // Global accessor (defined in profiler.cu)
