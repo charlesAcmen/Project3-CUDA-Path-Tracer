@@ -14,7 +14,7 @@ GNUmakefile
 !README.md
 !INSTRUCTION.md
 build
-/docs
+# /docs
 *.csv
 /profiler_output
 
