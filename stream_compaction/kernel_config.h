@@ -15,6 +15,11 @@
  * Usage:
  *   KernelConfig config(numElements);
  *   myKernel<<<config.gridSize, config.blockSize>>>(args...);
+ * 
+ * When to use:
+ * - General-purpose kernels without specific resource constraints
+ * - Simple memory-bound operations
+ * - When you want consistent block sizes across similar operations
  */
 class KernelConfig {
 public:
@@ -119,6 +124,17 @@ private:
  * Usage:
  *   OccupancyConfig config = OccupancyConfig::forKernel(myKernel, numElements);
  *   myKernel<<<config.gridSize, config.blockSize>>>(args...);
+ * 
+ * When to use:
+ * - Compute-intensive kernels where occupancy matters most
+ * - Kernels with significant shared memory usage
+ * - Kernels with complex register usage patterns
+ * - Performance-critical hotspots identified through profiling
+ * 
+ * When NOT to use:
+ * - Simple memory-bound operations (bandwidth is the bottleneck, not occupancy)
+ * - Kernels that need consistent block sizes for algorithmic reasons
+ * - Early development phase (use simpler KernelConfig first, optimize later)
  */
 class OccupancyConfig {
 public:

@@ -16,30 +16,25 @@ namespace StreamCompaction {
             return timer;
         }
 
-        // Cache device info at startup
+        // ========================================================================
+        // Internal Implementation Details
+        // ========================================================================
+        // Note: Only functions/kernels that require forward declaration (e.g.,
+        // recursive functions) are declared here. Other functions are defined
+        // in order of dependency to avoid unnecessary forward declarations.
+        // ========================================================================
+
+        // Cache device info at startup (internal utility)
         static DeviceInfo& getDeviceInfo() {
             static DeviceInfo& info = DeviceInfo::getInstance();
             return info;
         }
 
         // ========================================================================
-        // Forward Declarations of Internal Kernels
+        // Forward Declaration (Required for Recursion)
         // ========================================================================
         
-        // Global memory scan kernels
-        __global__ void kernUpSweep(int n, int d, int *data);
-        __global__ void kernDownSweep(int n, int d, int *data);
-        
-        // PathSegment-specific kernels
-        __global__ void kernMapPathSegmentToBoolean(int n, int *bools, const PathSegment *paths);
-        __global__ void kernScatterPathSegment(int n, PathSegment *odata,
-                const PathSegment *idata, const int *bools, const int *indices);
-        
-        // Shared memory scan kernels
-        __global__ void kernBlockExclusiveScan(int n, int *odata, const int *idata, int *blockSums);
-        __global__ void kernAddBlockOffsets(int n, int *data, const int *blockOffsets);
-        
-        // Helper function
+        // This recursive helper function needs forward declaration
         static void scanExclusiveSharedMemoryDevice(int n, int *dev_odata, const int *dev_idata);
 
         // ========================================================================
@@ -249,6 +244,11 @@ namespace StreamCompaction {
          * Per-block work-efficient exclusive scan using shared memory.
          * Each thread loads two elements (bank-conflict-free layout) so one CUDA
          * block processes SCAN_BLOCK_ELEMENTS items.
+         * 
+         * Note: This kernel uses a FIXED block size (SCAN_BLOCK_SIZE) because:
+         * 1. Shared memory array size must be known at compile time
+         * 2. The algorithm logic depends on the specific block size
+         * 3. Cannot use dynamic occupancy optimization here
          */
         __global__ void kernBlockExclusiveScan(
             int n, int *odata, const int *idata, int *blockSums)
@@ -321,6 +321,9 @@ namespace StreamCompaction {
         /**
          * Device-side exclusive prefix sum using shared memory across multiple
          * blocks (internal helper for the shared-memory API below).
+         * 
+         * This uses fixed block configuration optimized for shared memory usage.
+         * SCAN_BLOCK_SIZE is chosen to balance occupancy and shared memory usage.
          */
         static void scanExclusiveSharedMemoryDevice(
             int n, int *dev_odata, const int *dev_idata)
@@ -336,6 +339,8 @@ namespace StreamCompaction {
             cudaMalloc((void**)&dev_blockSums, numBlocks * sizeof(int));
             checkCUDAError("cudaMalloc dev_blockSums failed");
 
+            // Use fixed block size for shared memory scan
+            // (SCAN_BLOCK_SIZE is tuned for shared memory layout)
             kernBlockExclusiveScan<<<numBlocks, SCAN_BLOCK_SIZE>>>(
                 n, dev_odata, dev_idata, dev_blockSums);
             checkCUDAError("kernBlockExclusiveScan failed");
@@ -346,8 +351,10 @@ namespace StreamCompaction {
                 cudaMalloc((void**)&dev_blockOffsets, numBlocks * sizeof(int));
                 checkCUDAError("cudaMalloc dev_blockOffsets failed");
 
+                // Recursively scan block sums
                 scanExclusiveSharedMemoryDevice(numBlocks, dev_blockOffsets, dev_blockSums);
 
+                // Add block offsets back
                 kernAddBlockOffsets<<<numBlocks, SCAN_BLOCK_SIZE>>>(
                     n, dev_odata, dev_blockOffsets);
                 checkCUDAError("kernAddBlockOffsets failed");
