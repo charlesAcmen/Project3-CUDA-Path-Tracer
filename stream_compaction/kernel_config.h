@@ -57,28 +57,6 @@ public:
     }
     
     /**
-     * Constructor for 2D problem spaces
-     */
-    KernelConfig(int width, int height, int deviceId = 0) {
-        cudaDeviceProp deviceProp;
-        cudaGetDeviceProperties(&deviceProp, deviceId);
-        
-        // For 2D problems, use square blocks (common pattern)
-        int optimalBlockSize1D = computeOptimalBlockSize(deviceProp);
-        int blockDim = (int)sqrt((double)optimalBlockSize1D);
-        
-        blockSize.x = blockDim;
-        blockSize.y = blockDim;
-        blockSize.z = 1;
-        
-        gridSize.x = (width + blockSize.x - 1) / blockSize.x;
-        gridSize.y = (height + blockSize.y - 1) / blockSize.y;
-        gridSize.z = 1;
-        
-        effectiveThreads = gridSize.x * blockSize.x * gridSize.y * blockSize.y;
-    }
-    
-    /**
      * Get device properties for current device
      */
     static cudaDeviceProp getDeviceProperties(int deviceId = 0) {
