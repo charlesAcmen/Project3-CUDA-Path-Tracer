@@ -16,6 +16,7 @@ GNUmakefile
 build
 /docs
 *.csv
+/profiler_output
 
 
 # IDE and editor specific files
