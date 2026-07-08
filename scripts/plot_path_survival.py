@@ -21,24 +21,19 @@ def main_raw(path_survival_csv: str, output: str) -> None:
 
     label = pu.scalar_to_label(rows[0]["compact_method"], rows[0]["sort_by_material"])
 
+    # Group path counts by bounce depth (across all iterations)
     bounce_counts = defaultdict(list)
     for r in rows:
         bounce_counts[r["bounce_depth"]].append(r["num_active_paths"])
 
+    # Calculate mean path count for each bounce (averaged across iterations)
     bounces = sorted(bounce_counts.keys())
     mean_counts = [np.mean(bounce_counts[b]) for b in bounces]
-    std_counts  = [np.std(bounce_counts[b])  for b in bounces]
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    # Shaded band: mean ± std
-    mean_arr = np.array(mean_counts)
-    std_arr  = np.array(std_counts)
-    ax.fill_between(bounces, mean_arr - std_arr, mean_arr + std_arr,
-                    color="#4C78A8", alpha=0.20, label="Mean ± Std")
-
-    # Mean line
-    ax.plot(bounces, mean_counts, color="#4C78A8", linewidth=2.5, label="Mean")
+    # Plot mean path survival curve
+    ax.plot(bounces, mean_counts, color="#4C78A8", linewidth=2.5, marker='o', markersize=6, label="Active Paths")
 
     ax.set_xlabel("Bounce Depth")
     ax.set_ylabel("Active Paths")
