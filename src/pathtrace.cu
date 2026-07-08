@@ -855,10 +855,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         prof.updateGuiData(guiData);
     }
 
-    // Flush CSV output on the final iteration.
-    // runCuda() increments 'iteration' before calling pathtrace(), so the
-    // last frame passes iter == renderState->iterations.
-    if (prof.enabled() && iter == hst_scene->state.iterations) {
-        prof.shutdown();
-    }
+    // CSV output is flushed by atexit(profiler.shutdown) in main.cpp.
+    // Doing it here would race with endFrame() in runCuda(), which fires
+    // after pathtrace() returns.
 }

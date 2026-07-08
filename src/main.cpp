@@ -551,6 +551,10 @@ void runCuda()
         if (getAutoSave()) {
             saveImage();
         }
+        // Write CSVs and destroy CUDA events BEFORE tearing down the context.
+        // The atexit handler will fire again during exit() but is a no-op
+        // (vectors already cleared, events already null).
+        g_profiler().shutdown();
         pathtraceFree();
         // Null out the PBO so the atexit(cleanupCuda) handler doesn't try
         // cudaGLUnregisterBufferObject after the context was destroyed.
