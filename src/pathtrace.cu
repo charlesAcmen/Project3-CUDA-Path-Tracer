@@ -771,9 +771,9 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         cudaDeviceSynchronize();
         depth++;
 
-        prof.cpuStart(ProfilerOp::SortByMaterial);
+        prof.gpuStart(ProfilerOp::SortByMaterial);
         sortPathsByMaterial(num_paths);  // no-op when g_sortByMaterial==false
-        prof.cpuStop(ProfilerOp::SortByMaterial);
+        prof.gpuStop(ProfilerOp::SortByMaterial);
 
         prof.gpuStart(ProfilerOp::ShadeMaterial);
         shadeMaterial<<<numBlocks, blockSize1d>>>(
