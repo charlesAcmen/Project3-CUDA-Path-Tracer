@@ -367,6 +367,14 @@ __global__ void shadeMaterial(
                 // throughput has dropped below a useful level.  Only applies
                 // after rrMinBounces guaranteed bounces.
                 //
+                // Note: scatterRay() has already decremented remainingBounces, so we check
+                // the UPDATED value. With traceDepth=8 and rrMinBounces=3:
+                //   - Bounce 0: remainingBounces = 7 after scatter, 7 < 5? No → no RR
+                //   - Bounce 1: remainingBounces = 6 after scatter, 6 < 5? No → no RR  
+                //   - Bounce 2: remainingBounces = 5 after scatter, 5 < 5? No → no RR
+                //   - Bounce 3: remainingBounces = 4 after scatter, 4 < 5? Yes → RR starts
+                // This ensures the first rrMinBounces (3) bounces are guaranteed.
+                //
                 // Survival probability p = max(R,G,B) clamped to [RR_P_MIN, RR_P_MAX].
                 //   - Using max component is conservative (highest survival chance
                 //     among the three channels -> fewest fireflies).
@@ -377,7 +385,7 @@ __global__ void shadeMaterial(
                 // Terminated paths keep their color intact -- gatherTerminatedPaths
                 // collects it during the next compaction pass.
                 if (pathSegment.remainingBounces > 0 &&
-                    pathSegment.remainingBounces <= traceDepth - rrMinBounces)
+                    pathSegment.remainingBounces < traceDepth - rrMinBounces)
                 {
                     float p = fmaxf(fmaxf(pathSegment.color.r,
                                            pathSegment.color.g),
