@@ -373,12 +373,21 @@ int main(int argc, char** argv)
     
     // Strip path and extension to get a clean scene name for CSV output
     {
-        std::string s = sceneFile;
+        std::string s = sceneFile;  // e.g., "../scenes/cornell.json"
+        
+        // Step 1: Strip directory path
         size_t slash = s.find_last_of("/\\");
-        size_t dot   = s.find_last_of('.');
-        if (slash != std::string::npos) s = s.substr(slash + 1);
-        if (dot   != std::string::npos) s = s.substr(0, dot);
-        profCfg.sceneName = s;  // e.g., "cornell" from "../scenes/cornell.json"
+        if (slash != std::string::npos) {
+            s = s.substr(slash + 1);  // Now s = "cornell.json"
+        }
+        
+        // Step 2: Strip file extension (only after path is removed)
+        size_t dot = s.find_last_of('.');
+        if (dot != std::string::npos) {
+            s = s.substr(0, dot);  // Now s = "cornell"
+        }
+        
+        profCfg.sceneName = s;
     }
 
     // Initialize profCfg with runtime defaults from pathtrace.cu
