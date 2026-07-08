@@ -39,16 +39,16 @@ def main_raw(path_survival_csv: str, output: str) -> None:
     ax.plot(bounces, mean_counts, color="#4C78A8", linewidth=2.5,
             marker='o', markersize=6, label="Active Paths")
 
-    # Value labels at first, last, and every other point
+    # Value labels on every bounce point — alternating above / below to avoid overlap
     for i, (b, m) in enumerate(zip(bounces, mean_counts)):
-        if i == 0 or i == len(bounces) - 1 or i % 2 == 1:
-            ax.annotate(f"{m:,.0f}",
-                        (b, m),
-                        textcoords="offset points",
-                        xytext=(0, 12 if i % 4 == 0 else -16),
-                        ha="center", fontsize=8, fontweight="bold",
-                        color="#4C78A8",
-                        arrowprops=dict(arrowstyle="-", color="#888888", lw=0.5))
+        y_off = 14 if i % 2 == 0 else -18
+        ax.annotate(f"{m:,.0f}",
+                    (b, m),
+                    textcoords="offset points",
+                    xytext=(0, y_off),
+                    ha="center", fontsize=7.5, fontweight="bold",
+                    color="#4C78A8",
+                    arrowprops=dict(arrowstyle="-", color="#aaaaaa", lw=0.4))
 
     ax.set_xlabel("Bounce Depth")
     ax.set_ylabel("Active Paths")
