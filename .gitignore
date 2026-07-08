@@ -10,7 +10,8 @@
 /.github
 *.launch
 GNUmakefile
-*.md
+# *.md
+CLAUDE.md
 !README.md
 !INSTRUCTION.md
 build
