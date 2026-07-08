@@ -120,6 +120,12 @@ void Profiler::shutdown()
         printf("[Profiler] Wrote %zu path survival records.\n", m_pathCounts.size());
     }
 
+    // Destroy CUDA events while the context is still alive.
+    // If this is deferred to the destructor (~Profiler), it would run after
+    // cudaDeviceReset() has already torn down the context, causing errors.
+    if (m_eventStart) { cudaEventDestroy(m_eventStart); m_eventStart = nullptr; }
+    if (m_eventStop)  { cudaEventDestroy(m_eventStop);  m_eventStop  = nullptr; }
+
     m_timingRecords.clear();
     m_pathCounts.clear();
 }

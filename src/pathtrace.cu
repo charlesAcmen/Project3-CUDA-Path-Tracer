@@ -665,12 +665,14 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
             dev_paths_compacted,
             IsPathActive());
 
-        // Swap buffers
+        // Calculate survivor count BEFORE swapping buffers
+        // (end points into dev_paths_compacted, which will become stale after swap)
+        num_paths = static_cast<int>(end - dev_paths_compacted);
+
+        // Swap buffers: compacted array becomes the active one
         PathSegment* tmp = dev_paths;
         dev_paths = dev_paths_compacted;
         dev_paths_compacted = tmp;
-
-        num_paths = static_cast<int>(end - dev_paths);
 
         prof.cpuStop(ProfilerOp::CompactPaths);
         return (num_paths == 0);

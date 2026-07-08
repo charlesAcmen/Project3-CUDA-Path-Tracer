@@ -414,13 +414,6 @@ int main(int argc, char** argv)
         }
     }
 
-    g_profiler().init(profCfg);
-
-    // Graceful CSV write on any exit path (Esc key, completion, etc.)
-    if (profCfg.enabled) {
-        atexit([]() { g_profiler().shutdown(); });
-    }
-
     // Load scene file
     scene = new Scene(sceneFile);
 
@@ -451,7 +444,18 @@ int main(int argc, char** argv)
     zoom = glm::length(cam.position - ogLookAt);
 
     // Initialize CUDA and GL components
+    // IMPORTANT: initCuda() → cudaGLSetGLDevice(0) must be called BEFORE
+    // any other CUDA API calls (including cudaEventCreate in profiler init).
     init();
+
+    // Profiler init must come AFTER initCuda() so that CUDA-GL interop is
+    // properly configured before cudaEventCreate touches the CUDA runtime.
+    g_profiler().init(profCfg);
+
+    // Graceful CSV write on any exit path (Esc key, completion, etc.)
+    if (profCfg.enabled) {
+        atexit([]() { g_profiler().shutdown(); });
+    }
 
     // Initialize ImGui Data
     InitImguiData(guiData);
