@@ -2,6 +2,7 @@
 #include <cuda_runtime.h>
 #include "common.h"
 #include "efficient.h"
+#include "kernel_config.h"
 
 // Include PathSegment definition (need full definition, not just forward declaration)
 #include "../src/sceneStructs.h"
@@ -15,7 +16,11 @@ namespace StreamCompaction {
             return timer;
         }
 
-        const int blockSize = 128;
+        // Cache device info at startup
+        static DeviceInfo& getDeviceInfo() {
+            static DeviceInfo& info = DeviceInfo::getInstance();
+            return info;
+        }
 
         /**
          * Up-sweep (reduce) phase of work-efficient scan
@@ -88,11 +93,13 @@ namespace StreamCompaction {
 
             // Up-sweep phase
             for (int d = 0; d < ilog2ceil(paddedN); d++) {
-                //Thread Compaction
+                // Thread Compaction: compute number of active threads
                 int numThreads = paddedN / (1 << (d + 1));
-                dim3 fullBlocksPerGrid((numThreads + blockSize - 1) / blockSize);
                 
-                kernUpSweep<<<fullBlocksPerGrid, blockSize>>>(paddedN, d, dev_data);
+                // Use dynamic kernel configuration
+                KernelConfig config(numThreads);
+                
+                kernUpSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_data);
                 checkCUDAError("kernUpSweep failed");
             }
             
@@ -101,11 +108,13 @@ namespace StreamCompaction {
             
             // Down-sweep phase
             for (int d = ilog2ceil(paddedN) - 1; d >= 0; d--) {
-                //Thread Compaction
+                // Thread Compaction: compute number of active threads
                 int numThreads = paddedN / (1 << (d + 1));
-                dim3 fullBlocksPerGrid((numThreads + blockSize - 1) / blockSize);
                 
-                kernDownSweep<<<fullBlocksPerGrid, blockSize>>>(paddedN, d, dev_data);
+                // Use dynamic kernel configuration
+                KernelConfig config(numThreads);
+                
+                kernDownSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_data);
                 checkCUDAError("kernDownSweep failed");
             }
 
@@ -147,8 +156,8 @@ namespace StreamCompaction {
             timer().startGpuTimer();
 
             // Step 1: Map to boolean
-            dim3 fullBlocksPerGrid((n + blockSize - 1) / blockSize);
-            StreamCompaction::Common::kernMapToBoolean<<<fullBlocksPerGrid, blockSize>>>(n, dev_bools, dev_idata);
+            KernelConfig configMap(n);
+            StreamCompaction::Common::kernMapToBoolean<<<configMap.gridSize, configMap.blockSize>>>(n, dev_bools, dev_idata);
             checkCUDAError("kernMapToBoolean failed");
             
             // Copy bools to indices array and pad with zeros
@@ -161,8 +170,8 @@ namespace StreamCompaction {
             // Up-sweep phase
             for (int d = 0; d < ilog2ceil(paddedN); d++) {
                 int numThreads = paddedN / (1 << (d + 1));
-                dim3 blocks((numThreads + blockSize - 1) / blockSize);
-                kernUpSweep<<<blocks, blockSize>>>(paddedN, d, dev_indices);
+                KernelConfig config(numThreads);
+                kernUpSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_indices);
                 checkCUDAError("kernUpSweep failed");
             }
             
@@ -172,13 +181,14 @@ namespace StreamCompaction {
             // Down-sweep phase
             for (int d = ilog2ceil(paddedN) - 1; d >= 0; d--) {
                 int numThreads = paddedN / (1 << (d + 1));
-                dim3 blocks((numThreads + blockSize - 1) / blockSize);
-                kernDownSweep<<<blocks, blockSize>>>(paddedN, d, dev_indices);
+                KernelConfig config(numThreads);
+                kernDownSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_indices);
                 checkCUDAError("kernDownSweep failed");
             }
             
             // Step 3: Scatter
-            StreamCompaction::Common::kernScatter<<<fullBlocksPerGrid, blockSize>>>(n, dev_odata, dev_idata, dev_bools, dev_indices);
+            KernelConfig configScatter(n);
+            StreamCompaction::Common::kernScatter<<<configScatter.gridSize, configScatter.blockSize>>>(n, dev_odata, dev_idata, dev_bools, dev_indices);
             checkCUDAError("kernScatter failed");
 
             timer().endGpuTimer();
@@ -261,8 +271,8 @@ namespace StreamCompaction {
             checkCUDAError("cudaMalloc failed in compactPathSegments");
 
             // Step 1: Map PathSegments to boolean array
-            dim3 fullBlocksPerGrid((n + blockSize - 1) / blockSize);
-            kernMapPathSegmentToBoolean<<<fullBlocksPerGrid, blockSize>>>(n, dev_bools, dev_idata);
+            KernelConfig configMap(n);
+            kernMapPathSegmentToBoolean<<<configMap.gridSize, configMap.blockSize>>>(n, dev_bools, dev_idata);
             checkCUDAError("kernMapPathSegmentToBoolean failed");
             
             // Copy bools to indices array and pad with zeros
@@ -275,8 +285,8 @@ namespace StreamCompaction {
             // Up-sweep phase
             for (int d = 0; d < ilog2ceil(paddedN); d++) {
                 int numThreads = paddedN / (1 << (d + 1));
-                dim3 blocks((numThreads + blockSize - 1) / blockSize);
-                kernUpSweep<<<blocks, blockSize>>>(paddedN, d, dev_indices);
+                KernelConfig config(numThreads);
+                kernUpSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_indices);
                 checkCUDAError("kernUpSweep failed in compactPathSegments");
             }
             
@@ -286,13 +296,14 @@ namespace StreamCompaction {
             // Down-sweep phase
             for (int d = ilog2ceil(paddedN) - 1; d >= 0; d--) {
                 int numThreads = paddedN / (1 << (d + 1));
-                dim3 blocks((numThreads + blockSize - 1) / blockSize);
-                kernDownSweep<<<blocks, blockSize>>>(paddedN, d, dev_indices);
+                KernelConfig config(numThreads);
+                kernDownSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_indices);
                 checkCUDAError("kernDownSweep failed in compactPathSegments");
             }
             
             // Step 3: Scatter PathSegments to output array
-            kernScatterPathSegment<<<fullBlocksPerGrid, blockSize>>>(n, dev_odata, dev_idata, dev_bools, dev_indices);
+            KernelConfig configScatter(n);
+            kernScatterPathSegment<<<configScatter.gridSize, configScatter.blockSize>>>(n, dev_odata, dev_idata, dev_bools, dev_indices);
             checkCUDAError("kernScatterPathSegment failed");
 
             // Calculate the count of active paths
