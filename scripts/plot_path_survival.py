@@ -51,18 +51,14 @@ def main():
     parser = argparse.ArgumentParser(description="Path survival line chart")
     parser.add_argument("path_survival_csv", help="Path to path_survival CSV")
     parser.add_argument("--output", "-o", default=None,
-                        help="Output PNG path (default: <CSV_stem>/path_survival.png)")
+                        help="Output PNG path (default: same directory as CSV)")
     args = parser.parse_args()
+    
     if args.output is None:
-        stem = Path(args.path_survival_csv).stem
-        # Remove trailing _path_survival or _timing or _summary from stem
-        for suffix in ("_path_survival", "_timing", "_summary"):
-            if stem.endswith(suffix):
-                stem = stem[: -len(suffix)]
-                break
-        out_dir = Path(args.path_survival_csv).parent / stem
-        out_dir.mkdir(parents=True, exist_ok=True)
-        args.output = str(out_dir / "path_survival.png")
+        # Output to the same directory as the CSV file
+        csv_path = Path(args.path_survival_csv)
+        args.output = str(csv_path.parent / "path_survival.png")
+    
     main_raw(args.path_survival_csv, args.output)
 
 

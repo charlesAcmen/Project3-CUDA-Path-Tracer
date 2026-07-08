@@ -45,6 +45,12 @@ static std::string generateTimestamp()
 }
 
 // ---------------------------------------------------------------------------
+// Filesystem utilities (forward declarations)
+// ---------------------------------------------------------------------------
+static void ensureDirectory(const std::string& path);
+static std::string getExperimentDir(const std::string& sceneName, const std::string& timestamp);
+
+// ---------------------------------------------------------------------------
 // Singleton
 // ---------------------------------------------------------------------------
 static Profiler s_profiler;
@@ -91,26 +97,26 @@ void Profiler::init(const ProfilerConfig& cfg)
     m_pathCounts.clear();
     m_pathCounts.reserve(1024);
 
-    printf("[Profiler] Enabled. Output: scripts/%s_%s_*.csv\n",
-           m_cfg.sceneName.c_str(), m_timestamp.c_str());
+    std::string expDir = getExperimentDir(m_cfg.sceneName, m_timestamp);
+    printf("[Profiler] Enabled. Output directory: %s/\n", expDir.c_str());
 }
 
 void Profiler::shutdown()
 {
     if (!m_cfg.enabled) return;
 
-    std::string prefix = "scripts/" + m_cfg.sceneName + "_" + m_timestamp;
+    std::string expDir = getExperimentDir(m_cfg.sceneName, m_timestamp);
 
     if (!m_timingRecords.empty())
     {
-        writeTimingCSV(prefix + "_timing.csv");
-        writeSummaryCSV(prefix + "_summary.csv");
+        writeTimingCSV(expDir + "/timing.csv");
+        writeSummaryCSV(expDir + "/summary.csv");
         printf("[Profiler] Wrote %zu timing records.\n", m_timingRecords.size());
     }
 
     if (!m_pathCounts.empty())
     {
-        writePathSurvivalCSV(prefix + "_path_survival.csv");
+        writePathSurvivalCSV(expDir + "/path_survival.csv");
         printf("[Profiler] Wrote %zu path survival records.\n", m_pathCounts.size());
     }
 
@@ -242,19 +248,34 @@ void Profiler::updateGuiData(GuiDataContainer* guiData)
 // CSV writers (internal)
 // ---------------------------------------------------------------------------
 
-static void ensureScriptsDir()
+// ---------------------------------------------------------------------------
+// Filesystem utilities
+// ---------------------------------------------------------------------------
+
+static void ensureDirectory(const std::string& path)
 {
-    // Create scripts/ in the current working directory if it doesn't exist.
+    // Create directory if it doesn't exist
 #ifdef _WIN32
-    _mkdir("scripts");
+    _mkdir(path.c_str());
 #else
-    mkdir("scripts", 0755);
+    mkdir(path.c_str(), 0755);
 #endif
+}
+
+static std::string getExperimentDir(const std::string& sceneName, const std::string& timestamp)
+{
+    // Structure: profiler_output/<sceneName>_<timestamp>/
+    std::string baseDir = "profiler_output";
+    ensureDirectory(baseDir);
+    
+    std::string expDir = baseDir + "/" + sceneName + "_" + timestamp;
+    ensureDirectory(expDir);
+    
+    return expDir;
 }
 
 void Profiler::writeTimingCSV(const std::string& filepath)
 {
-    ensureScriptsDir();
     std::ofstream f(filepath);
     if (!f.is_open()) {
         printf("[Profiler] ERROR: cannot write %s\n", filepath.c_str());
@@ -277,7 +298,6 @@ void Profiler::writeTimingCSV(const std::string& filepath)
 
 void Profiler::writePathSurvivalCSV(const std::string& filepath)
 {
-    ensureScriptsDir();
     std::ofstream f(filepath);
     if (!f.is_open()) {
         printf("[Profiler] ERROR: cannot write %s\n", filepath.c_str());
@@ -298,7 +318,6 @@ void Profiler::writePathSurvivalCSV(const std::string& filepath)
 
 void Profiler::writeSummaryCSV(const std::string& filepath)
 {
-    ensureScriptsDir();
     if (m_timingRecords.empty()) return;
 
     // Compute per-operation statistics (excluding warmup iterations)

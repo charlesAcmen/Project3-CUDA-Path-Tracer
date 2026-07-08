@@ -370,15 +370,15 @@ int main(int argc, char** argv)
 
     // ---- Parse CLI arguments (after scene file) ----
     ProfilerConfig profCfg;
-    profCfg.sceneName = sceneFile;
-    // Strip path and extension to get a clean scene name
+    
+    // Strip path and extension to get a clean scene name for CSV output
     {
         std::string s = sceneFile;
         size_t slash = s.find_last_of("/\\");
         size_t dot   = s.find_last_of('.');
         if (slash != std::string::npos) s = s.substr(slash + 1);
         if (dot   != std::string::npos) s = s.substr(0, dot);
-        profCfg.sceneName = s;
+        profCfg.sceneName = s;  // e.g., "cornell" from "../scenes/cornell.json"
     }
 
     // Initialize profCfg with runtime defaults from pathtrace.cu

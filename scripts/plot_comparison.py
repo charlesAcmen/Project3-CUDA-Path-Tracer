@@ -90,19 +90,25 @@ def main():
     parser.add_argument("csv_a", help="Config A timing CSV")
     parser.add_argument("csv_b", help="Config B timing CSV")
     parser.add_argument("--output", "-o", default=None,
-                        help="Output PNG path (default: derived from CSV names)")
+                        help="Output PNG path (default: profiler_output/comparisons/)")
     parser.add_argument("--labels", nargs=2, default=None, help="Labels for config A and B")
     args = parser.parse_args()
 
     if args.output is None:
-        stem_a = Path(args.csv_a).stem
-        stem_b = Path(args.csv_b).stem
-        for suf in ("_timing", "_path_survival", "_summary"):
-            if stem_a.endswith(suf): stem_a = stem_a[: -len(suf)]
-            if stem_b.endswith(suf): stem_b = stem_b[: -len(suf)]
-        out_dir = Path(args.csv_a).parent / f"{stem_a}_vs_{stem_b}"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        args.output = str(out_dir / "comparison.png")
+        # Extract experiment names from CSV paths
+        # e.g., profiler_output/cornell_20260708_085529/timing.csv -> cornell_20260708_085529
+        path_a = Path(args.csv_a)
+        path_b = Path(args.csv_b)
+        
+        exp_a = path_a.parent.name  # cornell_20260708_085529
+        exp_b = path_b.parent.name  # cornell_closed_20260708_085541
+        
+        # Create comparisons directory in profiler_output
+        comp_dir = Path("profiler_output/comparisons")
+        comp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate filename
+        args.output = str(comp_dir / f"{exp_a}_vs_{exp_b}.png")
 
     main_raw(args.csv_a, args.csv_b, args.output, list(args.labels) if args.labels else None)
 
