@@ -53,7 +53,7 @@ struct ExtractMaterialId {
 // Runtime configuration (defaults below, overridable via setCompactMethod / setSortByMaterial / setAutoSave)
 // Default: Custom scan compaction (1), material sorting enabled (true)
 // Can be overridden at runtime via --compact=N --sort=0/1 command-line flags
-static int  g_compactMethod  = 1;     // 1 = custom scan-based compaction (from Project 2)
+static int  g_compactMethod  = 1;     // 1 = global-mem scan, 3 = shared-mem scan
 static bool g_sortByMaterial = true;  // true = material sorting enabled
 static bool g_autoSave       = false; // auto-save OFF by default — use --save to enable
 
@@ -633,7 +633,7 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
 
     if (g_compactMethod == 1)
     {
-        // Custom work-efficient scan-based compaction (Project 2)
+        // Global-memory work-efficient scan-based compaction (Project 2)
         int survivors = StreamCompaction::Efficient::compactPathSegments(
             num_paths,
             dev_paths_compacted,   // output
@@ -649,7 +649,25 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
         return (num_paths == 0);
     }
 
-    // Default: g_compactMethod == 2 (Thrust copy_if)
+    if (g_compactMethod == 3)
+    {
+        // Shared-memory multi-block scan-based compaction (GPU Gems 3, Ch. 39)
+        int survivors = StreamCompaction::Efficient::compactPathSegmentsSharedMemory(
+            num_paths,
+            dev_paths_compacted,
+            dev_paths);
+
+        PathSegment* tmp = dev_paths;
+        dev_paths = dev_paths_compacted;
+        dev_paths_compacted = tmp;
+
+        num_paths = survivors;
+
+        prof.cpuStop(ProfilerOp::CompactPaths);
+        return (num_paths == 0);
+    }
+
+    // g_compactMethod == 2 (Thrust copy_if)
     PathSegment* end = thrust::copy_if(
         thrust::device,
         dev_paths, dev_paths + num_paths,

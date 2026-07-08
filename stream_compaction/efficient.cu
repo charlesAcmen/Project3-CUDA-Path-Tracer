@@ -318,5 +318,236 @@ namespace StreamCompaction {
 
             return count;
         }
+
+        // ========================================================================
+        // Shared-memory stream compaction (GPU Gems 3, Chapter 39)
+        // Separate from the global-memory implementation above. Each CUDA block
+        // performs a work-efficient exclusive scan in shared memory; block totals
+        // are scanned recursively and propagated as cross-block offsets.
+        // ========================================================================
+
+        static const int SCAN_BLOCK_SIZE = 256;
+        static const int SCAN_BLOCK_ELEMENTS = SCAN_BLOCK_SIZE * 2;
+
+        /**
+         * Per-block work-efficient exclusive scan using shared memory.
+         * Each thread loads two elements (bank-conflict-free layout) so one CUDA
+         * block processes SCAN_BLOCK_ELEMENTS items.
+         */
+        __global__ void kernBlockExclusiveScan(
+            int n, int *odata, const int *idata, int *blockSums)
+        {
+            __shared__ int temp[2 * SCAN_BLOCK_SIZE];
+
+            int thid = threadIdx.x;
+            int bid = blockIdx.x;
+            int offset = 1;
+
+            int index0 = bid * SCAN_BLOCK_ELEMENTS + 2 * thid;
+            int index1 = index0 + 1;
+
+            temp[2 * thid]     = (index0 < n) ? idata[index0] : 0;
+            temp[2 * thid + 1] = (index1 < n) ? idata[index1] : 0;
+
+            for (int d = SCAN_BLOCK_SIZE >> 1; d > 0; d >>= 1)
+            {
+                __syncthreads();
+                if (thid < d)
+                {
+                    int ai = offset * (2 * thid + 1) - 1;
+                    int bi = offset * (2 * thid + 2) - 1;
+                    temp[bi] += temp[ai];
+                }
+                offset *= 2;
+            }
+
+            if (thid == 0)
+            {
+                blockSums[bid] = temp[2 * SCAN_BLOCK_SIZE - 1];
+                temp[2 * SCAN_BLOCK_SIZE - 1] = 0;
+            }
+
+            for (int d = 1; d < SCAN_BLOCK_SIZE; d <<= 1)
+            {
+                offset >>= 1;
+                __syncthreads();
+                if (thid < d)
+                {
+                    int ai = offset * (2 * thid + 1) - 1;
+                    int bi = offset * (2 * thid + 2) - 1;
+                    int t = temp[ai];
+                    temp[ai] = temp[bi];
+                    temp[bi] += t;
+                }
+            }
+            __syncthreads();
+
+            if (index0 < n) odata[index0] = temp[2 * thid];
+            if (index1 < n) odata[index1] = temp[2 * thid + 1];
+        }
+
+        /**
+         * Adds the exclusive-scan offset of each block to that block's elements.
+         */
+        __global__ void kernAddBlockOffsets(int n, int *data, const int *blockOffsets)
+        {
+            int bid = blockIdx.x;
+            int thid = threadIdx.x;
+
+            int index0 = bid * SCAN_BLOCK_ELEMENTS + 2 * thid;
+            int index1 = index0 + 1;
+            int offset = blockOffsets[bid];
+
+            if (index0 < n) data[index0] += offset;
+            if (index1 < n) data[index1] += offset;
+        }
+
+        /**
+         * Device-side exclusive prefix sum using shared memory across multiple
+         * blocks (internal helper for the shared-memory API below).
+         */
+        static void scanExclusiveSharedMemoryDevice(
+            int n, int *dev_odata, const int *dev_idata)
+        {
+            if (n <= 0)
+            {
+                return;
+            }
+
+            int numBlocks = (n + SCAN_BLOCK_ELEMENTS - 1) / SCAN_BLOCK_ELEMENTS;
+
+            int *dev_blockSums;
+            cudaMalloc((void**)&dev_blockSums, numBlocks * sizeof(int));
+            checkCUDAError("cudaMalloc dev_blockSums failed");
+
+            kernBlockExclusiveScan<<<numBlocks, SCAN_BLOCK_SIZE>>>(
+                n, dev_odata, dev_idata, dev_blockSums);
+            checkCUDAError("kernBlockExclusiveScan failed");
+
+            if (numBlocks > 1)
+            {
+                int *dev_blockOffsets;
+                cudaMalloc((void**)&dev_blockOffsets, numBlocks * sizeof(int));
+                checkCUDAError("cudaMalloc dev_blockOffsets failed");
+
+                scanExclusiveSharedMemoryDevice(numBlocks, dev_blockOffsets, dev_blockSums);
+
+                kernAddBlockOffsets<<<numBlocks, SCAN_BLOCK_SIZE>>>(
+                    n, dev_odata, dev_blockOffsets);
+                checkCUDAError("kernAddBlockOffsets failed");
+
+                cudaFree(dev_blockOffsets);
+            }
+
+            cudaFree(dev_blockSums);
+        }
+
+        /**
+         * Host-side exclusive prefix sum using shared-memory multi-block scan.
+         * Parallel API to scan() (global memory).
+         */
+        void scanSharedMemory(int n, int *odata, const int *idata)
+        {
+            int *dev_data;
+            cudaMalloc((void**)&dev_data, n * sizeof(int));
+            checkCUDAError("cudaMalloc dev_data failed");
+
+            cudaMemcpy(dev_data, idata, n * sizeof(int), cudaMemcpyHostToDevice);
+            checkCUDAError("cudaMemcpy to device failed");
+
+            timer().startGpuTimer();
+            scanExclusiveSharedMemoryDevice(n, dev_data, dev_data);
+            timer().endGpuTimer();
+
+            cudaMemcpy(odata, dev_data, n * sizeof(int), cudaMemcpyDeviceToHost);
+            checkCUDAError("cudaMemcpy to host failed");
+
+            cudaFree(dev_data);
+        }
+
+        /**
+         * Host-side stream compaction using shared-memory scan.
+         * Parallel API to compact() (global memory).
+         */
+        int compactSharedMemory(int n, int *odata, const int *idata)
+        {
+            int *dev_idata, *dev_bools, *dev_indices, *dev_odata;
+            cudaMalloc((void**)&dev_idata, n * sizeof(int));
+            cudaMalloc((void**)&dev_bools, n * sizeof(int));
+            cudaMalloc((void**)&dev_indices, n * sizeof(int));
+            cudaMalloc((void**)&dev_odata, n * sizeof(int));
+            checkCUDAError("cudaMalloc failed");
+
+            cudaMemcpy(dev_idata, idata, n * sizeof(int), cudaMemcpyHostToDevice);
+            checkCUDAError("cudaMemcpy to device failed");
+
+            timer().startGpuTimer();
+
+            KernelConfig configMap(n);
+            StreamCompaction::Common::kernMapToBoolean<<<configMap.gridSize, configMap.blockSize>>>(
+                n, dev_bools, dev_idata);
+            checkCUDAError("kernMapToBoolean failed");
+
+            cudaMemcpy(dev_indices, dev_bools, n * sizeof(int), cudaMemcpyDeviceToDevice);
+            scanExclusiveSharedMemoryDevice(n, dev_indices, dev_indices);
+
+            KernelConfig configScatter(n);
+            StreamCompaction::Common::kernScatter<<<configScatter.gridSize, configScatter.blockSize>>>(
+                n, dev_odata, dev_idata, dev_bools, dev_indices);
+            checkCUDAError("kernScatter failed");
+
+            timer().endGpuTimer();
+
+            int lastBool, lastIndex;
+            cudaMemcpy(&lastBool, dev_bools + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&lastIndex, dev_indices + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            int count = lastIndex + lastBool;
+
+            cudaMemcpy(odata, dev_odata, count * sizeof(int), cudaMemcpyDeviceToHost);
+            checkCUDAError("cudaMemcpy to host failed");
+
+            cudaFree(dev_idata);
+            cudaFree(dev_bools);
+            cudaFree(dev_indices);
+            cudaFree(dev_odata);
+
+            return count;
+        }
+
+        /**
+         * Device-side PathSegment stream compaction using shared-memory scan.
+         * Parallel API to compactPathSegments() (global memory).
+         */
+        int compactPathSegmentsSharedMemory(
+            int n, PathSegment *dev_odata, const PathSegment *dev_idata)
+        {
+            int *dev_bools, *dev_indices;
+            cudaMalloc((void**)&dev_bools, n * sizeof(int));
+            cudaMalloc((void**)&dev_indices, n * sizeof(int));
+            checkCUDAError("cudaMalloc failed in compactPathSegmentsSharedMemory");
+
+            KernelConfig configMap(n);
+            kernMapPathSegmentToBoolean<<<configMap.gridSize, configMap.blockSize>>>(
+                n, dev_bools, dev_idata);
+            checkCUDAError("kernMapPathSegmentToBoolean failed");
+
+            cudaMemcpy(dev_indices, dev_bools, n * sizeof(int), cudaMemcpyDeviceToDevice);
+            scanExclusiveSharedMemoryDevice(n, dev_indices, dev_indices);
+
+            KernelConfig configScatter(n);
+            kernScatterPathSegment<<<configScatter.gridSize, configScatter.blockSize>>>(
+                n, dev_odata, dev_idata, dev_bools, dev_indices);
+            checkCUDAError("kernScatterPathSegment failed");
+
+            int lastBool, lastIndex;
+            cudaMemcpy(&lastBool, dev_bools + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&lastIndex, dev_indices + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            int count = lastIndex + lastBool;
+
+            cudaFree(dev_bools);
+            cudaFree(dev_indices);
+
+            return count;
+        }
     }
 }
