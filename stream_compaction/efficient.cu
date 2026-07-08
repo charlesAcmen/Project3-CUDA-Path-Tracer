@@ -322,8 +322,14 @@ namespace StreamCompaction {
          * Device-side exclusive prefix sum using shared memory across multiple
          * blocks (internal helper for the shared-memory API below).
          * 
-         * This uses fixed block configuration optimized for shared memory usage.
-         * SCAN_BLOCK_SIZE is chosen to balance occupancy and shared memory usage.
+         * Algorithm:
+         * 1. Each block performs local exclusive scan on SCAN_BLOCK_ELEMENTS items
+         * 2. Collect the sum from each block into blockSums array
+         * 3. Recursively scan blockSums to get per-block offsets
+         * 4. Add the offsets back to each block's results
+         * 
+         * Complexity: O(n) work, O(log n) depth
+         * Recursion depth: ~log₅₁₂(n), safe for any practical input size
          */
         static void scanExclusiveSharedMemoryDevice(
             int n, int *dev_odata, const int *dev_idata)
@@ -339,28 +345,31 @@ namespace StreamCompaction {
             cudaMalloc((void**)&dev_blockSums, numBlocks * sizeof(int));
             checkCUDAError("cudaMalloc dev_blockSums failed");
 
-            // Use fixed block size for shared memory scan
-            // (SCAN_BLOCK_SIZE is tuned for shared memory layout)
+            // Step 1: Per-block exclusive scan, save each block's total sum
             kernBlockExclusiveScan<<<numBlocks, SCAN_BLOCK_SIZE>>>(
                 n, dev_odata, dev_idata, dev_blockSums);
             checkCUDAError("kernBlockExclusiveScan failed");
 
+            // Step 2: If multiple blocks, compute cross-block offsets
             if (numBlocks > 1)
             {
                 int *dev_blockOffsets;
                 cudaMalloc((void**)&dev_blockOffsets, numBlocks * sizeof(int));
                 checkCUDAError("cudaMalloc dev_blockOffsets failed");
 
-                // Recursively scan block sums
+                // Recursively scan block sums to get per-block offsets
+                // Input: dev_blockSums (each block's total)
+                // Output: dev_blockOffsets (cumulative sum = offset for each block)
                 scanExclusiveSharedMemoryDevice(numBlocks, dev_blockOffsets, dev_blockSums);
 
-                // Add block offsets back
+                // Step 3: Add block offsets to each block's local scan results
                 kernAddBlockOffsets<<<numBlocks, SCAN_BLOCK_SIZE>>>(
                     n, dev_odata, dev_blockOffsets);
                 checkCUDAError("kernAddBlockOffsets failed");
 
                 cudaFree(dev_blockOffsets);
             }
+            // else: single block, no cross-block offsets needed
 
             cudaFree(dev_blockSums);
         }
