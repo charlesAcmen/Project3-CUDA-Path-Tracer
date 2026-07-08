@@ -29,8 +29,21 @@ struct ProfilerConfig {
     bool        verbose        = false;    // Control debug printf output
     int         warmupIters    = 3;
     std::string sceneName      = "unknown";
-    int         compactMethod  = 2;       // 0=none, 1=custom, 2=Thrust
-    bool        sortByMaterial = false;   // overridden by --sort=0/1 at runtime
+    
+    // IMPORTANT: These fields are for CSV metadata tagging ONLY, not for controlling runtime behavior.
+    // They are written to every CSV row so plotting scripts can generate correct labels.
+    // 
+    // Runtime behavior is controlled by g_compactMethod and g_sortByMaterial in pathtrace.cu.
+    // 
+    // Synchronization happens in main.cpp:
+    //   1. profCfg is initialized by calling getCompactMethod() and getSortByMaterial()
+    //   2. If command-line flags (--compact=N --sort=0/1) are provided, they override both
+    //      profCfg fields AND pathtrace.cu runtime variables (via setters)
+    // 
+    // This ensures CSV metadata always matches actual runtime configuration, and you only
+    // need to change defaults in ONE place (pathtrace.cu).
+    int         compactMethod  = 1;       // 0=none, 1=custom, 2=Thrust (placeholder, auto-synced from pathtrace.cu)
+    bool        sortByMaterial = true;    // placeholder, auto-synced from pathtrace.cu
 };
 
 // ---------------------------------------------------------------------------

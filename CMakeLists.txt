@@ -109,41 +109,58 @@ source_group("ImGui\\Sources" FILES ${imgui_sources})
 add_subdirectory(stream_compaction)
 
 # Helper function to create path tracer executable with specific configuration
-function(add_pathtracer_executable target_name sort_by_material_default compact_method_default)
-    add_executable(${target_name} ${sources} ${headers} ${imgui_sources} ${imgui_headers})
-    target_link_libraries(${target_name}
-        ${GL_LIBRARIES}
-        stream_compaction
-    )
-    set_target_properties(${target_name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-    set_target_properties(${target_name} PROPERTIES CUDA_ARCHITECTURES native)
-
-    # Runtime-configurable defaults (overridable at runtime via --compact=N --sort=N)
-    target_compile_definitions(${target_name} PRIVATE
-        COMPACT_METHOD_DEFAULT=${compact_method_default}
-        SORT_BY_MATERIAL_DEFAULT=${sort_by_material_default}
-    )
-    
-    target_compile_options(${target_name} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
-    target_compile_options(${target_name} PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo;-src-in-ptx>")
-    
-    # Force UTF-8 encoding for all source files on Windows/MSVC.
-    if(MSVC)
-        target_compile_options(${target_name} PRIVATE
-            "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
-            "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>"
-        )
-    endif()
-endfunction()
+# (Currently not used - all configuration is runtime-based via command-line flags)
+#function(add_pathtracer_executable target_name sort_by_material_default compact_method_default)
+#    add_executable(${target_name} ${sources} ${headers} ${imgui_sources} ${imgui_headers})
+#    target_link_libraries(${target_name}
+#        ${GL_LIBRARIES}
+#        stream_compaction
+#    )
+#    set_target_properties(${target_name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+#    set_target_properties(${target_name} PROPERTIES CUDA_ARCHITECTURES native)
+#
+#    # Runtime-configurable defaults (overridable at runtime via --compact=N --sort=N)
+#    target_compile_definitions(${target_name} PRIVATE
+#        COMPACT_METHOD_DEFAULT=${compact_method_default}
+#        SORT_BY_MATERIAL_DEFAULT=${sort_by_material_default}
+#    )
+#    
+#    target_compile_options(${target_name} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
+#    target_compile_options(${target_name} PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo;-src-in-ptx>")
+#    
+#    # Force UTF-8 encoding for all source files on Windows/MSVC.
+#    if(MSVC)
+#        target_compile_options(${target_name} PRIVATE
+#            "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
+#            "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>"
+#        )
+#    endif()
+#endfunction()
 
 # Single executable — all tuning flags are controlled at runtime:
 #   --compact=N  (0=off, 1=custom scan, 2=Thrust copy_if)
 #   --sort=0/1   (disable/enable material sorting before shade)
 #   --benchmark  (enable CSV profiler output)
 #
-# Compile-time defaults only matter when no -- flag is passed.
-# Default: Thrust compaction ON, material sorting OFF.
-add_pathtracer_executable(${CMAKE_PROJECT_NAME} 0 2)
+# Defaults are set in pathtrace.cu and can be overridden at runtime.
+add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers} ${imgui_sources} ${imgui_headers})
+target_link_libraries(${CMAKE_PROJECT_NAME}
+    ${GL_LIBRARIES}
+    stream_compaction
+)
+set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES native)
+
+target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
+target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo;-src-in-ptx>")
+
+# Force UTF-8 encoding for all source files on Windows/MSVC.
+if(MSVC)
+    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
+        "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>"
+    )
+endif()
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
 

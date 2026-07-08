@@ -51,8 +51,10 @@ struct ExtractMaterialId {
 };
 
 // Runtime configuration (defaults below, overridable via setCompactMethod / setSortByMaterial / setAutoSave)
-static int  g_compactMethod  = 2;     // Thrust copy_if
-static bool g_sortByMaterial = false; // sorting OFF by default — use --sort=1 to enable
+// Default: Custom scan compaction (1), material sorting enabled (true)
+// Can be overridden at runtime via --compact=N --sort=0/1 command-line flags
+static int  g_compactMethod  = 1;     // 1 = custom scan-based compaction (from Project 2)
+static bool g_sortByMaterial = true;  // true = material sorting enabled
 static bool g_autoSave       = false; // auto-save OFF by default — use --save to enable
 
 void setCompactMethod(int method)   { g_compactMethod = method; }

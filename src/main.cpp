@@ -381,6 +381,11 @@ int main(int argc, char** argv)
         profCfg.sceneName = s;
     }
 
+    // Initialize profCfg with runtime defaults from pathtrace.cu
+    // This ensures CSV metadata matches actual runtime behavior when no flags are provided
+    profCfg.compactMethod = getCompactMethod();
+    profCfg.sortByMaterial = getSortByMaterial();
+
     for (int i = 2; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--benchmark") {
