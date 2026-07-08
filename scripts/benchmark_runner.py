@@ -38,18 +38,23 @@ CONFIGS_FULL = CONFIGS_QUICK + [
 ]
 
 
-def find_latest_csvs(scripts_dir: str, scene_name: str) -> list[str]:
-    """Find the most recently created CSV files for a scene."""
-    pattern = f"{scripts_dir}/{scene_name}_*_timing.csv"
-    files = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
-    if not files:
+def find_latest_csvs(output_dir: str, scene_name: str) -> list[str]:
+    """Find the most recently created CSV files for a scene.
+
+    CSVs are written by the C++ profiler to:
+        profiler_output/<scene_name>_<timestamp>/
+    Each directory contains timing.csv, path_survival.csv, summary.csv.
+    """
+    # Match directory pattern: profiler_output/<scene>_<YYYYMMDD_HHMMSS>/
+    pattern = f"{output_dir}/{scene_name}_*"
+    dirs = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+    if not dirs:
         return []
-    # Group by timestamp
-    latest_time = files[0].split(f"{scene_name}_")[1].rsplit("_timing.csv")[0]
+    latest_dir = dirs[0]
     return [
-        f"{scripts_dir}/{scene_name}_{latest_time}_timing.csv",
-        f"{scripts_dir}/{scene_name}_{latest_time}_path_survival.csv",
-        f"{scripts_dir}/{scene_name}_{latest_time}_summary.csv",
+        f"{latest_dir}/timing.csv",
+        f"{latest_dir}/path_survival.csv",
+        f"{latest_dir}/summary.csv",
     ]
 
 
@@ -93,8 +98,8 @@ def main():
                         help="Path to closed scene")
     parser.add_argument("--configs", choices=["all", "quick"], default="quick",
                         help="Which configurations to run")
-    parser.add_argument("--output-dir", "-d", default="scripts",
-                        help="Directory for CSV output (where profiler writes)")
+    parser.add_argument("--output-dir", "-d", default="profiler_output",
+                        help="Directory where the C++ profiler writes CSV output")
     parser.add_argument("--warmup", type=int, default=3,
                         help="Warmup iterations excluded from stats")
     args = parser.parse_args()
