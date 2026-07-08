@@ -52,7 +52,7 @@ def main_raw(timing_csv: str, output: str) -> None:
         for i in range(len(bounces)):
             bottom[i] += means[op][i]
 
-    ax.set_xlabel("Bounce Depth")
+    ax.set_xlabel("Bounce Depth (0 = Primary Rays)")
     ax.set_ylabel("Mean Time (ms)")
     ax.set_title(f"Per-Bounce Kernel Breakdown — {label}")
     ax.legend(loc="upper right")
