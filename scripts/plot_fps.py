@@ -1,29 +1,26 @@
-"""FPS comparison: mean iterations-per-second across configurations.
+"""Render FPS comparison with stability metrics.
 
-Reads frame_times.csv from one or more experiment directories and produces:
-  - Grouped bar chart comparing mean FPS (1000 / frame_time_ms)
-  - FPS = iterations per second of the core bounce loop
-    (excludes finalGather / sendImageToPBO / cudaMemcpy).
+Reads frame_times.csv (wall time of full pathtrace() call per iteration)
+and produces a grouped bar chart showing:
+  - Mean render FPS (1000 / frame_time_ms) with ±1σ error bars
+  - Numeric labels: "FPS ± σ"
+  - CV% (coefficient of variation) below each bar for stability assessment
 
 Usage:
-    python plot_fps.py <csv_a> [csv_b ...] [--labels "A" "B" ...] [-o out.png]
-
-    # Called programmatically by benchmark_runner:
-    plot_fps.main_raw(csv_paths, labels, output)
+    python plot_fps.py <csv> [csv ...] [--labels "A" "B"] [-o out.png]
+    plot_fps.main_raw(csv_paths, labels, output)  # programmatic
 """
 
 import argparse
 import sys
-from collections import defaultdict
 import numpy as np
 import matplotlib.pyplot as plt
 
 
 def _read_frame_times(filepath: str) -> list[float]:
-    """Parse frame_times.csv, return list of frame_time_ms values."""
     times = []
     with open(filepath, "r", newline="") as f:
-        header = f.readline()  # skip header
+        next(f)  # header
         for line in f:
             parts = line.strip().split(",")
             if len(parts) >= 2:
@@ -31,18 +28,7 @@ def _read_frame_times(filepath: str) -> list[float]:
     return times
 
 
-def _label_from_csv(csv_path: str) -> str:
-    """Derive a compact label from the experiment directory name."""
-    import os
-    dname = os.path.basename(os.path.dirname(csv_path))
-    parts = dname.split("_")
-    if len(parts) >= 2:
-        return parts[0]  # e.g. "cornell" or "cornell"
-    return dname
-
-
 def main_raw(csv_paths: list[str], labels: list[str], output: str) -> None:
-    """Programmatic entry point (called by benchmark_runner)."""
     all_times = []
     for path in csv_paths:
         times = _read_frame_times(path)
@@ -52,29 +38,47 @@ def main_raw(csv_paths: list[str], labels: list[str], output: str) -> None:
         all_times.append(times)
 
     if labels is None or len(labels) != len(csv_paths):
-        labels = [_label_from_csv(p) for p in csv_paths]
+        labels = [f"Config {i}" for i in range(len(csv_paths))]
 
-    means_fps = [1000.0 / np.mean(t) for t in all_times]
-    stds_fps  = [1000.0 * np.std(t) / (np.mean(t) ** 2) for t in all_times]
-    # ^ first-order propagation: std(FPS) ≈ 1000 * std(ms) / mean(ms)^2
+    means_ms = [np.mean(t) for t in all_times]
+    stds_ms  = [np.std(t, ddof=1) for t in all_times]
+    means_fps = [1000.0 / m for m in means_ms]
+    # Propagation: σ_FPS ≈ (1000 / μ²) · σ_ms
+    stds_fps  = [1000.0 * s / (m * m) for m, s in zip(means_ms, stds_ms)]
+    cv_pct     = [100.0 * s / m for m, s in zip(means_ms, stds_ms)]
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    colors = ["#4C78A8", "#F58518", "#E45756", "#72B7B2", "#B279A2"]
+
+    fig, ax = plt.subplots(figsize=(max(8, 2.2 * len(labels)), 6))
 
     x = np.arange(len(labels))
-    bars = ax.bar(x, means_fps, yerr=stds_fps, capsize=6,
-                  color=["#4C78A8", "#F58518", "#E45756", "#72B7B2", "#B279A2"][:len(labels)],
-                  edgecolor="white", linewidth=0.5)
+    bars = ax.bar(x, means_fps, yerr=stds_fps, capsize=8, width=0.55,
+                  color=colors[:len(labels)],
+                  edgecolor="white", linewidth=0.8,
+                  error_kw={"linewidth": 1.5, "ecolor": "#333333"})
 
-    # Annotate bars with FPS value
-    for bar, fps in zip(bars, means_fps):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + max(stds_fps) * 0.1,
-                f"{fps:.1f}", ha="center", va="bottom", fontsize=10, fontweight="bold")
+    # FPS value + σ above each bar
+    y_offset = max(stds_fps) * 0.15 if max(stds_fps) > 0 else 1.0
+    for bar, fps, std, cv in zip(bars, means_fps, stds_fps, cv_pct):
+        h = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, h + std + y_offset,
+                f"{fps:.1f} ± {std:.1f}",
+                ha="center", va="bottom", fontsize=10, fontweight="bold")
+        # Stability metric below bar
+        ax.text(bar.get_x() + bar.get_width() / 2, max(h * 0.02, 0.3),
+                f"CV {cv:.1f}%",
+                ha="center", va="bottom", fontsize=8, color="white",
+                fontweight="bold")
 
-    ax.set_ylabel("Iterations / Second (FPS)")
-    ax.set_title("Bounce-Loop Throughput by Configuration")
+    ax.set_ylabel("Render FPS  (iterations / second)")
+    ax.set_title("Render Throughput by Configuration\n"
+                 "(full frame: primary rays → bounce loop → finalGather → PBO → cudaMemcpy)\n"
+                 "Error bars = ±1σ  |  CV% = std/mean — lower = more stable",
+                 fontsize=10)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=15, ha="right")
-    ax.grid(axis="y", alpha=0.3)
+    ax.set_xticklabels(labels, rotation=15, ha="right", fontsize=9)
+    ax.set_ylim(0, max(means_fps) * 1.35)
+    ax.grid(axis="y", alpha=0.25)
     fig.tight_layout()
     fig.savefig(output, dpi=150)
     print(f"Saved {output}")
@@ -83,14 +87,11 @@ def main_raw(csv_paths: list[str], labels: list[str], output: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="FPS (iterations/sec) comparison from frame_times.csv")
-    parser.add_argument("csvs", nargs="+", help="One or more frame_times.csv paths")
-    parser.add_argument("--labels", nargs="*", default=None,
-                        help="Labels for each CSV (same order)")
-    parser.add_argument("--output", "-o", default="fps_comparison.png",
-                        help="Output PNG path")
+        description="Render FPS comparison from frame_times.csv")
+    parser.add_argument("csvs", nargs="+", help="frame_times.csv paths")
+    parser.add_argument("--labels", nargs="*", default=None, help="Config labels")
+    parser.add_argument("--output", "-o", default="fps_comparison.png")
     args = parser.parse_args()
-
     main_raw(args.csvs, args.labels, args.output)
 
 

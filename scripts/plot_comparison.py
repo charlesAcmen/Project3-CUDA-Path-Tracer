@@ -1,21 +1,10 @@
-"""Grouped bar chart: compare two configurations per-operation.
-
-Compares mean execution time for each operation (ShadeMaterial, GatherTerminatedPaths, 
-SortByMaterial, CompactPaths) across two different configurations.
-
-Configurations can differ in:
-  - Compaction method (none/custom/Thrust)
-  - Material sorting (on/off)
-  - Scene geometry (open/closed)
-  - Or any other parameter
+"""Grouped bar chart: compare two configurations per-operation with value labels.
 
 Usage:
-    python plot_comparison.py <timing_csv_A> <timing_csv_B> [--output comparison.png]
-                             [--labels "Config A" "Config B"]
-    
-    Example:
-    python plot_comparison.py open_timing.csv closed_timing.csv --labels "Open Scene" "Closed Scene"
+    python plot_comparison.py <csv_a> <csv_b> [--labels "A" "B"] [-o out.png]
+    plot_comparison.main_raw(csv_a, csv_b, output, labels)
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -25,17 +14,16 @@ import matplotlib.pyplot as plt
 import profiler_utils as pu
 
 OP_COLORS = {
-    "ComputeIntersections": "#B279A2",
-    "ShadeMaterial": "#4C78A8",
+    "ComputeIntersections":  "#B279A2",
+    "ShadeMaterial":         "#4C78A8",
     "GatherTerminatedPaths": "#F58518",
-    "SortByMaterial": "#E45756",
-    "CompactPaths": "#72B7B2",
+    "SortByMaterial":        "#E45756",
+    "CompactPaths":          "#72B7B2",
 }
 
 
 def main_raw(csv_a: str, csv_b: str, output: str,
              labels: list = None) -> None:
-    """Programmatic entry point (called by benchmark_runner)."""
     rows_a = pu.parse_timing_csv(csv_a)
     rows_b = pu.parse_timing_csv(csv_b)
     if not rows_a or not rows_b:
@@ -49,37 +37,52 @@ def main_raw(csv_a: str, csv_b: str, output: str,
         label_b = pu.scalar_to_label(rows_b[0]["compact_method"], rows_b[0]["sort_by_material"])
 
     def collect_stats(rows):
-        # Collect all timing measurements for each operation (across all iterations and bounces)
         op_times = defaultdict(list)
         for r in rows:
             op_times[r["operation"]].append(r["time_ms"])
         ops = sorted(op_times.keys())
         means = [np.mean(op_times[op]) for op in ops]
-        return ops, means
+        stds  = [np.std(op_times[op], ddof=1) for op in ops]
+        return ops, means, stds
 
-    ops_a, means_a = collect_stats(rows_a)
-    ops_b, means_b = collect_stats(rows_b)
+    ops_a, ma, sa = collect_stats(rows_a)
+    ops_b, mb, sb = collect_stats(rows_b)
     all_ops = sorted(set(ops_a) | set(ops_b))
 
-    def aligned(o_list, m_list):
-        return [m_list[o_list.index(op)] if op in o_list else 0.0 for op in all_ops]
+    def aligned(o_list, m_list, s_list):
+        return ([m_list[o_list.index(op)] if op in o_list else 0.0 for op in all_ops],
+                [s_list[o_list.index(op)] if op in o_list else 0.0 for op in all_ops])
 
-    ma = aligned(ops_a, means_a)
-    mb = aligned(ops_b, means_b)
+    ma_al, sa_al = aligned(ops_a, ma, sa)
+    mb_al, sb_al = aligned(ops_b, mb, sb)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(max(9, 1.5 * len(all_ops)), 6))
     x = np.arange(len(all_ops))
     width = 0.35
 
-    ax.bar(x - width/2, ma, width, label=label_a, color="#4C78A8", edgecolor="white")
-    ax.bar(x + width/2, mb, width, label=label_b, color="#F58518", edgecolor="white")
+    bar_a = ax.bar(x - width / 2, ma_al, width, yerr=sa_al, capsize=4,
+                   label=label_a, color="#4C78A8", edgecolor="white",
+                   error_kw={"linewidth": 1.0})
+    bar_b = ax.bar(x + width / 2, mb_al, width, yerr=sb_al, capsize=4,
+                   label=label_b, color="#F58518", edgecolor="white",
+                   error_kw={"linewidth": 1.0})
+
+    # Value labels on each bar
+    for bars, vals, stds in [(bar_a, ma_al, sa_al), (bar_b, mb_al, sb_al)]:
+        for bar, val, std in zip(bars, vals, stds):
+            if val > 0.001:
+                ax.text(bar.get_x() + bar.get_width() / 2,
+                        bar.get_height() + std + max(sa_al + sb_al) * 0.02,
+                        f"{val:.3f}",
+                        ha="center", va="bottom", fontsize=7.5,
+                        fontweight="bold")
 
     ax.set_ylabel("Mean Time (ms)")
-    ax.set_title("Per-Operation Comparison")
+    ax.set_title(f"Per-Operation Comparison\n{label_a}  vs  {label_b}")
     ax.set_xticks(x)
     ax.set_xticklabels(all_ops, rotation=15, ha="right")
-    ax.legend()
-    ax.grid(axis="y", alpha=0.3)
+    ax.legend(fontsize=9)
+    ax.grid(axis="y", alpha=0.25)
     fig.tight_layout()
     fig.savefig(output, dpi=150)
     print(f"Saved {output}")
@@ -90,28 +93,19 @@ def main():
     parser = argparse.ArgumentParser(description="A/B comparison grouped bar chart")
     parser.add_argument("csv_a", help="Config A timing CSV")
     parser.add_argument("csv_b", help="Config B timing CSV")
-    parser.add_argument("--output", "-o", default=None,
-                        help="Output PNG path (default: profiler_output/comparisons/)")
-    parser.add_argument("--labels", nargs=2, default=None, help="Labels for config A and B")
+    parser.add_argument("--output", "-o", default=None)
+    parser.add_argument("--labels", nargs=2, default=None)
     args = parser.parse_args()
 
     if args.output is None:
-        # Extract experiment names from CSV paths
-        # e.g., profiler_output/cornell_20260708_085529/timing.csv -> cornell_20260708_085529
         path_a = Path(args.csv_a)
         path_b = Path(args.csv_b)
-        
-        exp_a = path_a.parent.name  # cornell_20260708_085529
-        exp_b = path_b.parent.name  # cornell_closed_20260708_085541
-        
-        # Create comparisons directory in profiler_output
         comp_dir = Path("profiler_output/comparisons")
         comp_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Generate filename
-        args.output = str(comp_dir / f"{exp_a}_vs_{exp_b}.png")
+        args.output = str(comp_dir / f"{path_a.parent.name}_vs_{path_b.parent.name}.png")
 
-    main_raw(args.csv_a, args.csv_b, args.output, list(args.labels) if args.labels else None)
+    main_raw(args.csv_a, args.csv_b, args.output,
+             list(args.labels) if args.labels else None)
 
 
 if __name__ == "__main__":
