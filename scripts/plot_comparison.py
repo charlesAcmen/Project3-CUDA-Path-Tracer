@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 import profiler_utils as pu
 
 OP_COLORS = {
+    "ComputeIntersections": "#B279A2",
     "ShadeMaterial": "#4C78A8",
     "GatherTerminatedPaths": "#F58518",
     "SortByMaterial": "#E45756",

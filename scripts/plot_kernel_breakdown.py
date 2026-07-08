@@ -12,6 +12,7 @@ import profiler_utils as pu
 
 # Fixed color per operation
 OP_COLORS = {
+    "ComputeIntersections": "#B279A2",
     "ShadeMaterial": "#4C78A8",
     "GatherTerminatedPaths": "#F58518",
     "SortByMaterial": "#E45756",
@@ -33,7 +34,7 @@ def main_raw(timing_csv: str, output: str) -> None:
         bounce_ops[r["bounce_depth"]][r["operation"]].append(r["time_ms"])
 
     bounces = sorted(bounce_ops.keys())
-    ops = ["SortByMaterial", "ShadeMaterial", "GatherTerminatedPaths", "CompactPaths"]
+    ops = ["ComputeIntersections", "SortByMaterial", "ShadeMaterial", "GatherTerminatedPaths", "CompactPaths"]
     ops_present = [op for op in ops if any(op in bounce_ops[b] for b in bounces)]
 
     means = {op: [] for op in ops_present}
