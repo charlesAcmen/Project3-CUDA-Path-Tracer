@@ -70,148 +70,6 @@ namespace StreamCompaction {
             data[i] += temp;
         }
 
-        /**
-         * Performs prefix-sum (aka scan) on idata, storing the result into odata.
-         */
-        void scan(int n, int *odata, const int *idata) {
-            // Round up to next power of 2
-            int paddedN = 1 << ilog2ceil(n);
-            
-            // Allocate device memory
-            int *dev_data;
-            cudaMalloc((void**)&dev_data, paddedN * sizeof(int));
-            checkCUDAError("cudaMalloc dev_data failed");
-            
-            // Copy input data and pad with zeros
-            cudaMemcpy(dev_data, idata, n * sizeof(int), cudaMemcpyHostToDevice);
-            if (paddedN > n) {
-                cudaMemset(dev_data + n, 0, (paddedN - n) * sizeof(int));
-            }
-            checkCUDAError("cudaMemcpy to device failed");
-
-            timer().startGpuTimer();
-
-            // Up-sweep phase
-            for (int d = 0; d < ilog2ceil(paddedN); d++) {
-                // Thread Compaction: compute number of active threads
-                int numThreads = paddedN / (1 << (d + 1));
-                
-                // Use dynamic kernel configuration
-                KernelConfig config(numThreads);
-                
-                kernUpSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_data);
-                checkCUDAError("kernUpSweep failed");
-            }
-            
-            // Set root to zero
-            cudaMemset(dev_data + paddedN - 1, 0, sizeof(int));
-            
-            // Down-sweep phase
-            for (int d = ilog2ceil(paddedN) - 1; d >= 0; d--) {
-                // Thread Compaction: compute number of active threads
-                int numThreads = paddedN / (1 << (d + 1));
-                
-                // Use dynamic kernel configuration
-                KernelConfig config(numThreads);
-                
-                kernDownSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_data);
-                checkCUDAError("kernDownSweep failed");
-            }
-
-            timer().endGpuTimer();
-
-            // Copy result back to host
-            cudaMemcpy(odata, dev_data, n * sizeof(int), cudaMemcpyDeviceToHost);
-            checkCUDAError("cudaMemcpy to host failed");
-
-            // Free device memory
-            cudaFree(dev_data);
-        }
-
-        /**
-         * Performs stream compaction on idata, storing the result into odata.
-         * All zeroes are discarded.
-         *
-         * @param n      The number of elements in idata.
-         * @param odata  The array into which to store elements.
-         * @param idata  The array of elements to compact.
-         * @returns      The number of elements remaining after compaction.
-         */
-        int compact(int n, int *odata, const int *idata) {
-            // Round up to next power of 2 for scan
-            int paddedN = 1 << ilog2ceil(n);
-            
-            // Allocate device memory
-            int *dev_idata, *dev_bools, *dev_indices, *dev_odata;
-            cudaMalloc((void**)&dev_idata, n * sizeof(int));
-            cudaMalloc((void**)&dev_bools, n * sizeof(int));
-            cudaMalloc((void**)&dev_indices, paddedN * sizeof(int));
-            cudaMalloc((void**)&dev_odata, n * sizeof(int));
-            checkCUDAError("cudaMalloc failed");
-            
-            // Copy input data to device
-            cudaMemcpy(dev_idata, idata, n * sizeof(int), cudaMemcpyHostToDevice);
-            checkCUDAError("cudaMemcpy to device failed");
-
-            timer().startGpuTimer();
-
-            // Step 1: Map to boolean
-            KernelConfig configMap(n);
-            StreamCompaction::Common::kernMapToBoolean<<<configMap.gridSize, configMap.blockSize>>>(n, dev_bools, dev_idata);
-            checkCUDAError("kernMapToBoolean failed");
-            
-            // Copy bools to indices array and pad with zeros
-            cudaMemcpy(dev_indices, dev_bools, n * sizeof(int), cudaMemcpyDeviceToDevice);
-            if (paddedN > n) {
-                cudaMemset(dev_indices + n, 0, (paddedN - n) * sizeof(int));
-            }
-            
-            // Step 2: Scan (exclusive prefix sum) - inline implementation
-            // Up-sweep phase
-            for (int d = 0; d < ilog2ceil(paddedN); d++) {
-                int numThreads = paddedN / (1 << (d + 1));
-                KernelConfig config(numThreads);
-                kernUpSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_indices);
-                checkCUDAError("kernUpSweep failed");
-            }
-            
-            // Set root to zero
-            cudaMemset(dev_indices + paddedN - 1, 0, sizeof(int));
-            
-            // Down-sweep phase
-            for (int d = ilog2ceil(paddedN) - 1; d >= 0; d--) {
-                int numThreads = paddedN / (1 << (d + 1));
-                KernelConfig config(numThreads);
-                kernDownSweep<<<config.gridSize, config.blockSize>>>(paddedN, d, dev_indices);
-                checkCUDAError("kernDownSweep failed");
-            }
-            
-            // Step 3: Scatter
-            KernelConfig configScatter(n);
-            StreamCompaction::Common::kernScatter<<<configScatter.gridSize, configScatter.blockSize>>>(n, dev_odata, dev_idata, dev_bools, dev_indices);
-            checkCUDAError("kernScatter failed");
-
-            timer().endGpuTimer();
-
-            // Get the count of non-zero elements
-            int lastBool, lastIndex;
-            cudaMemcpy(&lastBool, dev_bools + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
-            cudaMemcpy(&lastIndex, dev_indices + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
-            int count = lastIndex + lastBool;
-            
-            // Copy result back to host
-            cudaMemcpy(odata, dev_odata, count * sizeof(int), cudaMemcpyDeviceToHost);
-            checkCUDAError("cudaMemcpy to host failed");
-
-            // Free device memory
-            cudaFree(dev_idata);
-            cudaFree(dev_bools);
-            cudaFree(dev_indices);
-            cudaFree(dev_odata);
-
-            return count;
-        }
-
         // ========================================================================
         // PathSegment-specific stream compaction kernels
         // ========================================================================
@@ -318,6 +176,43 @@ namespace StreamCompaction {
 
             return count;
         }
+
+        /**
+         * Device-side PathSegment stream compaction using shared-memory scan.
+         * Parallel API to compactPathSegments() (global memory).
+         */
+        int compactPathSegmentsSharedMemory(
+            int n, PathSegment *dev_odata, const PathSegment *dev_idata)
+        {
+            int *dev_bools, *dev_indices;
+            cudaMalloc((void**)&dev_bools, n * sizeof(int));
+            cudaMalloc((void**)&dev_indices, n * sizeof(int));
+            checkCUDAError("cudaMalloc failed in compactPathSegmentsSharedMemory");
+
+            KernelConfig configMap(n);
+            kernMapPathSegmentToBoolean<<<configMap.gridSize, configMap.blockSize>>>(
+                n, dev_bools, dev_idata);
+            checkCUDAError("kernMapPathSegmentToBoolean failed");
+
+            cudaMemcpy(dev_indices, dev_bools, n * sizeof(int), cudaMemcpyDeviceToDevice);
+            scanExclusiveSharedMemoryDevice(n, dev_indices, dev_indices);
+
+            KernelConfig configScatter(n);
+            kernScatterPathSegment<<<configScatter.gridSize, configScatter.blockSize>>>(
+                n, dev_odata, dev_idata, dev_bools, dev_indices);
+            checkCUDAError("kernScatterPathSegment failed");
+
+            int lastBool, lastIndex;
+            cudaMemcpy(&lastBool, dev_bools + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&lastIndex, dev_indices + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            int count = lastIndex + lastBool;
+
+            cudaFree(dev_bools);
+            cudaFree(dev_indices);
+
+            return count;
+        }
+
 
         // ========================================================================
         // Shared-memory stream compaction (GPU Gems 3, Chapter 39)
@@ -440,114 +335,6 @@ namespace StreamCompaction {
             }
 
             cudaFree(dev_blockSums);
-        }
-
-        /**
-         * Host-side exclusive prefix sum using shared-memory multi-block scan.
-         * Parallel API to scan() (global memory).
-         */
-        void scanSharedMemory(int n, int *odata, const int *idata)
-        {
-            int *dev_data;
-            cudaMalloc((void**)&dev_data, n * sizeof(int));
-            checkCUDAError("cudaMalloc dev_data failed");
-
-            cudaMemcpy(dev_data, idata, n * sizeof(int), cudaMemcpyHostToDevice);
-            checkCUDAError("cudaMemcpy to device failed");
-
-            timer().startGpuTimer();
-            scanExclusiveSharedMemoryDevice(n, dev_data, dev_data);
-            timer().endGpuTimer();
-
-            cudaMemcpy(odata, dev_data, n * sizeof(int), cudaMemcpyDeviceToHost);
-            checkCUDAError("cudaMemcpy to host failed");
-
-            cudaFree(dev_data);
-        }
-
-        /**
-         * Host-side stream compaction using shared-memory scan.
-         * Parallel API to compact() (global memory).
-         */
-        int compactSharedMemory(int n, int *odata, const int *idata)
-        {
-            int *dev_idata, *dev_bools, *dev_indices, *dev_odata;
-            cudaMalloc((void**)&dev_idata, n * sizeof(int));
-            cudaMalloc((void**)&dev_bools, n * sizeof(int));
-            cudaMalloc((void**)&dev_indices, n * sizeof(int));
-            cudaMalloc((void**)&dev_odata, n * sizeof(int));
-            checkCUDAError("cudaMalloc failed");
-
-            cudaMemcpy(dev_idata, idata, n * sizeof(int), cudaMemcpyHostToDevice);
-            checkCUDAError("cudaMemcpy to device failed");
-
-            timer().startGpuTimer();
-
-            KernelConfig configMap(n);
-            StreamCompaction::Common::kernMapToBoolean<<<configMap.gridSize, configMap.blockSize>>>(
-                n, dev_bools, dev_idata);
-            checkCUDAError("kernMapToBoolean failed");
-
-            cudaMemcpy(dev_indices, dev_bools, n * sizeof(int), cudaMemcpyDeviceToDevice);
-            scanExclusiveSharedMemoryDevice(n, dev_indices, dev_indices);
-
-            KernelConfig configScatter(n);
-            StreamCompaction::Common::kernScatter<<<configScatter.gridSize, configScatter.blockSize>>>(
-                n, dev_odata, dev_idata, dev_bools, dev_indices);
-            checkCUDAError("kernScatter failed");
-
-            timer().endGpuTimer();
-
-            int lastBool, lastIndex;
-            cudaMemcpy(&lastBool, dev_bools + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
-            cudaMemcpy(&lastIndex, dev_indices + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
-            int count = lastIndex + lastBool;
-
-            cudaMemcpy(odata, dev_odata, count * sizeof(int), cudaMemcpyDeviceToHost);
-            checkCUDAError("cudaMemcpy to host failed");
-
-            cudaFree(dev_idata);
-            cudaFree(dev_bools);
-            cudaFree(dev_indices);
-            cudaFree(dev_odata);
-
-            return count;
-        }
-
-        /**
-         * Device-side PathSegment stream compaction using shared-memory scan.
-         * Parallel API to compactPathSegments() (global memory).
-         */
-        int compactPathSegmentsSharedMemory(
-            int n, PathSegment *dev_odata, const PathSegment *dev_idata)
-        {
-            int *dev_bools, *dev_indices;
-            cudaMalloc((void**)&dev_bools, n * sizeof(int));
-            cudaMalloc((void**)&dev_indices, n * sizeof(int));
-            checkCUDAError("cudaMalloc failed in compactPathSegmentsSharedMemory");
-
-            KernelConfig configMap(n);
-            kernMapPathSegmentToBoolean<<<configMap.gridSize, configMap.blockSize>>>(
-                n, dev_bools, dev_idata);
-            checkCUDAError("kernMapPathSegmentToBoolean failed");
-
-            cudaMemcpy(dev_indices, dev_bools, n * sizeof(int), cudaMemcpyDeviceToDevice);
-            scanExclusiveSharedMemoryDevice(n, dev_indices, dev_indices);
-
-            KernelConfig configScatter(n);
-            kernScatterPathSegment<<<configScatter.gridSize, configScatter.blockSize>>>(
-                n, dev_odata, dev_idata, dev_bools, dev_indices);
-            checkCUDAError("kernScatterPathSegment failed");
-
-            int lastBool, lastIndex;
-            cudaMemcpy(&lastBool, dev_bools + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
-            cudaMemcpy(&lastIndex, dev_indices + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
-            int count = lastIndex + lastBool;
-
-            cudaFree(dev_bools);
-            cudaFree(dev_indices);
-
-            return count;
         }
     }
 }
