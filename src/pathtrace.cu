@@ -183,7 +183,7 @@ void pathtraceInit(Scene* scene)
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     // TODO: initialize any extra device memeory you need
-    StreamCompaction::Efficient::initSharedMemoryCompactionWorkspace(maxPaddedPathCount);
+    StreamCompaction::Efficient::initCompactionWorkspace(maxPaddedPathCount);
 
     // Sort buffers -- always allocated (overhead is negligible); the sorting
     // function early-returns when g_sortByMaterial is false at runtime.
@@ -212,7 +212,7 @@ void pathtraceFree()
     cudaFree(dev_sortKeys);
     cudaFree(dev_sortIndices);
     cudaFree(dev_intersections_sorted);
-    StreamCompaction::Efficient::freeSharedMemoryCompactionWorkspace();
+    StreamCompaction::Efficient::freeCompactionWorkspace();
     // TODO: clean up any extra device memory you created
 
     checkCUDAError("pathtraceFree");

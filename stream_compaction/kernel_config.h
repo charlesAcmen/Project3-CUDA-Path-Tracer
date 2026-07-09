@@ -198,7 +198,20 @@ public:
     int getMultiProcessorCount() const { return prop.multiProcessorCount; }
     int getWarpSize() const { return prop.warpSize; }
     int getComputeCapability() const { return prop.major * 10 + prop.minor; }
-    
+
+    /**
+     * Returns the recommended scan block size (threads per block) for the
+     * hierarchical shared-memory scan kernels.
+     *
+     * 512 is preferred on devices that support it (CC 3.0+ with >=512
+     * threads/block) because it halves the number of recursion levels
+     * compared to 256.  Shared memory pressure is minimal (4 KB vs 2 KB
+     * per block) and does not hurt occupancy on any GPU since Kepler.
+     */
+    int getOptimalScanBlockSize() const {
+        return (prop.maxThreadsPerBlock >= 512) ? 512 : 256;
+    }
+
     void printDeviceInfo() const {
         printf("=== CUDA Device Info ===\n");
         printf("Device: %s\n", prop.name);
