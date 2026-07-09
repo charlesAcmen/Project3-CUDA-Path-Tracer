@@ -65,6 +65,7 @@ void runCuda();
 void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods);
 void mousePositionCallback(GLFWwindow* window, double xpos, double ypos);
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
+void printStartupHelp(const char* exeName);
 
 std::string currentTimeString()
 {
@@ -73,6 +74,40 @@ std::string currentTimeString()
     char buf[sizeof "0000-00-00_00-00-00z"];
     strftime(buf, sizeof buf, "%Y-%m-%d_%H-%M-%Sz", gmtime(&now));
     return std::string(buf);
+}
+
+void printStartupHelp(const char* exeName)
+{
+    printf("\n");
+    printf("======================================================================\n");
+    printf("  CIS 565 Path Tracer - Command Line Help\n");
+    printf("======================================================================\n");
+    printf("  Usage:\n");
+    printf("    %s SCENEFILE.json [options]\n", exeName);
+    printf("\n");
+    printf("  Examples:\n");
+    printf("    %s ../scenes/cornell.json\n", exeName);
+    printf("    %s ../scenes/cornell.json --benchmark --compact=2 --warmup=1\n", exeName);
+    printf("    %s ../scenes/cornell.json --benchmark --sort=0 --save\n", exeName);
+    printf("\n");
+    printf("  Options:\n");
+    printf("    --benchmark    Enable profiler CSV output.\n");
+    printf("    --verbose      Print per-bounce path counts to the console.\n");
+    printf("    --compact=N    Compaction mode: 0=off, 1=global scan, 2=Thrust copy_if,\n");
+    printf("                   3=shared-memory scan (default).\n");
+    printf("    --sort=N       Material sorting: 0=off, nonzero=on (default on).\n");
+    printf("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
+    printf("    --save         Save the final rendered image on exit.\n");
+    printf("    -h, --help     Show this help text.\n");
+    printf("\n");
+    printf("  Notes:\n");
+    printf("    - Flags are order-independent, but the scene file must come first.\n");
+    printf("    - Profiler CSVs are written to profiler_output/<scene>_<timestamp>/\n");
+    printf("      when --benchmark is enabled.\n");
+    printf("    - Nonzero values for --sort are treated as enabled.\n");
+    printf("    - Only compact values 0..3 have defined behavior.\n");
+    printf("======================================================================\n");
+    printf("\n");
 }
 
 //-------------------------------
@@ -363,8 +398,18 @@ int main(int argc, char** argv)
 
     if (argc < 2)
     {
-        printf("Usage: %s SCENEFILE.json\n", argv[0]);
+        printStartupHelp(argv[0]);
         return 1;
+    }
+
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help")
+        {
+            printStartupHelp(argv[0]);
+            return 0;
+        }
     }
 
     const char* sceneFile = argv[1];
