@@ -53,7 +53,7 @@ struct ExtractMaterialId {
 // Runtime configuration (defaults below, overridable via setCompactMethod / setSortByMaterial / setAutoSave)
 // Default: Custom scan compaction (1), material sorting enabled (true)
 // Can be overridden at runtime via --compact=N --sort=0/1 command-line flags
-static int  g_compactMethod  = 1;     // 1 = global-mem scan, 3 = shared-mem scan
+static int  g_compactMethod  = 3;     // 3 = shared-mem scan (default), 1 = global-mem, 2 = Thrust
 static bool g_sortByMaterial = true;  // true = material sorting enabled
 static bool g_autoSave       = false; // auto-save OFF by default — use --save to enable
 
@@ -133,6 +133,7 @@ void pathtraceInit(Scene* scene)
 
     const Camera& cam = hst_scene->state.camera;
     const int pixelcount = cam.resolution.x * cam.resolution.y;
+    const int maxPaddedPathCount = 1 << ilog2ceil(pixelcount);
 
     cudaMalloc(&dev_image, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
@@ -151,6 +152,7 @@ void pathtraceInit(Scene* scene)
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     // TODO: initialize any extra device memeory you need
+    StreamCompaction::Efficient::initSharedMemoryCompactionWorkspace(maxPaddedPathCount);
 
     // Sort buffers -- always allocated (overhead is negligible); the sorting
     // function early-returns when g_sortByMaterial is false at runtime.
@@ -179,6 +181,7 @@ void pathtraceFree()
     cudaFree(dev_sortKeys);
     cudaFree(dev_sortIndices);
     cudaFree(dev_intersections_sorted);
+    StreamCompaction::Efficient::freeSharedMemoryCompactionWorkspace();
     // TODO: clean up any extra device memory you created
 
     checkCUDAError("pathtraceFree");

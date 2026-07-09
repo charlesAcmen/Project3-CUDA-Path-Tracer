@@ -29,9 +29,9 @@ import profiler_utils as pu
 # ---- Configuration matrix ----
 # Each entry: (name_suffix, compact_method, sort_by_material)
 CONFIGS_QUICK = [
-    ("compact2_sort1", 2, 1),   # baseline
+    ("compact3_sort1", 3, 1),   # baseline (shared-mem scan)
     ("compact0_sort1", 0, 1),   # no compaction
-    ("compact2_sort0", 2, 0),   # no sorting
+    ("compact3_sort0", 3, 0),   # no sorting
 ]
 
 CONFIGS_FULL = CONFIGS_QUICK + [
@@ -154,9 +154,9 @@ def main():
 
     # A/B comparisons: compaction on/off for open scene
     for scene_type in ["open", "closed"]:
-        base_key = f"{scene_type}_compact2_sort1"
+        base_key = f"{scene_type}_compact3_sort1"
         nocomp_key = f"{scene_type}_compact0_sort1"
-        nosort_key = f"{scene_type}_compact2_sort0"
+        nosort_key = f"{scene_type}_compact3_sort0"
 
         if base_key in results and nocomp_key in results:
             plot_comparison.main_raw(
@@ -173,8 +173,8 @@ def main():
             )
 
     # Open vs closed comparison
-    open_key = "open_compact2_sort1"
-    closed_key = "closed_compact2_sort1"
+    open_key = "open_compact3_sort1"
+    closed_key = "closed_compact3_sort1"
     if open_key in results and closed_key in results:
         plot_comparison.main_raw(
             results[open_key][0], results[closed_key][0],

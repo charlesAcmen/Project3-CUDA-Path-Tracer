@@ -35,7 +35,7 @@ python ../scripts/benchmark_runner.py bin/Release/cis565_path_tracer.exe ../scen
 |------|--------|---------|--------|
 | `--benchmark` | (none) | off | Enables profiler. CSVs written to `profiler_output/` after the final iteration. |
 | `--verbose` | (none) | off | Enables per-bounce path-count `printf` debug output to console. Can be used with or without `--benchmark`. |
-| `--compact=N` | `0`, `1`, `2`, `3` | `1` | **Stream compaction method.** `0`=disabled, `1`=global-mem scan, `2`=Thrust `copy_if`, `3`=shared-mem scan. |
+| `--compact=N` | `0`, `1`, `2`, `3` | `3` | **Stream compaction method.** `0`=disabled, `1`=global-mem scan, `2`=Thrust `copy_if`, `3`=shared-mem scan (default). |
 | `--sort=N` | `0`, `1` | `1` | **Material sorting.** `0`=disabled, `1`=enabled. |
 | `--warmup=N` | any int ≥ 0 | `3` | Warmup iterations excluded from summary statistics. |
 
