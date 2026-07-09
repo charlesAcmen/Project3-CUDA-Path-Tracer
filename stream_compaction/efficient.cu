@@ -16,6 +16,79 @@ namespace StreamCompaction {
             return timer;
         }
 
+        struct SharedMemoryCompactionWorkspace
+        {
+            int* scanData = nullptr;
+            int* scanScratch = nullptr;
+            size_t scanDataInts = 0;
+            size_t scanScratchInts = 0;
+            int maxElements = 0;
+        };
+
+        static SharedMemoryCompactionWorkspace s_sharedMemoryCompactionWorkspace;
+
+        static size_t computeSharedScanScratchInts(int n)
+        {
+            size_t totalInts = 0;
+            int current = (n + 511) / 512;
+
+            while (current > 0)
+            {
+                totalInts += static_cast<size_t>(current);
+
+                if (current == 1)
+                {
+                    break;
+                }
+
+                current = (current + 511) / 512;
+            }
+
+            return totalInts;
+        }
+
+        void freeSharedMemoryCompactionWorkspace();
+
+        void initSharedMemoryCompactionWorkspace(int maxElements)
+        {
+            freeSharedMemoryCompactionWorkspace();
+
+            if (maxElements <= 0)
+            {
+                return;
+            }
+
+            s_sharedMemoryCompactionWorkspace.maxElements = maxElements;
+            s_sharedMemoryCompactionWorkspace.scanDataInts = static_cast<size_t>(maxElements);
+            s_sharedMemoryCompactionWorkspace.scanScratchInts = computeSharedScanScratchInts(maxElements);
+
+            cudaMalloc(
+                reinterpret_cast<void**>(&s_sharedMemoryCompactionWorkspace.scanData),
+                s_sharedMemoryCompactionWorkspace.scanDataInts * sizeof(int));
+            checkCUDAError("cudaMalloc scanData failed");
+
+            if (s_sharedMemoryCompactionWorkspace.scanScratchInts > 0)
+            {
+                cudaMalloc(
+                    reinterpret_cast<void**>(&s_sharedMemoryCompactionWorkspace.scanScratch),
+                    s_sharedMemoryCompactionWorkspace.scanScratchInts * sizeof(int));
+                checkCUDAError("cudaMalloc scanScratch failed");
+            }
+        }
+
+        void freeSharedMemoryCompactionWorkspace()
+        {
+            cudaFree(s_sharedMemoryCompactionWorkspace.scanData);
+            s_sharedMemoryCompactionWorkspace.scanData = nullptr;
+
+            cudaFree(s_sharedMemoryCompactionWorkspace.scanScratch);
+            s_sharedMemoryCompactionWorkspace.scanScratch = nullptr;
+
+            s_sharedMemoryCompactionWorkspace.scanDataInts = 0;
+            s_sharedMemoryCompactionWorkspace.scanScratchInts = 0;
+            s_sharedMemoryCompactionWorkspace.maxElements = 0;
+        }
+
         // ========================================================================
         // Internal Implementation Details
         // ========================================================================
@@ -35,7 +108,8 @@ namespace StreamCompaction {
         // ========================================================================
         
         // This recursive helper function needs forward declaration
-        static void scanExclusiveSharedMemoryDevice(int n, int *dev_odata, const int *dev_idata);
+        static void scanExclusiveSharedMemoryDevice(
+            int n, int* dev_data, int* dev_scratch, size_t scratchInts);
 
         // ========================================================================
         // Global Memory Scan Kernels (Original Implementation)
@@ -97,7 +171,7 @@ namespace StreamCompaction {
          * Maps PathSegment array to boolean array.
          * Paths with remainingBounces > 0 map to 1, others map to 0.
          */
-        __global__ void kernMapPathSegmentToBoolean(int n, int *bools, const PathSegment *paths) {
+        __global__ void kernMapPathSegmentToBoolean(int n, int *flags, const PathSegment *paths) {
             int index = threadIdx.x + (blockIdx.x * blockDim.x);
             
             if (index >= n) {
@@ -105,7 +179,7 @@ namespace StreamCompaction {
             }
             
             // Keep paths that still have bounces remaining
-            bools[index] = (paths[index].remainingBounces > 0) ? 1 : 0;
+            flags[index] = (paths[index].remainingBounces > 0) ? 1 : 0;
         }
 
         /**
@@ -113,14 +187,14 @@ namespace StreamCompaction {
          * Only paths where bools[idx] == 1 are copied to output.
          */
         __global__ void kernScatterPathSegment(int n, PathSegment *odata,
-                const PathSegment *idata, const int *bools, const int *indices) {
+                const PathSegment *idata, const int *indices) {
             int index = threadIdx.x + (blockIdx.x * blockDim.x);
             
             if (index >= n) {
                 return;
             }
             
-            if (bools[index] == 1) {
+            if (idata[index].remainingBounces > 0) {
                 odata[indices[index]] = idata[index];
             }
         }
@@ -138,21 +212,24 @@ namespace StreamCompaction {
          * @returns           The number of active paths remaining after compaction.
          */
         int compactPathSegments(int n, PathSegment *dev_odata, const PathSegment *dev_idata) {
-            // Round up to next power of 2 for scan
+            if (n <= 0) {
+                return 0;
+            }
+
+            // Round up to next power of 2 for scan.
+            // The map + scan happen in a single reusable buffer so this path
+            // only needs one temporary allocation.
             int paddedN = 1 << ilog2ceil(n);
-            
-            // Allocate device memory for intermediate arrays
-            int *dev_bools, *dev_indices;
-            cudaMalloc((void**)&dev_bools, n * sizeof(int));
+
+            int* dev_indices;
             cudaMalloc((void**)&dev_indices, paddedN * sizeof(int));
             checkCUDAError("cudaMalloc failed in compactPathSegments");
 
-            // Step 1: Map PathSegments to boolean array
-            LAUNCH_KERNEL_AUTO(kernMapPathSegmentToBoolean, n, n, dev_bools, dev_idata);
+            // Step 1: Map PathSegments to a 0/1 flag buffer in-place.
+            LAUNCH_KERNEL_AUTO(kernMapPathSegmentToBoolean, n, n, dev_indices, dev_idata);
             checkCUDAError("kernMapPathSegmentToBoolean failed");
-            
-            // Copy bools to indices array and pad with zeros
-            cudaMemcpy(dev_indices, dev_bools, n * sizeof(int), cudaMemcpyDeviceToDevice);
+
+            // Zero-pad the scan tail so the tree is a full power of two.
             if (paddedN > n) {
                 cudaMemset(dev_indices + n, 0, (paddedN - n) * sizeof(int));
             }
@@ -176,17 +253,17 @@ namespace StreamCompaction {
             }
             
             // Step 3: Scatter PathSegments to output array
-            LAUNCH_KERNEL_AUTO(kernScatterPathSegment, n, n, dev_odata, dev_idata, dev_bools, dev_indices);
+            LAUNCH_KERNEL_AUTO(kernScatterPathSegment, n, n, dev_odata, dev_idata, dev_indices);
             checkCUDAError("kernScatterPathSegment failed");
 
             // Calculate the count of active paths
-            int lastBool, lastIndex;
-            cudaMemcpy(&lastBool, dev_bools + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            PathSegment lastPath;
+            int lastIndex;
+            cudaMemcpy(&lastPath, dev_idata + (n - 1), sizeof(PathSegment), cudaMemcpyDeviceToHost);
             cudaMemcpy(&lastIndex, dev_indices + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
-            int count = lastIndex + lastBool;
+            int count = lastIndex + (lastPath.remainingBounces > 0 ? 1 : 0);
 
             // Free intermediate device memory
-            cudaFree(dev_bools);
             cudaFree(dev_indices);
 
             return count;
@@ -199,39 +276,51 @@ namespace StreamCompaction {
         int compactPathSegmentsSharedMemory(
             int n, PathSegment *dev_odata, const PathSegment *dev_idata)
         {
+            if (n <= 0)
+            {
+                return 0;
+            }
+
             // Round up to next power of 2 so the shared-mem scan operates on
             // a padded array whose size is a multiple of SCAN_BLOCK_ELEMENTS.
             // Without padding, the last block processes a partial batch whose
             // out-of-bounds reads can corrupt the scan result.
             int paddedN = 1 << ilog2ceil(n);
 
-            int *dev_bools, *dev_indices;
-            cudaMalloc((void**)&dev_bools, n * sizeof(int));
-            cudaMalloc((void**)&dev_indices, paddedN * sizeof(int));
-            checkCUDAError("cudaMalloc failed in compactPathSegmentsSharedMemory");
+            if (s_sharedMemoryCompactionWorkspace.scanScratch == nullptr ||
+                s_sharedMemoryCompactionWorkspace.maxElements < paddedN)
+            {
+                fprintf(stderr,
+                    "ERROR: shared-memory compaction workspace is not initialized for %d elements.\n",
+                    paddedN);
+                return 0;
+            }
 
-            LAUNCH_KERNEL_AUTO(kernMapPathSegmentToBoolean, n, n, dev_bools, dev_idata);
+            int* dev_indices = s_sharedMemoryCompactionWorkspace.scanData;
+
+            LAUNCH_KERNEL_AUTO(kernMapPathSegmentToBoolean, n, n, dev_indices, dev_idata);
             checkCUDAError("kernMapPathSegmentToBoolean failed");
 
-            // Copy bools to indices and zero-pad the tail
-            cudaMemcpy(dev_indices, dev_bools, n * sizeof(int), cudaMemcpyDeviceToDevice);
+            // Zero-pad the tail so the scan runs on a power-of-two length.
             if (paddedN > n) {
                 cudaMemset(dev_indices + n, 0, (paddedN - n) * sizeof(int));
             }
 
-            scanExclusiveSharedMemoryDevice(paddedN, dev_indices, dev_indices);
+            scanExclusiveSharedMemoryDevice(
+                paddedN,
+                dev_indices,
+                s_sharedMemoryCompactionWorkspace.scanScratch,
+                s_sharedMemoryCompactionWorkspace.scanScratchInts);
 
-            LAUNCH_KERNEL_AUTO(kernScatterPathSegment, n, n, dev_odata, dev_idata, dev_bools, dev_indices);
+            LAUNCH_KERNEL_AUTO(kernScatterPathSegment, n, n, dev_odata, dev_idata, dev_indices);
             checkCUDAError("kernScatterPathSegment failed");
 
             // Count survivors: exclusive-scan result at last active element + its bool
-            int lastBool, lastIndex;
-            cudaMemcpy(&lastBool, dev_bools + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            PathSegment lastPath;
+            int lastIndex;
+            cudaMemcpy(&lastPath, dev_idata + (n - 1), sizeof(PathSegment), cudaMemcpyDeviceToHost);
             cudaMemcpy(&lastIndex, dev_indices + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
-            int count = lastIndex + lastBool;
-
-            cudaFree(dev_bools);
-            cudaFree(dev_indices);
+            int count = lastIndex + (lastPath.remainingBounces > 0 ? 1 : 0);
 
             return count;
         }
@@ -349,7 +438,7 @@ namespace StreamCompaction {
          * Recursion depth: ~log₅₁₂(n), safe for any practical input size
          */
         static void scanExclusiveSharedMemoryDevice(
-            int n, int *dev_odata, const int *dev_idata)
+            int n, int *dev_data, int *dev_scratch, size_t scratchInts)
         {
             if (n <= 0)
             {
@@ -358,37 +447,33 @@ namespace StreamCompaction {
 
             int numBlocks = (n + SCAN_BLOCK_ELEMENTS - 1) / SCAN_BLOCK_ELEMENTS;
 
-            int *dev_blockSums;
-            cudaMalloc((void**)&dev_blockSums, numBlocks * sizeof(int));
-            checkCUDAError("cudaMalloc dev_blockSums failed");
+            if (dev_scratch == nullptr || scratchInts < static_cast<size_t>(numBlocks))
+            {
+                fprintf(stderr, "ERROR: insufficient shared-memory compaction scratch space.\n");
+                return;
+            }
+
+            int* dev_blockSums = dev_scratch;
+            int* childScratch = dev_scratch + numBlocks;
+            size_t childScratchInts = scratchInts - static_cast<size_t>(numBlocks);
 
             // Step 1: Per-block exclusive scan, save each block's total sum
             kernBlockExclusiveScan<<<numBlocks, SCAN_BLOCK_SIZE>>>(
-                n, dev_odata, dev_idata, dev_blockSums);
+                n, dev_data, dev_data, dev_blockSums);
             checkCUDAError("kernBlockExclusiveScan failed");
 
             // Step 2: If multiple blocks, compute cross-block offsets
             if (numBlocks > 1)
             {
-                int *dev_blockOffsets;
-                cudaMalloc((void**)&dev_blockOffsets, numBlocks * sizeof(int));
-                checkCUDAError("cudaMalloc dev_blockOffsets failed");
-
-                // Recursively scan block sums to get per-block offsets
-                // Input: dev_blockSums (each block's total)
-                // Output: dev_blockOffsets (cumulative sum = offset for each block)
-                scanExclusiveSharedMemoryDevice(numBlocks, dev_blockOffsets, dev_blockSums);
+                // Recursively scan block sums to get per-block offsets.
+                scanExclusiveSharedMemoryDevice(numBlocks, dev_blockSums, childScratch, childScratchInts);
 
                 // Step 3: Add block offsets to each block's local scan results
                 kernAddBlockOffsets<<<numBlocks, SCAN_BLOCK_SIZE>>>(
-                    n, dev_odata, dev_blockOffsets);
+                    n, dev_data, dev_blockSums);
                 checkCUDAError("kernAddBlockOffsets failed");
-
-                cudaFree(dev_blockOffsets);
             }
             // else: single block, no cross-block offsets needed
-
-            cudaFree(dev_blockSums);
         }
     }
 }

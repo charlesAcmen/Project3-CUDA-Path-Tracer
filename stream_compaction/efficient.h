@@ -9,6 +9,20 @@ namespace StreamCompaction {
     namespace Efficient {
         StreamCompaction::Common::PerformanceTimer& timer();
 
+        /**
+         * Initializes the fixed scratch workspace used by the shared-memory
+         * stream compaction path. The workspace is sized for the maximum
+         * number of path segments the renderer can produce for the current
+         * scene resolution, and is freed in pathtraceFree().
+         */
+        void initSharedMemoryCompactionWorkspace(int maxElements);
+
+        /**
+         * Releases the shared-memory compaction workspace allocated by
+         * initSharedMemoryCompactionWorkspace().
+         */
+        void freeSharedMemoryCompactionWorkspace();
+
         // ========================================================================
         // PathSegment Stream Compaction API
         // ========================================================================
