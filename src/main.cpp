@@ -110,6 +110,31 @@ void printStartupHelp(const char* exeName)
     printf("\n");
 }
 
+// Print a concise startup summary of key runtime options and scene info.
+void printStartupSummary(const ProfilerConfig& profCfg)
+{
+    printf("\n");
+    printf("======================================================================\n");
+    printf("  Startup Summary\n");
+    printf("======================================================================\n");
+    printf("  Scene: %s\n", profCfg.sceneName.c_str());
+    printf("  Timestamp: %s\n", startTimeString.c_str());
+    printf("  Resolution: %d x %d\n", width, height);
+    if (renderState) {
+        printf("  Trace iterations (depth): %d\n", renderState->iterations);
+    }
+    printf("  Profiler: %s\n", profCfg.enabled ? "ENABLED" : "disabled");
+    if (profCfg.enabled) {
+        printf("    Warmup iters: %d\n", profCfg.warmupIters);
+        printf("    Verbose logging: %s\n", profCfg.verbose ? "yes" : "no");
+    }
+    printf("  Compact method: %d\n", profCfg.compactMethod);
+    printf("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
+    printf("  Auto-save final image: %s\n", getAutoSave() ? "yes" : "no");
+    printf("======================================================================\n");
+    printf("\n");
+}
+
 //-------------------------------
 //----------SETUP STUFF----------
 //-------------------------------
@@ -506,6 +531,9 @@ int main(int argc, char** argv)
     // Initialize ImGui Data
     InitImguiData(guiData);
     InitDataContainer(guiData);
+
+    // Print concise runtime summary before rendering
+    printStartupSummary(profCfg);
 
     // GLFW main loop
     mainLoop();
