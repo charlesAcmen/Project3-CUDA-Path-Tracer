@@ -128,7 +128,15 @@ void printStartupSummary(const ProfilerConfig& profCfg)
         printf("    Warmup iters: %d\n", profCfg.warmupIters);
         printf("    Verbose logging: %s\n", profCfg.verbose ? "yes" : "no");
     }
-    printf("  Compact method: %d\n", profCfg.compactMethod);
+    const char* compactName = "Unknown";
+    switch (profCfg.compactMethod) {
+        case 0: compactName = "Disabled (no compaction)"; break;
+        case 1: compactName = "Global-memory scan (custom)"; break;
+        case 2: compactName = "Thrust copy_if"; break;
+        case 3: compactName = "Shared-memory multi-block scan"; break;
+        default: compactName = "Shared-memory multi-block scan (default)"; break;
+    }
+    printf("  Compact method: %s\n", compactName);
     printf("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
     printf("  Auto-save final image: %s\n", getAutoSave() ? "yes" : "no");
     printf("======================================================================\n");
