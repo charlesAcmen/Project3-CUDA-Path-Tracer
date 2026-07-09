@@ -35,18 +35,19 @@ python ../scripts/benchmark_runner.py bin/Release/cis565_path_tracer.exe ../scen
 
 | Flag | Values | Default | Effect |
 |------|--------|---------|--------|
-| `--benchmark` | (none) | off | Enables profiler. CSVs written to `profiler_output/` after the final iteration. |
+| `--benchmark` | (none) | off | Enables profiler. CSVs are written on shutdown to `profiler_output/<scene>_<timestamp>/`. |
 | `--verbose` | (none) | off | Enables per-bounce path-count `printf` debug output to console. Can be used with or without `--benchmark`. |
-| `--compact=N` | `0`, `1`, `2`, `3` | `3` | **Stream compaction method.** `0`=disabled, `1`=global-mem scan, `2`=Thrust `copy_if`, `3`=shared-mem scan (default). |
-| `--sort=N` | `0`, `1` | `1` | **Material sorting.** `0`=disabled, `1`=enabled. |
-| `--warmup=N` | any int ≥ 0 | `3` | Warmup iterations excluded from summary statistics. |
+| `--compact=N` | `0`, `1`, `2`, `3` | `3` | **Stream compaction method.** `0`=disabled, `1`=global-mem scan, `2`=Thrust `copy_if`, `3`=shared-mem scan. Other integers are accepted by the parser, but only these values have defined behavior. |
+| `--sort=N` | `0`, `1` | `1` | **Material sorting.** `0`=disabled, `1`=enabled. Nonzero values are treated as enabled. |
+| `--warmup=N` | any int | `3` | Warmup iterations excluded from summary statistics. |
+| `--save` | (none) | off | Saves the rendered image when the app exits. Can be used with or without `--benchmark`. |
 
 Flags are order-independent.  `--benchmark` must be present for CSV output;
-the other flags only take effect when `--benchmark` is active.  Without
+`--compact`, `--sort`, and `--warmup` only affect profiling runs.  Without
 `--benchmark`, profiling overhead is zero — all `gpuStart` / `gpuStop` /
 `cpuStart` / `cpuStop` calls are no-ops.
 
-**Note:** `--verbose` is independent of `--benchmark`. Use `--verbose` only when you need to debug path survival behavior, as it produces substantial console output (one line per bounce per iteration).
+**Note:** `--verbose` and `--save` are independent of `--benchmark`. Use `--verbose` only when you need to debug path survival behavior, as it produces substantial console output (one line per bounce per iteration). `--save` writes the final image before shutdown.
 
 ### Examples
 
