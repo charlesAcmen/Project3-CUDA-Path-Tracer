@@ -2,21 +2,36 @@
 
 ## Overview
 
-The profiler outputs are organized in a clean directory structure that keeps each experiment's data together.
+The profiler outputs are organized in two layers:
+
+1. Raw profiler CSVs written by the C++ executable to `profiler_output/<scene>_<timestamp>/`
+2. Batch archives created by `scripts/benchmark_runner.py` under `profiler_output/runs/<run-id>/`
+
+The batch archive is the durable unit to keep when you want to compare code changes over time.
 
 ## Directory Structure
 
 ```
 build/profiler_output/
-├── <scene>_<timestamp>/          # One directory per experiment run
+├── <scene>_<timestamp>/          # Raw profiler output for one executable run
 │   ├── timing.csv                # Raw timing data (all operations × bounces × iterations)
 │   ├── summary.csv               # Aggregated statistics (mean, std, min, max per operation)
 │   ├── path_survival.csv         # Path count per bounce per iteration
-│   ├── path_survival.png         # Path survival curve chart
-│   └── kernel_breakdown.png      # Stacked bar chart of kernel timing per bounce
+│   ├── path_survival.png         # Path survival curve chart for this run
+│   └── kernel_breakdown.png      # Stacked bar chart of kernel timing per bounce for this run
 │
-└── comparisons/                  # Cross-experiment comparisons
-    └── expA_vs_expB.png          # Side-by-side comparison charts
+└── runs/                         # Durable benchmark batches
+  └── <run-id>/                 # One full benchmark_runner invocation
+    ├── manifest.txt          # Git hash, arguments, and archived experiment list
+    ├── comparisons/          # Cross-experiment comparison charts for this batch
+    └── experiments/          # Archived raw experiment directories with per-run PNGs
+      └── <scene>_<timestamp>__<scene_type>_<config>/
+        ├── timing.csv
+        ├── summary.csv
+        ├── path_survival.csv
+        ├── frame_times.csv
+        ├── path_survival.png
+        └── kernel_breakdown.png
 ```
 
 ## Example
@@ -37,8 +52,19 @@ build/profiler_output/
 │   ├── path_survival.png
 │   └── kernel_breakdown.png
 │
-└── comparisons/
-    └── cornell_20260708_085529_vs_cornell_closed_20260708_085541.png
+└── runs/
+  └── 20260710_143455_g1a2b3c4-dirty/
+    ├── manifest.txt
+    ├── comparisons/
+    │   └── compare_open_vs_closed.png
+    └── experiments/
+      └── cornell_20260710_143401__open_compact3_sort1/
+        ├── timing.csv
+        ├── summary.csv
+        ├── path_survival.csv
+        ├── frame_times.csv
+        ├── path_survival.png
+        └── kernel_breakdown.png
 ```
 
 ## Naming Convention
@@ -56,7 +82,7 @@ Format: `<scene_name>_<timestamp>`
 ### PNG Files
 - `path_survival.png` - Line chart showing how path count decreases with bounce depth
 - `kernel_breakdown.png` - Stacked bar chart showing time breakdown by operation per bounce
-- Comparison files in `comparisons/` follow the pattern: `<expA>_vs_<expB>.png`
+- Comparison files in `runs/<run-id>/comparisons/` follow the pattern: `compare_*.png`
 
 ## Usage
 
@@ -74,7 +100,7 @@ build/profiler_output/cornell_<timestamp>/
 
 ### Generating Plots
 
-Plots are generated automatically in the same directory as the CSV:
+The benchmark runner writes run-specific plots next to the CSVs in each experiment folder, then archives the whole batch into `runs/<run-id>/`:
 
 ```bash
 # From the build directory
@@ -94,7 +120,7 @@ python ..\scripts\plot_comparison.py ^
 
 Output appears at:
 ```
-build/profiler_output/comparisons/cornell_20260708_085529_vs_cornell_closed_20260708_085541.png
+build/profiler_output/runs/<run-id>/comparisons/compare_open_vs_closed.png
 ```
 
 ## Benefits

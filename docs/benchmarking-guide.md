@@ -5,7 +5,9 @@
 The measurement framework instruments user-written GPU kernels and host-side
 operations with **cudaEvent** (GPU) and **std::chrono** (CPU) timers.  Results
 are written as CSV files to `profiler_output/<scene>_<timestamp>/` and can be
-plotted with the companion Python scripts.
+plotted with the companion Python scripts.  When you use
+`scripts/benchmark_runner.py`, each full benchmark batch is archived under
+`profiler_output/runs/<run-id>/` so old runs do not get overwritten.
 
 Only code you wrote or modified is measured.  Starter-code kernels
 (`generateRayFromCamera`, `computeIntersections`, `finalGather`,
@@ -171,6 +173,14 @@ always process the full 640,000 elements.
 python scripts/plot_comparison.py profiler_output/cornell_<ts>_*/timing.csv profiler_output/cornell_<ts2>_*/timing.csv --labels "Compaction ON" "Compaction OFF"
 ```
 
+If you want a durable, code-versioned archive instead of ad-hoc plots, prefer:
+
+```
+python scripts/benchmark_runner.py build/bin/Release/cis565_path_tracer.exe scenes/cornell.json
+```
+
+That will leave the results in `profiler_output/runs/<run-id>/`, including the per-experiment PNGs and the comparison plots.
+
 ---
 
 ### Recipe B — Sorting ON vs OFF
@@ -264,7 +274,9 @@ Use `--configs all` to include the "neither" configuration (#4).
 ## CSV Output Format
 
 Three files are written to `profiler_output/<scene>_<timestamp>/` on
-the final iteration:
+the final iteration.  If you use `benchmark_runner.py`, the whole run is then
+archived under `profiler_output/runs/<run-id>/experiments/` together with the
+PNG plots.
 
 ### `timing.csv`
 
