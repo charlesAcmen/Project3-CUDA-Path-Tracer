@@ -51,18 +51,49 @@ struct ExtractMaterialId {
 };
 
 // Runtime configuration (defaults below, overridable via setCompactMethod / setSortByMaterial / setAutoSave)
-// Default: Custom scan compaction (1), material sorting enabled (true)
 // Can be overridden at runtime via --compact=N --sort=0/1 command-line flags
 static int  g_compactMethod  = 3;     // 3 = shared-mem scan (default), 1 = global-mem, 2 = Thrust
 static bool g_sortByMaterial = true;  // true = material sorting enabled
 static bool g_autoSave       = false; // auto-save OFF by default — use --save to enable
 
-void setCompactMethod(int method)   { g_compactMethod = method; }
+// Forward declarations for the dispatch table (defined below).
+using CompactCoreFunc = int (*)(int n, PathSegment* dst, const PathSegment* src);
+static int compactCoreThrust(int n, PathSegment* dst, const PathSegment* src);
+static int compactCoreGlobalMem(int n, PathSegment* dst, const PathSegment* src);
+static int compactCoreSharedMem(int n, PathSegment* dst, const PathSegment* src);
+static CompactCoreFunc g_compactCore = compactCoreSharedMem;  // default matches g_compactMethod
+
+void setCompactMethod(int method) {
+    g_compactMethod = method;
+    switch (method) {
+        case 0:  g_compactCore = nullptr;                  break;
+        case 1:  g_compactCore = compactCoreGlobalMem;     break;
+        case 2:  g_compactCore = compactCoreThrust;        break;
+        case 3:  g_compactCore = compactCoreSharedMem;     break;
+        default: g_compactCore = compactCoreSharedMem;     break;
+    }
+}
 void setSortByMaterial(bool enable) { g_sortByMaterial = enable; }
 int  getCompactMethod()             { return g_compactMethod; }
 bool getSortByMaterial()            { return g_sortByMaterial; }
 void setAutoSave(bool enable)       { g_autoSave = enable; }
 bool getAutoSave()                  { return g_autoSave; }
+
+// ====================================================================
+// Compaction dispatch implementations (forward-declared above).
+// ====================================================================
+static int compactCoreThrust(int n, PathSegment* dst, const PathSegment* src) {
+    PathSegment* end = thrust::copy_if(thrust::device, src, src + n, dst, IsPathActive());
+    return static_cast<int>(end - dst);
+}
+
+static int compactCoreGlobalMem(int n, PathSegment* dst, const PathSegment* src) {
+    return StreamCompaction::Efficient::compactPathSegments(n, dst, src);
+}
+
+static int compactCoreSharedMem(int n, PathSegment* dst, const PathSegment* src) {
+    return StreamCompaction::Efficient::compactPathSegmentsSharedMemory(n, dst, src);
+}
 
 //index:spatial correlation,ensuring that the different pixels will have different random seeds
 //depth:depth correlation ,ensuring that generated random number in different bounces is independent for a ray
@@ -622,10 +653,9 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
 {
     Profiler& prof = g_profiler();
 
-    // Compaction disabled at runtime -- terminated paths are guarded by the
+    // Compaction disabled at runtime — terminated paths are guarded by the
     // remainingBounces check in shadeMaterial; finalGather collects everything.
-    if (g_compactMethod == 0) {
-        (void)num_paths; (void)blockSize1d;
+    if (g_compactCore == nullptr) {
         return false;
     }
 
@@ -638,74 +668,18 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
     prof.gpuStop(ProfilerOp::GatherTerminatedPaths);
     checkCUDAError("gatherTerminatedPaths");
 
-    // 2. Compact: keep only paths with remainingBounces > 0.
+    // 2. Compact: dispatch through function pointer (set once at startup).
     prof.cpuStart(ProfilerOp::CompactPaths);
+    int survivors = g_compactCore(num_paths, dev_paths_compacted, dev_paths);
+    prof.cpuStop(ProfilerOp::CompactPaths);
 
-    if (g_compactMethod == 1)
-    {
-        // Global-memory work-efficient scan-based compaction (Project 2)
-        int survivors = StreamCompaction::Efficient::compactPathSegments(
-            num_paths,
-            dev_paths_compacted,   // output
-            dev_paths);            // input
+    // 3. Swap buffers: compacted array becomes the active one.
+    PathSegment* tmp = dev_paths;
+    dev_paths = dev_paths_compacted;
+    dev_paths_compacted = tmp;
 
-        // Swap buffers: compacted array becomes the active one
-        PathSegment* tmp = dev_paths;
-        dev_paths = dev_paths_compacted;
-        dev_paths_compacted = tmp;
-
-        num_paths = survivors;
-
-        prof.cpuStop(ProfilerOp::CompactPaths);
-        return (num_paths == 0);
-    }
-    else if (g_compactMethod == 2)
-    {
-        // Method 2: Thrust copy_if (simple and portable)
-        PathSegment* end = thrust::copy_if(
-            thrust::device,
-            dev_paths, dev_paths + num_paths,
-            dev_paths_compacted,
-            IsPathActive());
-
-        // Calculate survivor count BEFORE swapping buffers
-        // (end points into dev_paths_compacted, which will become stale after swap)
-        num_paths = static_cast<int>(end - dev_paths_compacted);
-
-        // Swap buffers: compacted array becomes the active one
-        PathSegment* tmp = dev_paths;
-        dev_paths = dev_paths_compacted;
-        dev_paths_compacted = tmp;
-
-        prof.cpuStop(ProfilerOp::CompactPaths);
-        return (num_paths == 0);
-    }
-    else if (g_compactMethod == 3)
-    {
-        // Shared-memory multi-block scan-based compaction (GPU Gems 3, Ch. 39)
-        int survivors = StreamCompaction::Efficient::compactPathSegmentsSharedMemory(
-            num_paths,
-            dev_paths_compacted,
-            dev_paths);
-
-        // Swap buffers
-        PathSegment* tmp = dev_paths;
-        dev_paths = dev_paths_compacted;
-        dev_paths_compacted = tmp;
-
-        num_paths = survivors;
-
-        prof.cpuStop(ProfilerOp::CompactPaths);
-        return (num_paths == 0);
-    }
-    else
-    {
-        // Invalid compact method - should never happen if validated at startup
-        fprintf(stderr, "ERROR: Invalid compact method %d. Falling back to no compaction.\n",
-                g_compactMethod);
-        prof.cpuStop(ProfilerOp::CompactPaths);
-        return false;
-    }
+    num_paths = survivors;
+    return (num_paths == 0);
 }
 
 // ---------------------------------------------------------------------------
