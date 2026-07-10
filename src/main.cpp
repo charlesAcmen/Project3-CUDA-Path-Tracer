@@ -96,6 +96,7 @@ void printStartupHelp(const char* exeName)
     printf("    --compact=N    Compaction mode: 0=off, 1=global scan, 2=Thrust copy_if,\n");
     printf("                   3=shared-memory scan (default).\n");
     printf("    --sort=N       Material sorting: 0=off, nonzero=on (default on).\n");
+    printf("    --fresnel=N    Fresnel mode: 0=Schlick (default), 1=Accurate.\n");
     printf("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
     printf("    --save         Save the final rendered image on exit.\n");
     printf("    -h, --help     Show this help text.\n");
@@ -138,6 +139,7 @@ void printStartupSummary(const ProfilerConfig& profCfg)
     }
     printf("  Compact method: %s\n", compactName);
     printf("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
+    printf("  Fresnel mode: %s\n", getFresnelMode() == 1 ? "Accurate" : "Schlick");
     printf("  Auto-save final image: %s\n", getAutoSave() ? "yes" : "no");
     printf("======================================================================\n");
     printf("\n");
@@ -486,6 +488,10 @@ int main(int argc, char** argv)
         } else if (arg.rfind("--sort=", 0) == 0) {
             profCfg.sortByMaterial = (std::stoi(arg.substr(7)) != 0);
             setSortByMaterial(profCfg.sortByMaterial);
+        } else if (arg.rfind("--fresnel=", 0) == 0) {
+            int mode = std::stoi(arg.substr(10));
+            mode = (mode == 1) ? 1 : 0;
+            setFresnelMode(mode);
         } else if (arg.rfind("--warmup=", 0) == 0) {
             profCfg.warmupIters = std::stoi(arg.substr(9));
         } else if (arg == "--save") {
