@@ -15,6 +15,16 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     glm::vec3 normal, 
     thrust::default_random_engine& rng);
 
+__host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2);
+__host__ __device__ float fresnelAccurate(float cosThetaI, float n1, float n2);
+__host__ __device__ HitSide classifyRefraction(
+    glm::vec3 rayDir,
+    glm::vec3 surfaceNormal,
+    float ior,
+    float& outN1,
+    float& outN2,
+    float& outCosThetaI);
+
 /**
  * Scatter a ray with some probabilities according to the material properties.
  * For example, a diffuse surface scatters in a cosine-weighted hemisphere.
@@ -45,4 +55,5 @@ __host__ __device__ void scatterRay(
     glm::vec3 intersect,
     glm::vec3 normal,
     const Material& m,
-    thrust::default_random_engine& rng);
+    thrust::default_random_engine& rng,
+    int fresnelMode);
