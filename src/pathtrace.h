@@ -15,3 +15,5 @@ int  getCompactMethod();
 bool getSortByMaterial();
 void setAutoSave(bool enable);
 bool getAutoSave();
+void setFresnelMode(int mode);
+int  getFresnelMode();
