@@ -111,9 +111,27 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
 
 __host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2)
 {
+    // Schlick's approximation for Fresnel reflectance.
+    // R(θ) = R₀ + (1 - R₀) · (1 - cosθ)⁵
     float r0 = (n1 - n2) / (n1 + n2);
     r0 = r0 * r0;
-    float oneMinusCos = 1.0f - cosThetaI;
+
+    // When light travels from a denser medium into a rarer one (n₁ > n₂),
+    // the physically correct argument to Schlick is cos(θₜ) — the cosine
+    // of the *transmitted* angle — rather than cos(θᵢ).  Otherwise
+    // reflectance is severely underestimated near the critical angle.
+    //   Ref: "Reflections and Refractions in Ray Tracing" — Bram de Greve
+    //   Ref: PBRT 4th ed. §9.2.1 — FresnelDielectric
+    float cosTheta = cosThetaI;
+    if (n1 > n2)
+    {
+        float sinThetaI = sqrtf(fmaxf(0.0f, 1.0f - cosThetaI * cosThetaI));
+        float sinThetaT = (n1 / n2) * sinThetaI;
+        if (sinThetaT >= 1.0f) return 1.0f;           // total internal reflection
+        cosTheta = sqrtf(fmaxf(0.0f, 1.0f - sinThetaT * sinThetaT)); // cos(θₜ)
+    }
+
+    float oneMinusCos = 1.0f - cosTheta;
     float oneMinusCos2 = oneMinusCos * oneMinusCos;
     float oneMinusCos5 = oneMinusCos2 * oneMinusCos2 * oneMinusCos;
     return r0 + (1.0f - r0) * oneMinusCos5;
@@ -209,30 +227,27 @@ __host__ __device__ void scatterRay(
     if (m.hasRefractive > 0.5f)
     {
         float n1, n2, cosThetaI;
-        HitSide side = classifyRefraction(pathSegment.ray.direction, normal, m.indexOfRefraction, n1, n2, cosThetaI);
+        classifyRefraction(pathSegment.ray.direction, normal, m.indexOfRefraction, n1, n2, cosThetaI);
         float etaRatio = n1 / n2;
 
+        // Both Fresnel functions return 1.0 on total internal reflection,
+        // so u01 < 1.0 is always true → the reflection branch is taken.
         float reflectance = (fresnelMode == 1)
             ? fresnelAccurate(cosThetaI, n1, n2)
             : fresnelSchlick(cosThetaI, n1, n2);
 
-        bool totalInternalReflection = false;
-        float sinThetaI = sqrtf(fmaxf(0.0f, 1.0f - cosThetaI * cosThetaI));
-        float sinThetaT = etaRatio * sinThetaI;
-        if (sinThetaT >= 1.0f)
-        {
-            totalInternalReflection = true;
-        }
-
-        bool reflect = totalInternalReflection || (u01(rng) < reflectance);
-
-        if (reflect)
+        // Russian roulette: reflect with prob R, refract with prob 1-R.
+        // Throughput multiplier = (energy fraction) / (probability):
+        //   reflection:  R * color / R     = color
+        //   refraction: (1-R) * color / (1-R) = color
+        // → Fresnel factor cancels out in both branches.
+        if (u01(rng) < reflectance)
         {
             glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
             float offsetSign = glm::dot(reflectedDir, normal) > 0.0f ? 1.0f : -1.0f;
             pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
             pathSegment.ray.direction = glm::normalize(reflectedDir);
-            pathSegment.color *= m.color / fmaxf(reflectance, 1e-6f);
+            pathSegment.color *= m.color;
         }
         else
         {
@@ -240,8 +255,7 @@ __host__ __device__ void scatterRay(
             float offsetSign = glm::dot(refractedDir, normal) > 0.0f ? 1.0f : -1.0f;
             pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
             pathSegment.ray.direction = glm::normalize(refractedDir);
-            float transmitProb = 1.0f - reflectance;
-            pathSegment.color *= m.color / fmaxf(transmitProb, 1e-6f);
+            pathSegment.color *= m.color;
         }
     }
     else if (m.hasReflective > 0.5f)
