@@ -35,16 +35,33 @@ struct Geom
 
 struct Material
 {
-    glm::vec3 color;
+    glm::vec3 color;              // Base albedo or surface tint for diffuse/refraction throughput
+    //基础反射率或漫反射/折射的表面色调
     struct
     {
-        float exponent;
-        glm::vec3 color;
+        float exponent;           // Phong exponent or glossiness for specular highlight falloff
+        //Phong指数或高光的光泽度，用于高光衰减
+        glm::vec3 color;          // Specular color tint for mirror-like reflections
+        //镜面反射的高光颜色色调
     } specular;
-    float hasReflective;
-    float hasRefractive;
-    float indexOfRefraction;
-    float emittance;
+    float hasReflective;          // Nonzero means this material should reflect rays
+    float hasRefractive;          // Nonzero means this material should refract/transmit rays
+    float indexOfRefraction;      // IOR of the refractive material, e.g. 1.5 for glass
+    float emittance;              // Emission strength for light sources (nonzero = emissive)
+};
+
+// Fresnel evaluation mode used by refractive materials.
+enum class FresnelMode : int
+{
+    Schlick = 0,
+    Accurate = 1
+};
+
+// Whether a ray is entering or exiting a refractive medium.
+enum class HitSide : int
+{
+    Outside = 0,
+    Inside = 1
 };
 
 struct Camera
