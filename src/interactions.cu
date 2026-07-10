@@ -118,39 +118,46 @@ __host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2)
     float oneMinusCos5 = oneMinusCos2 * oneMinusCos2 * oneMinusCos;
     return r0 + (1.0f - r0) * oneMinusCos5;
 }
-
+//returns the fraction of non-polarized light reflected at the interface between two materials with indices of refraction n1 and n2, 
+//given the cosine of the incident angle cosThetaI.
 __host__ __device__ float fresnelAccurate(float cosThetaI, float n1, float n2)
 {
     float sinThetaI = sqrtf(fmaxf(0.0f, 1.0f - cosThetaI * cosThetaI));
+    //SNELL'S LAW: n1 * sin(thetaI) = n2 * sin(thetaT)
     float sinThetaT = (n1 / n2) * sinThetaI;
     if (sinThetaT >= 1.0f)
-    {
+    {// Total internal reflection occurs when the angle of incidence exceeds the critical angle, resulting in no refraction.
         return 1.0f;
     }
 
     float cosThetaT = sqrtf(fmaxf(0.0f, 1.0f - sinThetaT * sinThetaT));
     float rParallel = (n2 * cosThetaI - n1 * cosThetaT) /
                       (n2 * cosThetaI + n1 * cosThetaT);
-    float rPerpendicular = (n1 * cosThetaT - n2 * cosThetaI) /
-                           (n1 * cosThetaT + n2 * cosThetaI);
+    // Correct perpendicular (s-polarized) Fresnel term:
+    // r_perp = (n1 * cosThetaI - n2 * cosThetaT) / (n1 * cosThetaI + n2 * cosThetaT)
+    float rPerpendicular = (n1 * cosThetaI - n2 * cosThetaT) /
+                           (n1 * cosThetaI + n2 * cosThetaT);
     return (rParallel * rParallel + rPerpendicular * rPerpendicular) * 0.5f;
 }
 
 __host__ __device__ HitSide classifyRefraction(
-    glm::vec3 rayDir,
-    glm::vec3 surfaceNormal,
-    float ior,
-    float& outN1,
-    float& outN2,
-    float& outCosThetaI)
+    glm::vec3 rayDir,//assumed to be normalized
+    glm::vec3 surfaceNormal,//assumed to be normalized
+    float ior,//index of refraction of the material
+    float& outN1,//from IOR
+    float& outN2,//to IOR
+    float& outCosThetaI//a positive value of costheta incident angle
+)
 {
+    //>=0:exit the object
+    //<0:enter the object
     float cosTheta = glm::dot(rayDir, surfaceNormal);
 
     if (cosTheta < 0.0f)
     {
         outN1 = 1.0f;
         outN2 = ior;
-        outCosThetaI = -cosTheta;
+        outCosThetaI = -cosTheta;//invert the sign to make it positive
         return HitSide::Outside;
     }
     else
