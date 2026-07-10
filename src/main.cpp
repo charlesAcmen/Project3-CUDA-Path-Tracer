@@ -27,6 +27,9 @@
 
 static std::string startTimeString;
 
+// Auto-save final image on completion (moved from pathtrace.cu — application-level concern)
+static bool g_autoSave = false;
+
 // For camera controls
 static bool leftMousePressed = false;
 static bool rightMousePressed = false;
@@ -140,7 +143,7 @@ void printStartupSummary(const ProfilerConfig& profCfg)
     printf("  Compact method: %s\n", compactName);
     printf("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
     printf("  Fresnel mode: %s\n", getFresnelMode() == 1 ? "Accurate" : "Schlick");
-    printf("  Auto-save final image: %s\n", getAutoSave() ? "yes" : "no");
+    printf("  Auto-save final image: %s\n", g_autoSave ? "yes" : "no");
     printf("======================================================================\n");
     printf("\n");
 }
@@ -495,7 +498,7 @@ int main(int argc, char** argv)
         } else if (arg.rfind("--warmup=", 0) == 0) {
             profCfg.warmupIters = std::stoi(arg.substr(9));
         } else if (arg == "--save") {
-            setAutoSave(true);
+            g_autoSave = true;
         }
     }
 
@@ -635,7 +638,7 @@ void runCuda()
     }
     else
     {
-        if (getAutoSave()) {
+        if (g_autoSave) {
             saveImage();
         }
         // Write CSVs and destroy CUDA events BEFORE tearing down the context.
