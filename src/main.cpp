@@ -152,7 +152,8 @@ void printStartupSummary(const ProfilerConfig& profCfg)
     }
     printf("  Compact method: %s\n", compactName);
     printf("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
-    printf("  Fresnel mode: %s\n", getFresnelMode() == 1 ? "Accurate" : "Schlick");
+    const char* fresnelName = (getFresnelMode() == 1 ? "Accurate" : "Schlick");
+    printf("  Fresnel mode: %s (flag=%d -> %s)\n", fresnelName, getFresnelMode(), fresnelName);
     printf("  Auto-save final image: %s\n", g_autoSave ? "yes" : "no");
     printf("======================================================================\n");
     printf("\n");
