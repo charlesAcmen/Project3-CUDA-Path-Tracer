@@ -103,10 +103,63 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     //             = up * normal + cos(around) * over * U + sin(around) * over * V
     // 
     // This gives us our final cosine-weighted random direction in world space.
-    
+
     return up * normal
         + cos(around) * over * perpendicularDirection1
         + sin(around) * over * perpendicularDirection2;
+}
+
+__host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2)
+{
+    float r0 = (n1 - n2) / (n1 + n2);
+    r0 = r0 * r0;
+    float oneMinusCos = 1.0f - cosThetaI;
+    float oneMinusCos2 = oneMinusCos * oneMinusCos;
+    float oneMinusCos5 = oneMinusCos2 * oneMinusCos2 * oneMinusCos;
+    return r0 + (1.0f - r0) * oneMinusCos5;
+}
+
+__host__ __device__ float fresnelAccurate(float cosThetaI, float n1, float n2)
+{
+    float sinThetaI = sqrtf(fmaxf(0.0f, 1.0f - cosThetaI * cosThetaI));
+    float sinThetaT = (n1 / n2) * sinThetaI;
+    if (sinThetaT >= 1.0f)
+    {
+        return 1.0f;
+    }
+
+    float cosThetaT = sqrtf(fmaxf(0.0f, 1.0f - sinThetaT * sinThetaT));
+    float rParallel = (n2 * cosThetaI - n1 * cosThetaT) /
+                      (n2 * cosThetaI + n1 * cosThetaT);
+    float rPerpendicular = (n1 * cosThetaT - n2 * cosThetaI) /
+                           (n1 * cosThetaT + n2 * cosThetaI);
+    return (rParallel * rParallel + rPerpendicular * rPerpendicular) * 0.5f;
+}
+
+__host__ __device__ HitSide classifyRefraction(
+    glm::vec3 rayDir,
+    glm::vec3 surfaceNormal,
+    float ior,
+    float& outN1,
+    float& outN2,
+    float& outCosThetaI)
+{
+    float cosTheta = glm::dot(rayDir, surfaceNormal);
+
+    if (cosTheta < 0.0f)
+    {
+        outN1 = 1.0f;
+        outN2 = ior;
+        outCosThetaI = -cosTheta;
+        return HitSide::Outside;
+    }
+    else
+    {
+        outN1 = ior;
+        outN2 = 1.0f;
+        outCosThetaI = cosTheta;
+        return HitSide::Inside;
+    }
 }
 
 __host__ __device__ void scatterRay(
@@ -114,15 +167,15 @@ __host__ __device__ void scatterRay(
     glm::vec3 intersect,
     glm::vec3 normal,
     const Material &m,
-    thrust::default_random_engine &rng)
+    thrust::default_random_engine &rng,
+    int fresnelMode)
 {
     // TODO: implement this.
     // A basic implementation of pure-diffuse shading will just call the
     // calculateRandomDirectionInHemisphere defined above.
-    
+
     // Generate new random direction for diffuse reflection (cosine-weighted hemisphere sampling)
-    glm::vec3 newDirection = calculateRandomDirectionInHemisphere(normal, rng);
-    
+
     // CRITICAL: Offset ray origin along the NORMAL direction to prevent self-intersection
     // Using EPSILON (1e-5) provides sufficient clearance for the Cornell Box scale (units: ~10)
     // 
@@ -144,15 +197,67 @@ __host__ __device__ void scatterRay(
     
     //Note that since only Refraction always requires opposite direction offset
     //Let's leave sign judging to future release.i.e.TODO: judge sign by dot product of normal and newDirection
-    pathSegment.ray.origin = intersect + normal * EPSILON;
-    pathSegment.ray.direction = newDirection;
-    
-    // Apply diffuse material color (energy attenuation)
-    // multiplier = fr * cos theta/pdf(omega)
-    // where pdf(omega) = cos theta / PI
-    // BSDF of diffuse reflection: fr = R / PI
-    pathSegment.color *= m.color;
-    
+    thrust::uniform_real_distribution<float> u01(0, 1);
+
+    if (m.hasRefractive > 0.5f)
+    {
+        float n1, n2, cosThetaI;
+        HitSide side = classifyRefraction(pathSegment.ray.direction, normal, m.indexOfRefraction, n1, n2, cosThetaI);
+        float etaRatio = n1 / n2;
+
+        float reflectance = (fresnelMode == 1)
+            ? fresnelAccurate(cosThetaI, n1, n2)
+            : fresnelSchlick(cosThetaI, n1, n2);
+
+        bool totalInternalReflection = false;
+        float sinThetaI = sqrtf(fmaxf(0.0f, 1.0f - cosThetaI * cosThetaI));
+        float sinThetaT = etaRatio * sinThetaI;
+        if (sinThetaT >= 1.0f)
+        {
+            totalInternalReflection = true;
+        }
+
+        bool reflect = totalInternalReflection || (u01(rng) < reflectance);
+
+        if (reflect)
+        {
+            glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
+            float offsetSign = glm::dot(reflectedDir, normal) > 0.0f ? 1.0f : -1.0f;
+            pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
+            pathSegment.ray.direction = glm::normalize(reflectedDir);
+            pathSegment.color *= m.color / fmaxf(reflectance, 1e-6f);
+        }
+        else
+        {
+            glm::vec3 refractedDir = glm::refract(pathSegment.ray.direction, normal, etaRatio);
+            float offsetSign = glm::dot(refractedDir, normal) > 0.0f ? 1.0f : -1.0f;
+            pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
+            pathSegment.ray.direction = glm::normalize(refractedDir);
+            float transmitProb = 1.0f - reflectance;
+            pathSegment.color *= m.color / fmaxf(transmitProb, 1e-6f);
+        }
+    }
+    else if (m.hasReflective > 0.5f)
+    {
+        glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
+        float offsetSign = glm::dot(reflectedDir, normal) > 0.0f ? 1.0f : -1.0f;
+        pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
+        pathSegment.ray.direction = glm::normalize(reflectedDir);
+        pathSegment.color *= m.color;
+    }
+    else
+    {
+        glm::vec3 newDirection = calculateRandomDirectionInHemisphere(normal, rng);
+        pathSegment.ray.origin = intersect + normal * EPSILON;
+        // Apply diffuse material color (energy attenuation)
+        // multiplier = fr * cos theta/pdf(omega)
+        // where pdf(omega) = cos theta / PI
+        // BSDF of diffuse reflection: fr = R / PI
+        pathSegment.ray.direction = glm::normalize(newDirection);
+        pathSegment.color *= m.color;
+    }
+
     // Decrement remaining bounces
     pathSegment.remainingBounces--;
 }
+
