@@ -1,4 +1,4 @@
-﻿#include "pathtrace.h"
+#include "pathtrace.h"
 
 #include <cstdio>
 #include <cuda.h>
@@ -50,23 +50,19 @@ struct ExtractMaterialId {
     }
 };
 
-// Runtime configuration (defaults below, 
-// overridable via setCompactMethod / setSortByMaterial / setAutoSave / setFresnelMode)
+// Runtime configuration -- consolidated into PathTracerOptions (defined in pathtrace.h).
 // Can be overridden at runtime via --compact=N --sort=0/1 --fresnel=0/1 command-line flags
-static int  g_compactMethod  = 3;     // 3 = shared-mem scan (default), 1 = global-mem, 2 = Thrust
-static bool g_sortByMaterial = true;  // true = material sorting enabled
-static bool g_autoSave       = false; // auto-save OFF by default — use --save to enable
-static int  g_fresnelMode    = 0;     // 0 = Schlick, 1 = Accurate
+static PathTracerOptions g_opts;
 
 // Forward declarations for the dispatch table (defined below).
 using CompactCoreFunc = int (*)(int n, PathSegment* dst, const PathSegment* src);
 static int compactCoreThrust(int n, PathSegment* dst, const PathSegment* src);
 static int compactCoreGlobalMem(int n, PathSegment* dst, const PathSegment* src);
 static int compactCoreSharedMem(int n, PathSegment* dst, const PathSegment* src);
-static CompactCoreFunc g_compactCore = compactCoreSharedMem;  // default matches g_compactMethod
+static CompactCoreFunc g_compactCore = compactCoreSharedMem;  // default matches g_opts.compactMethod
 
 void setCompactMethod(int method) {
-    g_compactMethod = method;
+    g_opts.compactMethod = method;
     switch (method) {
         case 0:  g_compactCore = nullptr;                  break;
         case 1:  g_compactCore = compactCoreGlobalMem;     break;
@@ -75,13 +71,11 @@ void setCompactMethod(int method) {
         default: g_compactCore = compactCoreSharedMem;     break;
     }
 }
-void setSortByMaterial(bool enable) { g_sortByMaterial = enable; }
-int  getCompactMethod()             { return g_compactMethod; }
-bool getSortByMaterial()            { return g_sortByMaterial; }
-void setAutoSave(bool enable)       { g_autoSave = enable; }
-bool getAutoSave()                  { return g_autoSave; }
-void setFresnelMode(int mode)       { g_fresnelMode = (mode == 1 ? 1 : 0); }
-int  getFresnelMode()              { return g_fresnelMode; }
+void setSortByMaterial(bool enable) { g_opts.sortByMaterial = enable; }
+int  getCompactMethod()             { return g_opts.compactMethod; }
+bool getSortByMaterial()            { return g_opts.sortByMaterial; }
+void setFresnelMode(int mode)       { g_opts.fresnelMode = (mode == 1 ? 1 : 0); }
+int  getFresnelMode()              { return g_opts.fresnelMode; }
 
 // ====================================================================
 // Compaction dispatch implementations (forward-declared above).
@@ -137,19 +131,11 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
 
 static Scene* hst_scene = NULL;
 static GuiDataContainer* guiData = NULL;
-static glm::vec3* dev_image = NULL;
-static Geom* dev_geoms = NULL;
-static Material* dev_materials = NULL;
-static PathSegment* dev_paths = NULL;
-static ShadeableIntersection* dev_intersections = NULL;
-// Temporary buffer for stream compaction
-static PathSegment* dev_paths_compacted = NULL;
-// Buffers for material-based sorting
-// store the materialId of each intersection for sorting
-static int* dev_sortKeys = NULL;
-// store the original index of each intersection for sorting
-static int* dev_sortIndices = NULL;
-static ShadeableIntersection* dev_intersections_sorted = NULL;
+
+// All GPU device buffers consolidated into a single struct (defined in pathtrace.h).
+// Previously 9 separate static dev_* pointers.
+static DeviceBuffers g_dev;
+
 // TODO: static variables for device memory, any extra info you need, etc
 // ...
 
@@ -170,30 +156,30 @@ void pathtraceInit(Scene* scene)
     const int pixelcount = cam.resolution.x * cam.resolution.y;
     const int maxPaddedPathCount = 1 << ilog2ceil(pixelcount);
 
-    cudaMalloc(&dev_image, pixelcount * sizeof(glm::vec3));
-    cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
+    cudaMalloc(&g_dev.image, pixelcount * sizeof(glm::vec3));
+    cudaMemset(g_dev.image, 0, pixelcount * sizeof(glm::vec3));
 
-    cudaMalloc(&dev_paths, pixelcount * sizeof(PathSegment));
+    cudaMalloc(&g_dev.paths, pixelcount * sizeof(PathSegment));
 
-    cudaMalloc(&dev_paths_compacted, pixelcount * sizeof(PathSegment));
+    cudaMalloc(&g_dev.pathsCompacted, pixelcount * sizeof(PathSegment));
 
-    cudaMalloc(&dev_geoms, scene->geoms.size() * sizeof(Geom));
-    cudaMemcpy(dev_geoms, scene->geoms.data(), scene->geoms.size() * sizeof(Geom), cudaMemcpyHostToDevice);
+    cudaMalloc(&g_dev.geoms, scene->geoms.size() * sizeof(Geom));
+    cudaMemcpy(g_dev.geoms, scene->geoms.data(), scene->geoms.size() * sizeof(Geom), cudaMemcpyHostToDevice);
 
-    cudaMalloc(&dev_materials, scene->materials.size() * sizeof(Material));
-    cudaMemcpy(dev_materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
+    cudaMalloc(&g_dev.materials, scene->materials.size() * sizeof(Material));
+    cudaMemcpy(g_dev.materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
 
-    cudaMalloc(&dev_intersections, pixelcount * sizeof(ShadeableIntersection));
-    cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+    cudaMalloc(&g_dev.intersections, pixelcount * sizeof(ShadeableIntersection));
+    cudaMemset(g_dev.intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     // TODO: initialize any extra device memeory you need
     StreamCompaction::Efficient::initCompactionWorkspace(maxPaddedPathCount);
 
     // Sort buffers -- always allocated (overhead is negligible); the sorting
-    // function early-returns when g_sortByMaterial is false at runtime.
-    cudaMalloc(&dev_sortKeys, pixelcount * sizeof(int));
-    cudaMalloc(&dev_sortIndices, pixelcount * sizeof(int));
-    cudaMalloc(&dev_intersections_sorted, pixelcount * sizeof(ShadeableIntersection));
+    // function early-returns when g_opts.sortByMaterial is false at runtime.
+    cudaMalloc(&g_dev.sortKeys, pixelcount * sizeof(int));
+    cudaMalloc(&g_dev.sortIndices, pixelcount * sizeof(int));
+    cudaMalloc(&g_dev.intersectionsSorted, pixelcount * sizeof(ShadeableIntersection));
 
     s_initialized = true;
 
@@ -207,15 +193,15 @@ void pathtraceFree()
 
     s_initialized = false;
 
-    cudaFree(dev_image);  // no-op if dev_image is null
-    cudaFree(dev_paths);
-    cudaFree(dev_paths_compacted);
-    cudaFree(dev_geoms);
-    cudaFree(dev_materials);
-    cudaFree(dev_intersections);
-    cudaFree(dev_sortKeys);
-    cudaFree(dev_sortIndices);
-    cudaFree(dev_intersections_sorted);
+    cudaFree(g_dev.image);  // no-op if g_dev.image is null
+    cudaFree(g_dev.paths);
+    cudaFree(g_dev.pathsCompacted);
+    cudaFree(g_dev.geoms);
+    cudaFree(g_dev.materials);
+    cudaFree(g_dev.intersections);
+    cudaFree(g_dev.sortKeys);
+    cudaFree(g_dev.sortIndices);
+    cudaFree(g_dev.intersectionsSorted);
     StreamCompaction::Efficient::freeCompactionWorkspace();
     // TODO: clean up any extra device memory you created
 
@@ -267,6 +253,29 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 // computeIntersections handles generating ray intersections ONLY.
 // Generating new rays is handled in your shader(s).
 // Feel free to modify the code below.
+
+// Dispatch a single geometry intersection test based on geometry type.
+// Extracted from computeIntersections so that adding a new primitive type
+// (triangle, metaball, CSG, etc.) only requires modifying this one function.
+__device__ float intersectSingleGeom(
+    const Geom& geom,
+    const Ray& ray,
+    glm::vec3& outPoint,
+    glm::vec3& outNormal,
+    bool& outOutside)
+{
+    if (geom.type == CUBE)
+    {
+        return boxIntersectionTest(geom, ray, outPoint, outNormal, outOutside);
+    }
+    else if (geom.type == SPHERE)
+    {
+        return sphereIntersectionTest(geom, ray, outPoint, outNormal, outOutside);
+    }
+    // TODO: add more intersection tests here... triangle? metaball? CSG?
+    return -1.0f;
+}
+
 __global__ void computeIntersections(
     int depth,
     int num_paths,
@@ -297,15 +306,7 @@ __global__ void computeIntersections(
         {
             Geom& geom = geoms[i];
 
-            if (geom.type == CUBE)
-            {
-                t = boxIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
-            }
-            else if (geom.type == SPHERE)
-            {
-                t = sphereIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
-            }
-            // TODO: add more intersection tests here... triangle? metaball? CSG?
+            t = intersectSingleGeom(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
 
             // Compute the minimum t from the intersection tests to determine what
             // scene geometry object was hit first.
@@ -330,6 +331,45 @@ __global__ void computeIntersections(
             intersections[path_index].surfaceNormal = normal;
         }
     }
+}
+
+// Russian roulette: probabilistically terminate paths whose throughput has
+// dropped below a useful level.  Extracted from shadeMaterial for clarity.
+// Returns true if the path should be terminated.
+//
+// Survival probability p = max(R,G,B) clamped to [RR_P_MIN, RR_P_MAX].
+//   - Using max component is conservative (highest survival chance
+//     among the three channels -> fewest fireflies).
+//   - RR_P_MIN prevents extreme compensation factors (max 1/0.2 = 5x).
+//   - RR_P_MAX = 1.0 means paths with full throughput always survive.
+//
+// Unbiased: survivors have throughput /= p.
+// Terminated paths keep their color intact -- gatherTerminatedPaths
+// collects it during the next compaction pass.
+__device__ bool russianRouletteTerminate(
+    glm::vec3& color,
+    int remainingBounces,
+    int traceDepth,
+    int rrMinBounces,
+    thrust::default_random_engine& rng)
+{
+    // Only applies after rrMinBounces guaranteed bounces.
+    if (remainingBounces <= 0 ||
+        remainingBounces >= traceDepth - rrMinBounces)
+    {
+        return false; // still within guaranteed bounces
+    }
+
+    float p = fmaxf(fmaxf(color.r, color.g), color.b);
+    p = fminf(fmaxf(p, RR_P_MIN), RR_P_MAX);
+
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    if (u01(rng) < p)
+    {
+        color /= p;    // unbiased compensation
+        return false;  // survived
+    }
+    return true; // terminated
 }
 
 /**
@@ -408,38 +448,15 @@ __global__ void shadeMaterial(
                 //
                 // Note: scatterRay() has already decremented remainingBounces, so we check
                 // the UPDATED value. With traceDepth=8 and rrMinBounces=3:
-                //   - Bounce 0: remainingBounces = 7 after scatter, 7 < 5? No → no RR
-                //   - Bounce 1: remainingBounces = 6 after scatter, 6 < 5? No → no RR  
-                //   - Bounce 2: remainingBounces = 5 after scatter, 5 < 5? No → no RR
-                //   - Bounce 3: remainingBounces = 4 after scatter, 4 < 5? Yes → RR starts
+                //   - Bounce 0: remainingBounces = 7 after scatter, 7 < 5? No -> no RR
+                //   - Bounce 1: remainingBounces = 6 after scatter, 6 < 5? No -> no RR
+                //   - Bounce 2: remainingBounces = 5 after scatter, 5 < 5? No -> no RR
+                //   - Bounce 3: remainingBounces = 4 after scatter, 4 < 5? Yes -> RR starts
                 // This ensures the first rrMinBounces (3) bounces are guaranteed.
-                //
-                // Survival probability p = max(R,G,B) clamped to [RR_P_MIN, RR_P_MAX].
-                //   - Using max component is conservative (highest survival chance
-                //     among the three channels -> fewest fireflies).
-                //   - RR_P_MIN prevents extreme compensation factors (max 1/0.2 = 5x).
-                //   - RR_P_MAX = 1.0 means paths with full throughput always survive.
-                //
-                // Unbiased: survivors have throughput /= p.
-                // Terminated paths keep their color intact -- gatherTerminatedPaths
-                // collects it during the next compaction pass.
-                if (pathSegment.remainingBounces > 0 &&
-                    pathSegment.remainingBounces < traceDepth - rrMinBounces)
+                if (russianRouletteTerminate(pathSegment.color,
+                    pathSegment.remainingBounces, traceDepth, rrMinBounces, rng))
                 {
-                    float p = fmaxf(fmaxf(pathSegment.color.r,
-                                           pathSegment.color.g),
-                                           pathSegment.color.b);
-                    p = fminf(fmaxf(p, RR_P_MIN), RR_P_MAX);
-
-                    thrust::uniform_real_distribution<float> u01(0, 1);
-                    if (u01(rng) < p)
-                    {
-                        pathSegment.color /= p;    // unbiased compensation
-                    }
-                    else
-                    {
-                        pathSegment.remainingBounces = 0;  // terminate
-                    }
+                    pathSegment.remainingBounces = 0;  // terminate
                 }
             }
         }
@@ -555,7 +572,7 @@ __global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment*
 // ---------------------------------------------------------------------------
 
 /**
- * Permutes dev_paths and dev_intersections so that paths hitting the same
+ * Permutes g_dev.paths and g_dev.intersections so that paths hitting the same
  * material become contiguous in memory.
  *
  * Why this helps:
@@ -569,66 +586,61 @@ __global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment*
  *   load adjacent Material structs instead of scattering across the array.
  *
  * Algorithm (Thrust-based, in-place via ping-pong):
- *   1. Extract materialId from dev_intersections -> dev_sortKeys
- *   2. Fill dev_sortIndices = [0, 1, 2, ...]
+ *   1. Extract materialId from g_dev.intersections -> g_dev.sortKeys
+ *   2. Fill g_dev.sortIndices = [0, 1, 2, ...]
  *   3. sort_by_key(keys, indices)  -- indices now map sorted_pos -> original_pos
- *   4. gather paths    via indices -> dev_paths_compacted  (reuses compaction buffer)
- *   5. gather intersections via indices -> dev_intersections_sorted
- *   6. Swap pointers so dev_paths / dev_intersections point to sorted data
+ *   4. gather paths    via indices -> g_dev.pathsCompacted  (reuses compaction buffer)
+ *   5. gather intersections via indices -> g_dev.intersectionsSorted
+ *   6. Swap pointers so g_dev.paths / g_dev.intersections point to sorted data
  *
- * When g_sortByMaterial is false this function returns immediately (runtime
+ * When g_opts.sortByMaterial is false this function returns immediately (runtime
  * toggle -- no rebuild needed for performance comparisons).
  */
 static void sortPathsByMaterial(int num_paths)
 {
-    if (!g_sortByMaterial) return;   // runtime toggle
+    if (!g_opts.sortByMaterial) return;   // runtime toggle
     if (num_paths <= 1) return;
 
     // 1. Extract sort keys (materialId from each intersection)
     thrust::transform(thrust::device,//transform in GPU
-        dev_intersections, dev_intersections + num_paths,
-        dev_sortKeys,
+        g_dev.intersections, g_dev.intersections + num_paths,
+        g_dev.sortKeys,
         ExtractMaterialId());
 
     // 2. Initialise permutation indices: [0, 1, 2, ..., n-1]
     thrust::sequence(thrust::device,
-        dev_sortIndices, dev_sortIndices + num_paths);
+        g_dev.sortIndices, g_dev.sortIndices + num_paths);
 
     // 3. Sort indices by material ID (stable radix sort)
     thrust::sort_by_key(thrust::device,
-        dev_sortKeys, dev_sortKeys + num_paths,
-        dev_sortIndices);
-    // dev_sortIndices[sorted_pos] now gives the original position
+        g_dev.sortKeys, g_dev.sortKeys + num_paths,
+        g_dev.sortIndices);
+    // g_dev.sortIndices[sorted_pos] now gives the original position
 
     // 4. Gather path segments into sorted order
-    //    Reuses dev_paths_compacted as the gather destination; its previous
+    //    Reuses g_dev.pathsCompacted as the gather destination; its previous
     //    contents (from stream compaction) are stale and safe to overwrite.
     thrust::gather(thrust::device,
-        dev_sortIndices, dev_sortIndices + num_paths,
-        dev_paths,               // input  (unsorted)
-        dev_paths_compacted);    // output (sorted)
+        g_dev.sortIndices, g_dev.sortIndices + num_paths,
+        g_dev.paths,               // input  (unsorted)
+        g_dev.pathsCompacted);    // output (sorted)
     //for (i = 0 to n-1):
     //output[i] = input[indices[i]]
 
 
     // 5. Gather intersections into sorted order (separate temp buffer)
     thrust::gather(thrust::device,
-        dev_sortIndices, dev_sortIndices + num_paths,
-        dev_intersections,        // input  (unsorted)
-        dev_intersections_sorted);// output (sorted)
+        g_dev.sortIndices, g_dev.sortIndices + num_paths,
+        g_dev.intersections,        // input  (unsorted)
+        g_dev.intersectionsSorted);// output (sorted)
 
     // 6. Swap pointers -- the sorted arrays are now the "live" ones
-    { PathSegment* tmp = dev_paths;
-      dev_paths = dev_paths_compacted;
-      dev_paths_compacted = tmp; }
-
-    { ShadeableIntersection* tmp = dev_intersections;
-      dev_intersections = dev_intersections_sorted;
-      dev_intersections_sorted = tmp; }
+    std::swap(g_dev.paths, g_dev.pathsCompacted);
+    std::swap(g_dev.intersections, g_dev.intersectionsSorted);
 }
 
 /**
- * Gathers terminated path colors into dev_image, then stream-compacts the path
+ * Gathers terminated path colors into g_dev.image, then stream-compacts the path
  * array to remove entries with remainingBounces <= 0.
  *
  * WHY before compaction:
@@ -639,7 +651,7 @@ static void sortPathsByMaterial(int num_paths)
  *   Active paths (remainingBounces > 0) are deliberately skipped here -- they
  *   continue bouncing and contribute when they eventually terminate.
  *
- * Uses ping-pong buffers (dev_paths <-> dev_paths_compacted) to avoid a
+ * Uses ping-pong buffers (g_dev.paths <-> g_dev.pathsCompacted) to avoid a
  * separate allocation per bounce.
  *
  * Implicit Host-Device Synchronization:
@@ -658,7 +670,7 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
 {
     Profiler& prof = g_profiler();
 
-    // Compaction disabled at runtime — terminated paths are guarded by the
+    // Compaction disabled at runtime -- terminated paths are guarded by the
     // remainingBounces check in shadeMaterial; finalGather collects everything.
     if (g_compactCore == nullptr) {
         return false;
@@ -669,22 +681,39 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
     // 1. Bank terminated-path colors before they disappear.
     prof.gpuStart(ProfilerOp::GatherTerminatedPaths);
     gatherTerminatedPaths<<<numBlocks, blockSize1d>>>(
-        num_paths, dev_image, dev_paths);
+        num_paths, g_dev.image, g_dev.paths);
     prof.gpuStop(ProfilerOp::GatherTerminatedPaths);
     checkCUDAError("gatherTerminatedPaths");
 
     // 2. Compact: dispatch through function pointer (set once at startup).
     prof.cpuStart(ProfilerOp::CompactPaths);
-    int survivors = g_compactCore(num_paths, dev_paths_compacted, dev_paths);
+    int survivors = g_compactCore(num_paths, g_dev.pathsCompacted, g_dev.paths);
     prof.cpuStop(ProfilerOp::CompactPaths);
 
     // 3. Swap buffers: compacted array becomes the active one.
-    PathSegment* tmp = dev_paths;
-    dev_paths = dev_paths_compacted;
-    dev_paths_compacted = tmp;
+    std::swap(g_dev.paths, g_dev.pathsCompacted);
 
     num_paths = survivors;
     return (num_paths == 0);
+}
+
+// ---------------------------------------------------------------------------
+// Host-side helpers extracted from pathtrace() for readability.
+// ---------------------------------------------------------------------------
+
+// Print per-bounce path survival counts.  Enabled only when the profiler's
+// --verbose flag is set.
+static void debugPrintBounce(int iter, int depth, int num_paths) {
+    if (g_profiler().verbose()) {
+        printf("  iter=%d depth=%d paths=%d\n", iter, depth, num_paths);
+    }
+}
+
+// Update the ImGui trace-depth display and per-kernel timing after each frame.
+static void updateGuiAfterFrame(Profiler& prof, GuiDataContainer* gui) {
+    if (prof.enabled() && gui != NULL) {
+        prof.updateGuiData(gui);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -752,7 +781,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
     // ---- 1. Primary rays ------------------------------------------------
     generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(
-        cam, iter, traceDepth, dev_paths);
+        cam, iter, traceDepth, g_dev.paths);
     checkCUDAError("generate camera ray");
 
     int  depth     = 0;
@@ -762,9 +791,9 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     // ---- 2. Bounce loop -------------------------------------------------
     while (!done)
     {
-        // Note: No need to zero out dev_intersections here.
+        // Note: No need to zero out g_dev.intersections here.
         // computeIntersections will overwrite all active path entries completely.
-        // cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+        // cudaMemset(g_dev.intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
         prof.recordBounce(depth, num_paths);
 
@@ -772,16 +801,16 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         prof.gpuStart(ProfilerOp::ComputeIntersections);
         computeIntersections<<<numBlocks, blockSize1d>>>(
-            depth, num_paths, dev_paths,
-            dev_geoms, hst_scene->geoms.size(), dev_intersections);
+            depth, num_paths, g_dev.paths,
+            g_dev.geoms, hst_scene->geoms.size(), g_dev.intersections);
         prof.gpuStop(ProfilerOp::ComputeIntersections);
         checkCUDAError("trace one bounce");
         depth++;
 
         // GPU timer: sortPathsByMaterial consists of asynchronous Thrust calls
-        // (transform, sequence, sort_by_key, gather×2).  None of these implicitly
-        // synchronise — they launch GPU kernels and return immediately.  A CPU
-        // timer would only capture launch overhead (~µs), missing the actual GPU
+        // (transform, sequence, sort_by_key, gatherx2).  None of these implicitly
+        // synchronise -- they launch GPU kernels and return immediately.  A CPU
+        // timer would only capture launch overhead (~us), missing the actual GPU
         // work.  Using cudaEvent captures true GPU execution time and the
         // cudaEventSynchronize inside gpuStop provides the sync point.
         //
@@ -789,25 +818,21 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         // iterator, so Thrust internally syncs to count survivors.  CPU timer is
         // correct there because it naturally captures the full blocking cost.
         prof.gpuStart(ProfilerOp::SortByMaterial);
-        sortPathsByMaterial(num_paths);  // no-op when g_sortByMaterial==false
+        sortPathsByMaterial(num_paths);  // no-op when g_opts.sortByMaterial==false
         prof.gpuStop(ProfilerOp::SortByMaterial);
 
         prof.gpuStart(ProfilerOp::ShadeMaterial);
         shadeMaterial<<<numBlocks, blockSize1d>>>(
             iter, num_paths,
-            dev_intersections, dev_paths, dev_materials,
+            g_dev.intersections, g_dev.paths, g_dev.materials,
             traceDepth, hst_scene->state.rrMinBounces,
-            g_fresnelMode);
+            g_opts.fresnelMode);
         prof.gpuStop(ProfilerOp::ShadeMaterial);
 
         bool allDead = compactActivePaths(num_paths, blockSize1d);
         done = allDead || (depth >= traceDepth);
 
-        // Debug: print per-bounce path survival to verify RR is working.
-        // Enabled only when --verbose flag is passed (separate from --benchmark).
-        if (g_profiler().verbose()) {
-            printf("  iter=%d depth=%d paths=%d\n", iter, depth, num_paths);
-        }
+        debugPrintBounce(iter, depth, num_paths);
 
         if (guiData != NULL)
             guiData->TracedDepth = depth;
@@ -819,24 +844,20 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     {
         dim3 numBlocks((pixelcount + blockSize1d - 1) / blockSize1d);
         finalGather<<<numBlocks, blockSize1d>>>(
-            num_paths, dev_image, dev_paths);
+            num_paths, g_dev.image, g_dev.paths);
     }
 
     // ---- 4. Display -----------------------------------------------------
     sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(
-        pbo, cam.resolution, iter, dev_image);
+        pbo, cam.resolution, iter, g_dev.image);
 
-    cudaMemcpy(hst_scene->state.image.data(), dev_image,
+    cudaMemcpy(hst_scene->state.image.data(), g_dev.image,
                pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
     checkCUDAError("pathtrace");
 
     prof.endIteration();
-
-    // Update GUI timing display
-    if (prof.enabled() && guiData != NULL) {
-        prof.updateGuiData(guiData);
-    }
+    updateGuiAfterFrame(prof, guiData);
 
     // CSV output is flushed by atexit(profiler.shutdown) in main.cpp.
     // Doing it here would race with endFrame() in runCuda(), which fires
