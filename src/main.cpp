@@ -25,6 +25,15 @@
 #include <sstream>
 #include <string>
 
+// Parsed command-line configuration returned by parseFlags()
+struct CliConfig {
+    std::string  sceneFile;
+    ProfilerConfig profCfg;
+    bool autoSave   = false;
+    bool showHelp   = false;
+    bool hasScene   = false;
+};
+
 static std::string startTimeString;
 
 // Auto-save final image on completion (moved from pathtrace.cu — application-level concern)
@@ -69,6 +78,7 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods
 void mousePositionCallback(GLFWwindow* window, double xpos, double ypos);
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 void printStartupHelp(const char* exeName);
+CliConfig parseFlags(int argc, char** argv);
 
 std::string currentTimeString()
 {
@@ -105,7 +115,7 @@ void printStartupHelp(const char* exeName)
     printf("    -h, --help     Show this help text.\n");
     printf("\n");
     printf("  Notes:\n");
-    printf("    - Flags are order-independent, but the scene file must come first.\n");
+    printf("    - Flags and scene file are order-independent.\n");
     printf("    - Profiler CSVs are written to profiler_output/<scene>_<timestamp>/\n");
     printf("      when --benchmark is enabled.\n");
     printf("    - Nonzero values for --sort are treated as enabled.\n");
@@ -426,6 +436,62 @@ void mainLoop()
     glfwTerminate();
 }
 
+CliConfig parseFlags(int argc, char** argv)
+{
+    CliConfig cfg;
+
+    // Seed ProfilerConfig with runtime defaults from pathtrace.cu, so that
+    // CSV metadata matches actual behaviour even when no CLI flag is given.
+    cfg.profCfg.compactMethod  = getCompactMethod();
+    cfg.profCfg.sortByMaterial = getSortByMaterial();
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        // ----- Named flags -----
+        if (arg == "-h" || arg == "--help") {
+            cfg.showHelp = true;
+        } else if (arg == "--benchmark") {
+            cfg.profCfg.enabled = true;
+        } else if (arg == "--verbose") {
+            cfg.profCfg.verbose = true;
+        } else if (arg == "--save") {
+            cfg.autoSave = true;
+        } else if (arg.rfind("--compact=", 0) == 0) {
+            int v = std::stoi(arg.substr(10));
+            cfg.profCfg.compactMethod = v;
+            setCompactMethod(v);
+        } else if (arg.rfind("--sort=", 0) == 0) {
+            bool v = (std::stoi(arg.substr(7)) != 0);
+            cfg.profCfg.sortByMaterial = v;
+            setSortByMaterial(v);
+        } else if (arg.rfind("--fresnel=", 0) == 0) {
+            int v = std::stoi(arg.substr(10));
+            v = (v == 1) ? 1 : 0;
+            setFresnelMode(v);
+        } else if (arg.rfind("--warmup=", 0) == 0) {
+            cfg.profCfg.warmupIters = std::stoi(arg.substr(9));
+        }
+        // ----- Positional argument: scene file -----
+        else {
+            cfg.sceneFile = arg;
+            cfg.hasScene  = true;
+        }
+    }
+
+    // Derive a clean scene name for CSV output (strip path + extension)
+    if (cfg.hasScene) {
+        std::string s = cfg.sceneFile;
+        size_t slash = s.find_last_of("/\\");
+        if (slash != std::string::npos) s = s.substr(slash + 1);
+        size_t dot = s.find_last_of('.');
+        if (dot != std::string::npos) s = s.substr(0, dot);
+        cfg.profCfg.sceneName = s;
+    }
+
+    return cfg;
+}
+
 //-------------------------------
 //-------------MAIN--------------
 //-------------------------------
@@ -440,67 +506,24 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    for (int i = 1; i < argc; ++i)
+    CliConfig cfg = parseFlags(argc, argv);
+    g_autoSave = cfg.autoSave;
+
+    if (cfg.showHelp)
     {
-        std::string arg = argv[i];
-        if (arg == "-h" || arg == "--help")
-        {
-            printStartupHelp(argv[0]);
-            return 0;
-        }
+        printStartupHelp(argv[0]);
+        return 0;
     }
 
-    const char* sceneFile = argv[1];
-
-    // ---- Parse CLI arguments (after scene file) ----
-    ProfilerConfig profCfg;
-    
-    // Strip path and extension to get a clean scene name for CSV output
+    if (!cfg.hasScene)
     {
-        std::string s = sceneFile;  // e.g., "../scenes/cornell.json"
-        
-        // Step 1: Strip directory path
-        size_t slash = s.find_last_of("/\\");
-        if (slash != std::string::npos) {
-            s = s.substr(slash + 1);  // Now s = "cornell.json"
-        }
-        
-        // Step 2: Strip file extension (only after path is removed)
-        size_t dot = s.find_last_of('.');
-        if (dot != std::string::npos) {
-            s = s.substr(0, dot);  // Now s = "cornell"
-        }
-        
-        profCfg.sceneName = s;
+        fprintf(stderr, "Error: No scene file specified.\n\n");
+        printStartupHelp(argv[0]);
+        return 1;
     }
 
-    // Initialize profCfg with runtime defaults from pathtrace.cu
-    // This ensures CSV metadata matches actual runtime behavior when no flags are provided
-    profCfg.compactMethod = getCompactMethod();
-    profCfg.sortByMaterial = getSortByMaterial();
-
-    for (int i = 2; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--benchmark") {
-            profCfg.enabled = true;
-        } else if (arg == "--verbose") {
-            profCfg.verbose = true;
-        } else if (arg.rfind("--compact=", 0) == 0) {
-            profCfg.compactMethod = std::stoi(arg.substr(10));
-            setCompactMethod(profCfg.compactMethod);
-        } else if (arg.rfind("--sort=", 0) == 0) {
-            profCfg.sortByMaterial = (std::stoi(arg.substr(7)) != 0);
-            setSortByMaterial(profCfg.sortByMaterial);
-        } else if (arg.rfind("--fresnel=", 0) == 0) {
-            int mode = std::stoi(arg.substr(10));
-            mode = (mode == 1) ? 1 : 0;
-            setFresnelMode(mode);
-        } else if (arg.rfind("--warmup=", 0) == 0) {
-            profCfg.warmupIters = std::stoi(arg.substr(9));
-        } else if (arg == "--save") {
-            g_autoSave = true;
-        }
-    }
+    ProfilerConfig profCfg = cfg.profCfg;
+    const char* sceneFile  = cfg.sceneFile.c_str();
 
     // Load scene file
     scene = new Scene(sceneFile);
