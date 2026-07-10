@@ -50,11 +50,13 @@ struct ExtractMaterialId {
     }
 };
 
-// Runtime configuration (defaults below, overridable via setCompactMethod / setSortByMaterial / setAutoSave)
-// Can be overridden at runtime via --compact=N --sort=0/1 command-line flags
+// Runtime configuration (defaults below, 
+// overridable via setCompactMethod / setSortByMaterial / setAutoSave / setFresnelMode)
+// Can be overridden at runtime via --compact=N --sort=0/1 --fresnel=0/1 command-line flags
 static int  g_compactMethod  = 3;     // 3 = shared-mem scan (default), 1 = global-mem, 2 = Thrust
 static bool g_sortByMaterial = true;  // true = material sorting enabled
 static bool g_autoSave       = false; // auto-save OFF by default — use --save to enable
+static int  g_fresnelMode    = 0;     // 0 = Schlick, 1 = Accurate
 
 // Forward declarations for the dispatch table (defined below).
 using CompactCoreFunc = int (*)(int n, PathSegment* dst, const PathSegment* src);
@@ -78,6 +80,8 @@ int  getCompactMethod()             { return g_compactMethod; }
 bool getSortByMaterial()            { return g_sortByMaterial; }
 void setAutoSave(bool enable)       { g_autoSave = enable; }
 bool getAutoSave()                  { return g_autoSave; }
+void setFresnelMode(int mode)       { g_fresnelMode = (mode == 1 ? 1 : 0); }
+int  getFresnelMode()              { return g_fresnelMode; }
 
 // ====================================================================
 // Compaction dispatch implementations (forward-declared above).
@@ -346,7 +350,8 @@ __global__ void shadeMaterial(
     PathSegment* pathSegments,
     Material* materials,
     int traceDepth,
-    int rrMinBounces)
+    int rrMinBounces,
+    int fresnelMode)
 {
     //Memory-Bound:Occupancy is limited by the number of registers used per thread
     //so designing smallest and aligned data structure 
@@ -395,7 +400,7 @@ __global__ void shadeMaterial(
             {
                 // Non-emissive surface: scatter ray according to BSDF
                 // This updates the ray direction and attenuates color based on material
-                scatterRay(pathSegment, intersectionPoint, intersection.surfaceNormal, material, rng);
+                scatterRay(pathSegment, intersectionPoint, intersection.surfaceNormal, material, rng, fresnelMode);
 
                 // Russian roulette: probabilistically terminate paths whose
                 // throughput has dropped below a useful level.  Only applies
@@ -791,7 +796,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         shadeMaterial<<<numBlocks, blockSize1d>>>(
             iter, num_paths,
             dev_intersections, dev_paths, dev_materials,
-            traceDepth, hst_scene->state.rrMinBounces);
+            traceDepth, hst_scene->state.rrMinBounces,
+            g_fresnelMode);
         prof.gpuStop(ProfilerOp::ShadeMaterial);
 
         bool allDead = compactActivePaths(num_paths, blockSize1d);
