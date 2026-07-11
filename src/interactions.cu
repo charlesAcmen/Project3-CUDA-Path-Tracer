@@ -244,9 +244,13 @@ __host__ __device__ void scatterRay(
         case MaterialType::Refractive:
         {
             float n1, n2, cosThetaI;
-            classifyRefraction(pathSegment.ray.direction, normal, m.indexOfRefraction, n1, n2, cosThetaI);
-            // Use invIndexOfRefraction to avoid division on entry
-            float etaRatio = (glm::dot(pathSegment.ray.direction, normal) < 0.0f) ? m.invIndexOfRefraction : m.indexOfRefraction;
+            const HitSide hitSide = classifyRefraction(pathSegment.ray.direction, normal, m.indexOfRefraction, n1, n2, cosThetaI);
+            const bool entering = (hitSide == HitSide::Outside);
+            // Use invIndexOfRefraction to avoid division on entry.
+            // The offset sign is keyed off the entering/exiting state rather than
+            // the new direction's dot product, which is numerically unstable near grazing angles.
+            const float etaRatio = entering ? m.invIndexOfRefraction : m.indexOfRefraction;
+            const glm::vec3 refractNormal = entering ? normal : -normal;
 
             // Both Fresnel functions return 1.0 on total internal reflection,
             // so u01 < 1.0 is always true → the reflection branch is taken.
@@ -260,15 +264,14 @@ __host__ __device__ void scatterRay(
             if (u01(rng) < reflectance)
             {
                 glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
-                float offsetSign = glm::dot(reflectedDir, normal) > 0.0f ? 1.0f : -1.0f;
+                const float offsetSign = entering ? 1.0f : -1.0f;
                 pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
                 pathSegment.ray.direction = reflectedDir;
             }
             else
             {
-                glm::vec3 refractNormal = (glm::dot(pathSegment.ray.direction, normal) < 0.0f) ? normal : -normal;
                 glm::vec3 refractedDir = glm::refract(pathSegment.ray.direction, refractNormal, etaRatio);
-                float offsetSign = glm::dot(refractedDir, normal) > 0.0f ? 1.0f : -1.0f;
+                const float offsetSign = entering ? -1.0f : 1.0f;
                 pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
                 pathSegment.ray.direction = refractedDir;
             }
