@@ -54,22 +54,13 @@ struct ExtractMaterialId {
 // Can be overridden at runtime via --compact=N --sort=0/1 --fresnel=0/1 command-line flags
 static PathTracerOptions g_opts;
 
-// Forward declarations for the dispatch table (defined below).
-using CompactCoreFunc = int (*)(int n, PathSegment* dst, const PathSegment* src);
+// Forward declarations for the compact implementations.
 static int compactCoreThrust(int n, PathSegment* dst, const PathSegment* src);
 static int compactCoreGlobalMem(int n, PathSegment* dst, const PathSegment* src);
 static int compactCoreSharedMem(int n, PathSegment* dst, const PathSegment* src);
-static CompactCoreFunc g_compactCore = nullptr;
 
 void setCompactMethod(int method) {
     g_opts.compactMethod = method;
-    switch (method) {
-        case 0:  g_compactCore = nullptr;                  break;
-        case 1:  g_compactCore = compactCoreGlobalMem;     break;
-        case 2:  g_compactCore = compactCoreThrust;        break;
-        case 3:  g_compactCore = compactCoreSharedMem;     break;
-        default: g_compactCore = compactCoreSharedMem;     break;
-    }
 }
 void setSortByMaterial(bool enable) { g_opts.sortByMaterial = enable; }
 int  getCompactMethod()             { return g_opts.compactMethod; }
@@ -688,7 +679,7 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
 
     // Compaction disabled at runtime -- terminated paths are guarded by the
     // remainingBounces check in shadeMaterial; finalGather collects everything.
-    if (g_compactCore == nullptr) {
+    if (g_opts.compactMethod == 0) {
         return false;
     }
 
@@ -701,9 +692,16 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
     prof.gpuStop(ProfilerOp::GatherTerminatedPaths);
     checkCUDAError("gatherTerminatedPaths");
 
-    // 2. Compact: dispatch through function pointer (set once at startup).
+    // 2. Compact: dispatch explicitly based on the runtime option.
     prof.cpuStart(ProfilerOp::CompactPaths);
-    int survivors = g_compactCore(num_paths, g_dev.pathsCompacted, g_dev.paths);
+    int survivors = 0;
+    if (g_opts.compactMethod == 1) {
+        survivors = compactCoreGlobalMem(num_paths, g_dev.pathsCompacted, g_dev.paths);
+    } else if (g_opts.compactMethod == 2) {
+        survivors = compactCoreThrust(num_paths, g_dev.pathsCompacted, g_dev.paths);
+    } else {
+        survivors = compactCoreSharedMem(num_paths, g_dev.pathsCompacted, g_dev.paths);
+    }
     prof.cpuStop(ProfilerOp::CompactPaths);
 
     // 3. Swap buffers: compacted array becomes the active one.
