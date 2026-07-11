@@ -33,6 +33,14 @@ struct Geom
     glm::mat4 invTranspose;
 };
 
+enum class MaterialType
+{
+    Diffuse,
+    Reflective,
+    Refractive,
+    Emissive
+};
+
 struct Material
 {
     glm::vec3 color;              // Base albedo or surface tint for diffuse/refraction throughput
@@ -44,8 +52,7 @@ struct Material
         glm::vec3 color;          // Specular color tint for mirror-like reflections
         //镜面反射的高光颜色色调
     } specular;
-    float hasReflective;          // Nonzero means this material should reflect rays
-    float hasRefractive;          // Nonzero means this material should refract/transmit rays
+    MaterialType type;            // Explicit material classification used by scattering logic
     float indexOfRefraction;      // IOR of the refractive material, e.g. 1.5 for glass
     float invIndexOfRefraction;   // Precomputed inverse IOR to avoid GPU division
     float emittance;              // Emission strength for light sources (nonzero = emissive)

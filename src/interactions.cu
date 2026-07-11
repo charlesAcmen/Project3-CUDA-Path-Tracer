@@ -239,58 +239,66 @@ __host__ __device__ void scatterRay(
     // normal, so the offset always pushes the origin to the correct side.
     thrust::uniform_real_distribution<float> u01(0, 1);
 
-    if (m.hasRefractive > 0.5f)
+    switch (m.type)
     {
-        float n1, n2, cosThetaI;
-        classifyRefraction(pathSegment.ray.direction, normal, m.indexOfRefraction, n1, n2, cosThetaI);
-        // Use invIndexOfRefraction to avoid division on entry
-        float etaRatio = (glm::dot(pathSegment.ray.direction, normal) < 0.0f) ? m.invIndexOfRefraction : m.indexOfRefraction;
+        case MaterialType::Refractive:
+        {
+            float n1, n2, cosThetaI;
+            classifyRefraction(pathSegment.ray.direction, normal, m.indexOfRefraction, n1, n2, cosThetaI);
+            // Use invIndexOfRefraction to avoid division on entry
+            float etaRatio = (glm::dot(pathSegment.ray.direction, normal) < 0.0f) ? m.invIndexOfRefraction : m.indexOfRefraction;
 
-        // Both Fresnel functions return 1.0 on total internal reflection,
-        // so u01 < 1.0 is always true → the reflection branch is taken.
-        FresnelEvaluator fresnelEval = selectFresnelEvaluator(fresnelMode);
-        float reflectance = fresnelEval(cosThetaI, n1, n2);
+            // Both Fresnel functions return 1.0 on total internal reflection,
+            // so u01 < 1.0 is always true → the reflection branch is taken.
+            FresnelEvaluator fresnelEval = selectFresnelEvaluator(fresnelMode);
+            float reflectance = fresnelEval(cosThetaI, n1, n2);
 
-        // Russian roulette: reflect with prob R, refract with prob 1-R.
-        // Throughput multiplier = (energy fraction) / (probability):
-        //   reflection:  R * color / R     = color
-        //   refraction: (1-R) * color / (1-R) = color
-        // → Fresnel factor cancels out in both branches.
-        if (u01(rng) < reflectance)
+            // Russian roulette: reflect with prob R, refract with prob 1-R.
+            // Throughput multiplier = (energy fraction) / (probability):
+            //   reflection:  R * color / R     = color
+            //   refraction: (1-R) * color / (1-R) = color
+            // → Fresnel factor cancels out in both branches.
+            if (u01(rng) < reflectance)
+            {
+                glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
+                float offsetSign = glm::dot(reflectedDir, normal) > 0.0f ? 1.0f : -1.0f;
+                pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
+                pathSegment.ray.direction = reflectedDir;
+            }
+            else
+            {
+                glm::vec3 refractNormal = (glm::dot(pathSegment.ray.direction, normal) < 0.0f) ? normal : -normal;
+                glm::vec3 refractedDir = glm::refract(pathSegment.ray.direction, refractNormal, etaRatio);
+                float offsetSign = glm::dot(refractedDir, normal) > 0.0f ? 1.0f : -1.0f;
+                pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
+                pathSegment.ray.direction = refractedDir;
+            }
+            pathSegment.color *= m.color;
+            break;
+        }
+        case MaterialType::Reflective:
         {
             glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
             float offsetSign = glm::dot(reflectedDir, normal) > 0.0f ? 1.0f : -1.0f;
             pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
             pathSegment.ray.direction = reflectedDir;
+            pathSegment.color *= m.color;
+            break;
         }
-        else
+        case MaterialType::Diffuse:
+        case MaterialType::Emissive:
+        default:
         {
-            glm::vec3 refractNormal = (glm::dot(pathSegment.ray.direction, normal) < 0.0f) ? normal : -normal;
-            glm::vec3 refractedDir = glm::refract(pathSegment.ray.direction, refractNormal, etaRatio);
-            float offsetSign = glm::dot(refractedDir, normal) > 0.0f ? 1.0f : -1.0f;
-            pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
-            pathSegment.ray.direction = refractedDir;
+            glm::vec3 newDirection = calculateRandomDirectionInHemisphere(normal, rng);
+            pathSegment.ray.origin = intersect + normal * EPSILON;
+            // Apply diffuse material color (energy attenuation)
+            // multiplier = fr * cos theta/pdf(omega)
+            // where pdf(omega) = cos theta / PI
+            // BSDF of diffuse reflection: fr = R / PI
+            pathSegment.ray.direction = newDirection;
+            pathSegment.color *= m.color;
+            break;
         }
-        pathSegment.color *= m.color;
-    }
-    else if (m.hasReflective > 0.5f)
-    {
-        glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
-        float offsetSign = glm::dot(reflectedDir, normal) > 0.0f ? 1.0f : -1.0f;
-        pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
-        pathSegment.ray.direction = reflectedDir;
-        pathSegment.color *= m.color;
-    }
-    else
-    {
-        glm::vec3 newDirection = calculateRandomDirectionInHemisphere(normal, rng);
-        pathSegment.ray.origin = intersect + normal * EPSILON;
-        // Apply diffuse material color (energy attenuation)
-        // multiplier = fr * cos theta/pdf(omega)
-        // where pdf(omega) = cos theta / PI
-        // BSDF of diffuse reflection: fr = R / PI
-        pathSegment.ray.direction = newDirection;
-        pathSegment.color *= m.color;
     }
 
     // Decrement remaining bounces

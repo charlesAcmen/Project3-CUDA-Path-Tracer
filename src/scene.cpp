@@ -49,24 +49,26 @@ void Scene::loadFromJSON(const std::string& jsonName)
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            newMaterial.type = MaterialType::Diffuse;
         }
         else if (p["TYPE"] == "Emitting")
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            newMaterial.type = MaterialType::Emissive;
             newMaterial.emittance = p["EMITTANCE"];
         }
         else if (p["TYPE"] == "Specular")
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
-            newMaterial.hasReflective = 1.0f;
+            newMaterial.type = MaterialType::Reflective;
         }
         else if (p["TYPE"] == "Refractive")
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
-            newMaterial.hasRefractive = 1.0f;
+            newMaterial.type = MaterialType::Refractive;
             newMaterial.indexOfRefraction = p.value("IOR", 1.5f);
             newMaterial.invIndexOfRefraction = 1.0f / newMaterial.indexOfRefraction;
         }
