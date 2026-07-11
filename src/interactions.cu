@@ -111,6 +111,7 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
 
 __host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2)
 {
+    cosThetaI = fminf(fmaxf(cosThetaI, 0.0f), 1.0f);
     // Schlick's approximation for Fresnel reflectance.
     // R(θ) = R₀ + (1 - R₀) · (1 - cosθ)⁵
     float r0 = (n1 - n2) / (n1 + n2);
@@ -149,11 +150,13 @@ __host__ __device__ FresnelEvaluator selectFresnelEvaluator(int fresnelMode)
 //given the cosine of the incident angle cosThetaI.
 __host__ __device__ float fresnelAccurate(float cosThetaI, float n1, float n2)
 {
+    cosThetaI = fminf(fmaxf(cosThetaI, 0.0f), 1.0f);
     float sinThetaI = sqrtf(fmaxf(0.0f, 1.0f - cosThetaI * cosThetaI));
     //SNELL'S LAW: n1 * sin(thetaI) = n2 * sin(thetaT)
     float sinThetaT = (n1 / n2) * sinThetaI;
     if (sinThetaT >= 1.0f)
-    {// Total internal reflection occurs when the angle of incidence exceeds the critical angle, resulting in no refraction.
+    {// Total internal reflection occurs when the angle of incidence exceeds the critical angle, 
+        //resulting in no refraction.
         return 1.0f;
     }
 
