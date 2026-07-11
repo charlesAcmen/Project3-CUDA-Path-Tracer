@@ -59,7 +59,7 @@ using CompactCoreFunc = int (*)(int n, PathSegment* dst, const PathSegment* src)
 static int compactCoreThrust(int n, PathSegment* dst, const PathSegment* src);
 static int compactCoreGlobalMem(int n, PathSegment* dst, const PathSegment* src);
 static int compactCoreSharedMem(int n, PathSegment* dst, const PathSegment* src);
-static CompactCoreFunc g_compactCore = compactCoreSharedMem;  // default matches g_opts.compactMethod
+static CompactCoreFunc g_compactCore = nullptr;
 
 void setCompactMethod(int method) {
     g_opts.compactMethod = method;
@@ -151,6 +151,7 @@ void InitDataContainer(GuiDataContainer* imGuiData)
 void pathtraceInit(Scene* scene)
 {
     hst_scene = scene;
+    setCompactMethod(g_opts.compactMethod);
 
     const Camera& cam = hst_scene->state.camera;
     const int pixelcount = cam.resolution.x * cam.resolution.y;
