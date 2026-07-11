@@ -227,6 +227,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
         segment.ray.origin = cam.position;
         segment.color = glm::vec3(1.0f, 1.0f, 1.0f);
+        segment.pathEta = 1.0f;
 
         // TODO: implement antialiasing by jittering the ray
         // segment.ray.direction = glm::normalize(cam.view
@@ -523,7 +524,17 @@ __global__ void shadeFakeMaterial(
     }
 }
 
-// Add the current iteration's output to the overall image
+/**
+ * Add the current iteration's output to the overall image.
+ *
+ * Applies a radiance scaling of (1 / pathEta)^2 to account for the solid-angle
+ * change when the path terminates inside a medium with IOR != 1.  For paths that
+ * end in air (pathEta = 1.0) the scale is exactly 1.0 and has no cost.
+ *
+ * Physical basis: L_transmitted = (n_to / n_from)^2 * L_incident.
+ * Viewed from the camera (n_camera = 1.0), a path currently in medium eta carries
+ * radiance that must be divided by eta^2 to recover the camera-space value.
+ */
 __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths)
 {
     int index = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -531,7 +542,10 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
     if (index < nPaths)
     {
         PathSegment iterationPath = iterationPaths[index];
-        image[iterationPath.pixelIndex] += iterationPath.color;
+        // pathEta tracks the IOR of the medium the ray is currently in.
+        // Divide by eta^2 to convert medium-space radiance to camera-space radiance.
+        float invEta2 = 1.0f / (iterationPath.pathEta * iterationPath.pathEta);
+        image[iterationPath.pixelIndex] += iterationPath.color * invEta2;
     }
 }
 
@@ -562,7 +576,9 @@ __global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment*
         // Active paths are skipped -- they will contribute when they terminate.
         if (path.remainingBounces <= 0)
         {
-            image[path.pixelIndex] += path.color;
+            // Same (1/pathEta^2) solid-angle correction as finalGather.
+            float invEta2 = 1.0f / (path.pathEta * path.pathEta);
+            image[path.pixelIndex] += path.color * invEta2;
         }
     }
 }
