@@ -258,8 +258,7 @@ __host__ __device__ void scatterRay(
             glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
             float offsetSign = glm::dot(reflectedDir, normal) > 0.0f ? 1.0f : -1.0f;
             pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
-            pathSegment.ray.direction = glm::normalize(reflectedDir);
-            pathSegment.color *= m.color;
+            pathSegment.ray.direction = reflectedDir;
         }
         else
         {
@@ -269,13 +268,14 @@ __host__ __device__ void scatterRay(
             pathSegment.ray.direction = glm::normalize(refractedDir);
             pathSegment.color *= m.color;
         }
+        pathSegment.color *= m.color;
     }
     else if (m.hasReflective > 0.5f)
     {
         glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
         float offsetSign = glm::dot(reflectedDir, normal) > 0.0f ? 1.0f : -1.0f;
         pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
-        pathSegment.ray.direction = glm::normalize(reflectedDir);
+        pathSegment.ray.direction = reflectedDir;
         pathSegment.color *= m.color;
     }
     else
