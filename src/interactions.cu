@@ -207,9 +207,11 @@ __host__ __device__ void scatterRay(
     thrust::default_random_engine &rng,
     int fresnelMode)
 {
-    // TODO: implement this.
-    // A basic implementation of pure-diffuse shading will just call the
-    // calculateRandomDirectionInHemisphere defined above.
+    // Scatter a ray according to the material's BSDF.
+    // Diffuse: cosine-weighted hemisphere sampling.
+    // Reflective: perfect specular reflection (glm::reflect).
+    // Refractive: Fresnel-weighted Russian roulette between reflection and
+    //             refraction (glm::refract), with normal flipped for exit rays.
 
     // Generate new random direction for diffuse reflection (cosine-weighted hemisphere sampling)
 
@@ -232,8 +234,9 @@ __host__ __device__ void scatterRay(
     // - Decrease to 1e-6 for scenes with very thin geometry (< 0.01 units)
     // - For large-scale scenes (>1000 units), scale proportionally
     
-    //Note that since only Refraction always requires opposite direction offset
-    //Let's leave sign judging to future release.i.e.TODO: judge sign by dot product of normal and newDirection
+    // The offset sign for the new ray origin is determined per-branch below by
+    // checking the dot product of the new ray direction against the geometric
+    // normal, so the offset always pushes the origin to the correct side.
     thrust::uniform_real_distribution<float> u01(0, 1);
 
     if (m.hasRefractive > 0.5f)
@@ -262,11 +265,12 @@ __host__ __device__ void scatterRay(
         }
         else
         {
-            glm::vec3 refractedDir = glm::refract(pathSegment.ray.direction, normal, etaRatio);
+            glm::vec3 refractNormal = (glm::dot(pathSegment.ray.direction, normal) < 0.0f) ? normal : -normal;
+            glm::vec3 refractedDir = glm::refract(pathSegment.ray.direction, refractNormal, etaRatio);
             float offsetSign = glm::dot(refractedDir, normal) > 0.0f ? 1.0f : -1.0f;
             pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
-            pathSegment.ray.direction = glm::normalize(refractedDir);
-            pathSegment.color *= m.color;
+            pathSegment.ray.direction = refractedDir;
+            pathSegment.pathEta = n2;
         }
         pathSegment.color *= m.color;
     }
@@ -286,7 +290,7 @@ __host__ __device__ void scatterRay(
         // multiplier = fr * cos theta/pdf(omega)
         // where pdf(omega) = cos theta / PI
         // BSDF of diffuse reflection: fr = R / PI
-        pathSegment.ray.direction = glm::normalize(newDirection);
+        pathSegment.ray.direction = newDirection;
         pathSegment.color *= m.color;
     }
 
