@@ -15,11 +15,9 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     glm::vec3 normal, 
     thrust::default_random_engine& rng);
 
-using FresnelEvaluator = float (*)(float, float, float);
-
 __host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2);
 __host__ __device__ float fresnelAccurate(float cosThetaI, float n1, float n2);
-__host__ __device__ FresnelEvaluator selectFresnelEvaluator(int fresnelMode);
+__host__ __device__ float selectFresnelEvaluator(int fresnelMode, float cosThetaI, float n1, float n2);
 __host__ __device__ HitSide classifyRefraction(
     glm::vec3 rayDir,
     glm::vec3 surfaceNormal,

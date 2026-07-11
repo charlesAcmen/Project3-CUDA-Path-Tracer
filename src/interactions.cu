@@ -138,12 +138,12 @@ __host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2)
     return r0 + (1.0f - r0) * oneMinusCos5;
 }
 
-__host__ __device__ FresnelEvaluator selectFresnelEvaluator(int fresnelMode)
+__host__ __device__ float selectFresnelEvaluator(int fresnelMode, float cosThetaI, float n1, float n2)
 {
     // Runtime flag mapping:
     //   0 -> Schlick (default)
     //   1 -> Accurate
-    return (fresnelMode == 1) ? fresnelAccurate : fresnelSchlick;
+    return (fresnelMode == 1) ? fresnelAccurate(cosThetaI, n1, n2) : fresnelSchlick(cosThetaI, n1, n2);
 }
 
 //returns the fraction of non-polarized light reflected at the interface between two materials with indices of refraction n1 and n2, 
@@ -250,8 +250,7 @@ __host__ __device__ void scatterRay(
 
             // Both Fresnel functions return 1.0 on total internal reflection,
             // so u01 < 1.0 is always true → the reflection branch is taken.
-            FresnelEvaluator fresnelEval = selectFresnelEvaluator(fresnelMode);
-            float reflectance = fresnelEval(cosThetaI, n1, n2);
+            float reflectance = selectFresnelEvaluator(fresnelMode, cosThetaI, n1, n2);
 
             // Russian roulette: reflect with prob R, refract with prob 1-R.
             // Throughput multiplier = (energy fraction) / (probability):
