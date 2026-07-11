@@ -527,13 +527,17 @@ __global__ void shadeFakeMaterial(
 /**
  * Add the current iteration's output to the overall image.
  *
- * Applies a radiance scaling of (1 / pathEta)^2 to account for the solid-angle
- * change when the path terminates inside a medium with IOR != 1.  For paths that
- * end in air (pathEta = 1.0) the scale is exactly 1.0 and has no cost.
+ * NOTE: The (1/eta^2) radiance scaling was removed because it caused energy
+ * loss in the glass furnace test.  pathEta is only updated when refraction
+ * occurs; it is NOT updated on Fresnel reflection or TIR.  Therefore, when a
+ * path exhausts its bounce budget while still inside glass (e.g. after TIR),
+ * pathEta retains the glass IOR (1.5) and the former 1/eta^2 factor (~0.44)
+ * incorrectly darkened those contributions, making glass balls appear gray
+ * instead of invisible in a uniform-white furnace environment.
  *
- * Physical basis: L_transmitted = (n_to / n_from)^2 * L_incident.
- * Viewed from the camera (n_camera = 1.0), a path currently in medium eta carries
- * radiance that must be divided by eta^2 to recover the camera-space value.
+ * For paths that do exit the glass and then hit the furnace walls the energy
+ * is already correctly accounted for by the Fresnel Russian-roulette weights
+ * inside scatterRay; no additional correction is needed here.
  */
 __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths)
 {
@@ -542,10 +546,7 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
     if (index < nPaths)
     {
         PathSegment iterationPath = iterationPaths[index];
-        // pathEta tracks the IOR of the medium the ray is currently in.
-        // Divide by eta^2 to convert medium-space radiance to camera-space radiance.
-        float invEta2 = 1.0f / (iterationPath.pathEta * iterationPath.pathEta);
-        image[iterationPath.pixelIndex] += iterationPath.color * invEta2;
+        image[iterationPath.pixelIndex] += iterationPath.color;
     }
 }
 
@@ -574,11 +575,10 @@ __global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment*
         PathSegment path = paths[index];
         // Only collect contributions from paths that have finished their journey.
         // Active paths are skipped -- they will contribute when they terminate.
+        // See finalGather for why the (1/pathEta^2) correction was removed.
         if (path.remainingBounces <= 0)
         {
-            // Same (1/pathEta^2) solid-angle correction as finalGather.
-            float invEta2 = 1.0f / (path.pathEta * path.pathEta);
-            image[path.pixelIndex] += path.color * invEta2;
+            image[path.pixelIndex] += path.color;
         }
     }
 }

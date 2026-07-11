@@ -270,7 +270,6 @@ __host__ __device__ void scatterRay(
             float offsetSign = glm::dot(refractedDir, normal) > 0.0f ? 1.0f : -1.0f;
             pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
             pathSegment.ray.direction = refractedDir;
-            pathSegment.pathEta = n2;
         }
         pathSegment.color *= m.color;
     }

@@ -93,10 +93,6 @@ struct PathSegment
     glm::vec3 color;
     int pixelIndex;
     int remainingBounces;
-    //determined by the product of the eta of each refractive material along the path
-    //Telescopic Cancellation:final value does not depend on the intermediate eta values, 
-    //but only on the initial and final eta values
-    float pathEta;
 };
 
 // Use with a corresponding PathSegment to do:
