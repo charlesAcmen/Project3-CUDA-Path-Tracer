@@ -47,6 +47,7 @@ struct Material
     float hasReflective;          // Nonzero means this material should reflect rays
     float hasRefractive;          // Nonzero means this material should refract/transmit rays
     float indexOfRefraction;      // IOR of the refractive material, e.g. 1.5 for glass
+    float invIndexOfRefraction;   // Precomputed inverse IOR to avoid GPU division
     float emittance;              // Emission strength for light sources (nonzero = emissive)
 };
 

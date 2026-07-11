@@ -237,7 +237,8 @@ __host__ __device__ void scatterRay(
     {
         float n1, n2, cosThetaI;
         classifyRefraction(pathSegment.ray.direction, normal, m.indexOfRefraction, n1, n2, cosThetaI);
-        float etaRatio = n1 / n2;
+        // Use invIndexOfRefraction to avoid division on entry
+        float etaRatio = (glm::dot(pathSegment.ray.direction, normal) < 0.0f) ? m.invIndexOfRefraction : m.indexOfRefraction;
 
         // Both Fresnel functions return 1.0 on total internal reflection,
         // so u01 < 1.0 is always true → the reflection branch is taken.
