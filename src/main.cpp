@@ -376,6 +376,7 @@ void RenderImGui()
     //    counter++;
     //ImGui::SameLine();
     //ImGui::Text("counter = %d", counter);
+
     ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
@@ -389,8 +390,25 @@ void RenderImGui()
         ImGui::Text("  CompactPaths:          %.3f ms", imguiData->perKernelMs[3]);
         ImGui::Text("Bounces Last Frame: %d", imguiData->lastBounceCount);
     }
-    ImGui::End();
 
+    if (renderState != nullptr) {
+        ImGui::Separator();
+        ImGui::Text("Camera Settings (JSON format):");
+        Camera& cam = renderState->camera;
+        char jsonBuf[384];
+        sprintf(jsonBuf, 
+            "\"EYE\": [%.4f, %.4f, %.4f],\n"
+            "\"LOOKAT\": [%.4f, %.4f, %.4f],\n"
+            "\"UP\": [%.4f, %.4f, %.4f],\n"
+            "\"FOVY\": %.2f",
+            cam.position.x, cam.position.y, cam.position.z,
+            cam.lookAt.x, cam.lookAt.y, cam.lookAt.z,
+            cam.up.x, cam.up.y, cam.up.z,
+            cam.fov.y
+        );
+        ImGui::InputTextMultiline("##json_cam", jsonBuf, sizeof(jsonBuf), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 4.5f), ImGuiInputTextFlags_ReadOnly);
+    }
+    ImGui::End();
 
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -548,12 +566,11 @@ int main(int argc, char** argv)
 
     // compute phi (horizontal) and theta (vertical) relative 3D axis
     // so, (0 0 1) is forward, (0 1 0) is up
-    glm::vec3 viewXZ = glm::vec3(view.x, 0.0f, view.z);
-    glm::vec3 viewZY = glm::vec3(0.0f, view.y, view.z);
-    phi = glm::acos(glm::dot(glm::normalize(viewXZ), glm::vec3(0, 0, -1)));
-    theta = glm::acos(glm::dot(glm::normalize(viewZY), glm::vec3(0, 1, 0)));
     ogLookAt = cam.lookAt;
-    zoom = glm::length(cam.position - ogLookAt);
+    glm::vec3 v = cam.position - ogLookAt;
+    zoom = glm::length(v);
+    theta = (zoom > 0.0f) ? glm::acos(v.y / zoom) : 0.0f;
+    phi = atan2(v.x, v.z);
 
     // Initialize CUDA and GL components
     // IMPORTANT: initCuda() → cudaGLSetGLDevice(0) must be called BEFORE
