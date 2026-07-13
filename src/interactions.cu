@@ -21,6 +21,65 @@
  * @param rng Random number generator for Monte Carlo sampling
  * @return A unit direction vector in the hemisphere, cosine-weighted around the normal
  */
+__host__ __device__ void buildOrthonormalBasis(
+    glm::vec3 normal,
+    glm::vec3 &tangent,
+    glm::vec3 &bitangent)
+{
+    glm::vec3 directionNotNormal;
+    if (abs(normal.x) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(1.0f, 0.0f, 0.0f);
+    }
+    else if (abs(normal.y) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+    else
+    {
+        directionNotNormal = glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+
+    // Generate two perpendicular direction vectors using cross products
+    // These form the tangent (U) and bitangent (V) vectors of our local coordinate system
+    // 
+    // First perpendicular direction (U-axis): orthogonal to both normal and our helper vector
+    tangent = glm::normalize(glm::cross(normal, directionNotNormal));
+
+    // Second perpendicular direction (V-axis): orthogonal to both normal and first perpendicular
+    // This completes the right-handed orthonormal basis {U, V, N}
+    bitangent = glm::normalize(glm::cross(normal, tangent));
+}
+
+__host__ __device__ glm::vec3 samplePhongSpecularDir(
+    glm::vec3 reflectDir,
+    float exponent,
+    thrust::default_random_engine& rng)
+{
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    float xi1 = u01(rng);
+    float xi2 = u01(rng);
+
+    // Eq.7: cos(theta_s) = xi1^(1/(n+1))
+    // Optimization: if exponent is 0.0f (i.e. maximum roughness, r=1.0f), we skip powf
+    float cosTheta = (exponent < 1e-5f) ? xi1 : powf(xi1, 1.0f / (exponent + 1.0f));
+    float sinTheta = sqrtf(fmaxf(0.0f, 1.0f - cosTheta * cosTheta));
+
+    // Eq.8: phi_s = 2*pi*xi2
+    float phi = TWO_PI * xi2;
+
+    // Eq.9: Local Cartesian coordinates
+    float xs = sinTheta * cosf(phi);
+    float ys = sinTheta * sinf(phi);
+    float zs = cosTheta;
+
+    // Construct local ONB with reflectDir as the up direction (Z-axis)
+    glm::vec3 tangent, bitangent;
+    buildOrthonormalBasis(reflectDir, tangent, bitangent);
+
+    return glm::normalize(xs * tangent + ys * bitangent + zs * reflectDir);
+}
+
 __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     glm::vec3 normal,
     thrust::default_random_engine &rng)
@@ -61,31 +120,9 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     // that the cross product won't degenerate to zero (which would happen if the
     // normal and our chosen axis were parallel or nearly parallel).
 
-    glm::vec3 directionNotNormal;
-    if (abs(normal.x) < SQRT_OF_ONE_THIRD)
-    {
-        directionNotNormal = glm::vec3(1, 0, 0); // X-axis is safe to use
-    }
-    else if (abs(normal.y) < SQRT_OF_ONE_THIRD)
-    {
-        directionNotNormal = glm::vec3(0, 1, 0); // Y-axis is safe to use
-    }
-    else
-    {
-        directionNotNormal = glm::vec3(0, 0, 1); // Z-axis is safe to use
-    }
-
-    // Generate two perpendicular direction vectors using cross products
-    // These form the tangent (U) and bitangent (V) vectors of our local coordinate system
-    // 
-    // First perpendicular direction (U-axis): orthogonal to both normal and our helper vector
-    glm::vec3 perpendicularDirection1 =
-        glm::normalize(glm::cross(normal, directionNotNormal));
-    
-    // Second perpendicular direction (V-axis): orthogonal to both normal and first perpendicular
-    // This completes the right-handed orthonormal basis {U, V, N}
-    glm::vec3 perpendicularDirection2 =
-        glm::normalize(glm::cross(normal, perpendicularDirection1));
+    glm::vec3 perpendicularDirection1;
+    glm::vec3 perpendicularDirection2;
+    buildOrthonormalBasis(normal, perpendicularDirection1, perpendicularDirection2);
 
     // STEP 3: Transform from Local to World Space
     // --------------------------------------------
@@ -281,9 +318,24 @@ __host__ __device__ void scatterRay(
         case MaterialType::Reflective:
         {
             glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
-            float offsetSign = glm::dot(reflectedDir, normal) > 0.0f ? 1.0f : -1.0f;
+            glm::vec3 scatterDir;
+
+            if (m.specular.exponent >= 0.0f)
+            {
+                // Glossy specular (imperfect specular)
+                glm::vec3 candidate = samplePhongSpecularDir(reflectedDir, m.specular.exponent, rng);
+                // Ensure the ray goes outward from the surface, otherwise fallback to perfect reflection
+                scatterDir = (glm::dot(candidate, normal) > 0.0f) ? candidate : reflectedDir;
+            }
+            else
+            {
+                // exponent < 0 (i.e. -1.0f): Perfect specular mirror
+                scatterDir = reflectedDir;
+            }
+
+            float offsetSign = glm::dot(scatterDir, normal) > 0.0f ? 1.0f : -1.0f;
             pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
-            pathSegment.ray.direction = reflectedDir;
+            pathSegment.ray.direction = scatterDir;
             pathSegment.color *= m.color;
             break;
         }
