@@ -450,6 +450,14 @@ __global__ void shadeMaterial(
                 {
                     pathSegment.remainingBounces = 0;  // terminate
                 }
+
+                // If path is now terminated (either because remainingBounces == 0
+                // or because Russian roulette terminated it) without hitting a light,
+                // set its color to 0 since it contributes no light.
+                if (pathSegment.remainingBounces <= 0)
+                {
+                    pathSegment.color = glm::vec3(0.0f);
+                }
             }
         }
         else
@@ -537,7 +545,12 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
     if (index < nPaths)
     {
         PathSegment iterationPath = iterationPaths[index];
-        image[iterationPath.pixelIndex] += iterationPath.color;
+        // Only gather if the path has terminated (remainingBounces <= 0).
+        // Active paths (remainingBounces > 0) never hit a light source.
+        if (iterationPath.remainingBounces <= 0)
+        {
+            image[iterationPath.pixelIndex] += iterationPath.color;
+        }
     }
 }
 
@@ -548,11 +561,12 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
  * This is critical for correctness with stream compaction:
  * - When a path hits a light, its color *= emittance is the final result for that
  *   sample, and it must be recorded in the accumulation buffer.
- * - When a path exhausts all bounces without hitting a light, its attenuated color
- *   is also a valid sample and must be recorded.
- * - Without this pre-compaction gather, these terminated paths are removed by
- *   compaction before finalGather can collect their contributions, resulting in
- *   a black image.
+ * - When a path exhausts all bounces WITHOUT hitting a light, its color has
+ *   already been set to 0 by shadeMaterial (no light source reachable = zero
+ *   contribution). We still gather it here to satisfy the pre-compaction flush,
+ *   but it adds 0 to the image.
+ * - Without this pre-compaction gather, light-hit paths would be removed by
+ *   compaction before finalGather can collect them, resulting in a black image.
  *
  * Active paths (remainingBounces > 0) are NOT gathered here -- they will continue
  * bouncing and their final color will be gathered when they eventually terminate.
@@ -853,12 +867,14 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     }
 
     // ---- 3. Accumulation ------------------------------------------------
-    // Survivors (paths that reached traceDepth without terminating) also
-    // carry valid attenuated colors and must contribute.
+    // Survivors only need to be gathered if stream compaction was disabled.
+    // When compaction is enabled, all terminated paths have already been
+    // gathered by gatherTerminatedPaths and removed from the active path list.
+    if (g_opts.compactMethod == 0)
     {
         dim3 numBlocks((pixelcount + blockSize1d - 1) / blockSize1d);
         finalGather<<<numBlocks, blockSize1d>>>(
-            num_paths, g_dev.image, g_dev.paths);
+            pixelcount, g_dev.image, g_dev.paths);
     }
 
     // ---- 4. Display -----------------------------------------------------
