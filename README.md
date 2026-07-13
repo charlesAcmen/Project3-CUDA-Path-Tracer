@@ -29,7 +29,11 @@ original README content above — this is just an addition for tracking.
 
 - Material sorting: implemented (`sort by material` path + intersection permutation before shading)
 
-- BSDF / scattering: only diffuse (Lambertian) scattering implemented so far
+- BSDF / scattering: implemented diffuse Lambertian scattering, perfect specular reflection, and imperfect glossy/specular reflection with roughness-driven sampling for non-perfect mirrors
+
+- Visual Improvements (Instruction.md): the refraction-oriented visual improvement is implemented, including Fresnel-based reflection/refraction selection and imperfect specular lighting for rougher specular materials
+
+- Random sampling: the path tracer now uses one centralized seeded RNG helper so sampling stays consistent across path generation, shading, and Russian roulette decisions
 
 Other notes:
 
