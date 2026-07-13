@@ -66,7 +66,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
             if (p.contains("ROUGHNESS"))
             {
                 float r = glm::clamp((float)p["ROUGHNESS"], 0.0f, 1.0f);
-                if (r < 0.001f)
+                if (r < ROUGHNESS_THRESHOLD)
                 {
                     newMaterial.specular.exponent = -1.0f; // Treat as perfect mirror
                 }
