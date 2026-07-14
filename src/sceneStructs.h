@@ -82,6 +82,8 @@ struct Camera
     glm::vec3 right;
     glm::vec2 fov;
     glm::vec2 pixelLength;
+    float lensRadius;       // lens aperture radius; 0 = pinhole camera (backward compatible)
+    float focalDistance;    // distance from camera to plane of perfect focus
 };
 
 struct RenderState
