@@ -15,6 +15,7 @@
 #include "intersections.h"
 #include "interactions.h"
 #include "profiler.h"
+#include "kernel_config.h"
 
 // Note: checkCUDAError and checkCUDAErrorFn are now defined in utilities.h/cu
 
@@ -30,7 +31,7 @@
 
 // Always include all dependencies -- runtime branching replaces the old
 // #if guards so a single executable supports every combination.
-#include "../stream_compaction/efficient.h"
+#include "efficient.h"
 #include <thrust/copy.h>
 #include <thrust/sort.h>
 #include <thrust/gather.h>
@@ -687,7 +688,7 @@ static void sortPathsByMaterial(int num_paths)
  * @return                       true if every path terminated (caller should
  *                               exit the bounce loop immediately).
  */
-static bool compactActivePaths(int& num_paths, int blockSize1d)
+static bool compactActivePaths(int& num_paths)
 {
     Profiler& prof = g_profiler();
 
@@ -697,11 +698,9 @@ static bool compactActivePaths(int& num_paths, int blockSize1d)
         return false;
     }
 
-    dim3 numBlocks((num_paths + blockSize1d - 1) / blockSize1d);
-
     // 1. Bank terminated-path colors before they disappear.
     prof.gpuStart(ProfilerOp::GatherTerminatedPaths);
-    gatherTerminatedPaths<<<numBlocks, blockSize1d>>>(
+    LAUNCH_KERNEL_AUTO(gatherTerminatedPaths, num_paths,
         num_paths, g_dev.image, g_dev.paths);
     prof.gpuStop(ProfilerOp::GatherTerminatedPaths);
     checkCUDAError("gatherTerminatedPaths");
@@ -828,7 +827,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         dim3 numBlocks((num_paths + blockSize1d - 1) / blockSize1d);
 
         prof.gpuStart(ProfilerOp::ComputeIntersections);
-        computeIntersections<<<numBlocks, blockSize1d>>>(
+        LAUNCH_KERNEL_AUTO(computeIntersections, num_paths,
             depth, num_paths, g_dev.paths,
             g_dev.geoms, hst_scene->geoms.size(), g_dev.intersections);
         prof.gpuStop(ProfilerOp::ComputeIntersections);
@@ -850,14 +849,14 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         prof.gpuStop(ProfilerOp::SortByMaterial);
 
         prof.gpuStart(ProfilerOp::ShadeMaterial);
-        shadeMaterial<<<numBlocks, blockSize1d>>>(
+        LAUNCH_KERNEL_AUTO(shadeMaterial, num_paths,
             iter, num_paths,
             g_dev.intersections, g_dev.paths, g_dev.materials,
             traceDepth, hst_scene->state.rrMinBounces,
             g_opts.fresnelMode);
         prof.gpuStop(ProfilerOp::ShadeMaterial);
 
-        bool allDead = compactActivePaths(num_paths, blockSize1d);
+        bool allDead = compactActivePaths(num_paths);
         done = allDead || (depth >= traceDepth);
 
         debugPrintBounce(iter, depth, num_paths);
@@ -873,7 +872,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     if (g_opts.compactMethod == 0)
     {
         dim3 numBlocks((pixelcount + blockSize1d - 1) / blockSize1d);
-        finalGather<<<numBlocks, blockSize1d>>>(
+        LAUNCH_KERNEL_AUTO(finalGather, pixelcount,
             pixelcount, g_dev.image, g_dev.paths);
     }
 
