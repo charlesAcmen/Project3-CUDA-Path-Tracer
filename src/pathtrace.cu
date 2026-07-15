@@ -218,20 +218,47 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         int index = x + (y * cam.resolution.x);
         PathSegment& segment = pathSegments[index];
 
-        segment.ray.origin = cam.position;
         segment.color = glm::vec3(1.0f, 1.0f, 1.0f);
 
         // RNG for primary-ray generation: AA jitter + lens sampling share one engine.
         // depth=0 groups all bounce-0 randomness per (iter, pixel) pair.
         thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
         thrust::uniform_real_distribution<float> u01(0, 1);
-        float jitterX = u01(rng) - 0.5f;  // Random offset in [-0.5, 0.5]
-        float jitterY = u01(rng) - 0.5f;
-        
-        segment.ray.direction = glm::normalize(cam.view
+
+        // Anti-aliasing: stochastic sub-pixel jitter
+        float jitterX = u01(rng) - 0.5f;   // Draw 1
+        float jitterY = u01(rng) - 0.5f;   // Draw 2
+
+        // Pinhole ray direction (undeflected center-of-lens ray)
+        glm::vec3 pinholeDir = glm::normalize(cam.view
             - cam.right * cam.pixelLength.x * ((float)x + jitterX - (float)cam.resolution.x * 0.5f)
-            - cam.up * cam.pixelLength.y * ((float)y + jitterY - (float)cam.resolution.y * 0.5f)
-        );
+            - cam.up    * cam.pixelLength.y * ((float)y + jitterY - (float)cam.resolution.y * 0.5f));
+
+        if (cam.lensRadius > 0.0f) {
+            // --- Thin-lens depth-of-field ---
+            // 1. Intersect pinhole ray with the focal plane
+            float cosTheta = glm::dot(pinholeDir, cam.view);
+            float ft = (cosTheta > 1e-6f) ? (cam.focalDistance / cosTheta)
+                                          : cam.focalDistance;
+            glm::vec3 pFocus = cam.position + ft * pinholeDir;
+
+            // 2. Sample a point on the lens aperture via concentric disk mapping
+            float lensU = u01(rng);   // Draw 3
+            float lensV = u01(rng);   // Draw 4
+            float dx, dy;
+            concentricSampleDisk(lensU, lensV, dx, dy);
+
+            // 3. Offset ray origin within the aperture (cam.right x cam.up plane)
+            glm::vec3 lensOffset = cam.lensRadius * (dx * cam.right + dy * cam.up);
+            segment.ray.origin = cam.position + lensOffset;
+
+            // 4. Aim ray at the focal-plane point (all rays for this pixel converge there)
+            segment.ray.direction = glm::normalize(pFocus - segment.ray.origin);
+        } else {
+            // Pinhole camera (backward-compatible path, lensRadius == 0)
+            segment.ray.origin = cam.position;
+            segment.ray.direction = pinholeDir;
+        }
 
         segment.pixelIndex = index;
         segment.remainingBounces = traceDepth;
