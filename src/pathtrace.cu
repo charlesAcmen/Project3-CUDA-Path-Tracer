@@ -235,8 +235,8 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
             // --- Thin-lens depth-of-field ---
             // 1. Intersect pinhole ray with the focal plane
             float cosTheta = glm::dot(pinholeDir, cam.view);
-            float ft = (cosTheta > 1e-6f) ? (cam.focalDistance / cosTheta)
-                                          : cam.focalDistance;
+            float ft = (cosTheta > EPSILON) ? (cam.focalDistance / cosTheta)
+                                            : cam.focalDistance;
             glm::vec3 pFocus = cam.position + ft * pinholeDir;
 
             // 2. Sample a point on the lens aperture via concentric disk mapping
