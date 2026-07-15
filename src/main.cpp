@@ -563,6 +563,9 @@ int main(int argc, char** argv)
     // Set up camera stuff from loaded path tracer settings
     iteration = 0;
     renderState = &scene->state;
+    if (cfg.fresnelSet) {
+        renderState->fresnelMode = cfg.fresnelMode;
+    }
     Camera& cam = renderState->camera;
     width = cam.resolution.x;
     height = cam.resolution.y;

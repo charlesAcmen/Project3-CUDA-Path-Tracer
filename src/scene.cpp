@@ -127,6 +127,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
     state.iterations = cameraData["ITERATIONS"];
     state.traceDepth = cameraData["DEPTH"];
     state.rrMinBounces = cameraData.value("RR_DEPTH", 3);
+    state.fresnelMode  = cameraData.value("FRESNEL_MODE", 0);
     state.imageName = cameraData["FILE"];
     const auto& pos = cameraData["EYE"];
     const auto& lookat = cameraData["LOOKAT"];

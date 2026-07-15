@@ -103,6 +103,7 @@ struct RenderState
     unsigned int iterations;
     int traceDepth;
     int rrMinBounces;  // guaranteed bounces before Russian roulette (default 3)
+    int fresnelMode;   // 0=Schlick (default), 1=Accurate
     std::vector<glm::vec3> image;
     std::string imageName;
     DebugConfig debug;
