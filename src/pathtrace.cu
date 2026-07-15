@@ -402,11 +402,7 @@ __global__ void shadeMaterial(
     ShadeableIntersection* shadeableIntersections,
     PathSegment* pathSegments,
     Material* materials,
-    int traceDepth,
-    int rrMinBounces,
-    int fresnelMode,
-    Camera cam,
-    DebugConfig debug)
+    ShadingConfig config)
 {
     //Memory-Bound:Occupancy is limited by the number of registers used per thread
     //so designing smallest and aligned data structure 
@@ -445,11 +441,11 @@ __global__ void shadeMaterial(
             glm::vec3 intersectionPoint = getExactPointOnRay(pathSegment.ray, intersection.t);
 
             // Debug overlay: mark first-bounce hits on the focal plane in green.
-            // Uniform branch — zero warp divergence when debug.showDOFOverlay is false.
-            if (debug.showDOFOverlay && pathSegment.remainingBounces == traceDepth) {
-                float hitDist = glm::dot(intersectionPoint - cam.position, cam.view);
-                float focalErr = fabsf(hitDist - cam.focalDistance);
-                if (focalErr < debug.focalTolerance) {
+            // Uniform branch — zero warp divergence when debug is disabled.
+            if (config.debug.showDOFOverlay && pathSegment.remainingBounces == config.traceDepth) {
+                float hitDist = glm::dot(intersectionPoint - config.cam.position, config.cam.view);
+                float focalErr = fabsf(hitDist - config.cam.focalDistance);
+                if (focalErr < config.debug.focalTolerance) {
                     pathSegment.color = glm::vec3(0.0f, 1.0f, 0.0f);
                     pathSegment.remainingBounces = 0;
                     return;
@@ -467,7 +463,7 @@ __global__ void shadeMaterial(
             {
                 // Non-emissive surface: scatter ray according to BSDF
                 // This updates the ray direction and attenuates color based on material
-                scatterRay(pathSegment, intersectionPoint, intersection.surfaceNormal, material, rng, fresnelMode);
+                scatterRay(pathSegment, intersectionPoint, intersection.surfaceNormal, material, rng, config.fresnelMode);
 
                 // Russian roulette: probabilistically terminate paths whose
                 // throughput has dropped below a useful level.  Only applies
@@ -481,7 +477,7 @@ __global__ void shadeMaterial(
                 //   - Bounce 3: remainingBounces = 4 after scatter, 4 < 5? Yes -> RR starts
                 // This ensures the first rrMinBounces (3) bounces are guaranteed.
                 if (russianRouletteTerminate(pathSegment.color,
-                    pathSegment.remainingBounces, traceDepth, rrMinBounces, rng))
+                    pathSegment.remainingBounces, config.traceDepth, config.rrMinBounces, rng))
                 {
                     pathSegment.remainingBounces = 0;  // terminate
                 }
@@ -886,9 +882,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         LAUNCH_KERNEL_AUTO(shadeMaterial, num_paths,
             iter, num_paths,
             g_dev.intersections, g_dev.paths, g_dev.materials,
-            traceDepth, hst_scene->state.rrMinBounces,
-            g_opts.fresnelMode,
-            cam, hst_scene->state.debug);
+            shadingCfg);
         prof.gpuStop(ProfilerOp::ShadeMaterial);
 
         bool allDead = compactActivePaths(num_paths);
