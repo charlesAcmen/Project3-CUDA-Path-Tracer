@@ -1,5 +1,6 @@
 #pragma once
 
+#include "constants.h"
 #include "sceneStructs.h"
 
 #include <glm/glm.hpp>
