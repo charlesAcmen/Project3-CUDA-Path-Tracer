@@ -407,6 +407,16 @@ void RenderImGui()
             cam.fov.y
         );
         ImGui::InputTextMultiline("##json_cam", jsonBuf, sizeof(jsonBuf), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 4.5f), ImGuiInputTextFlags_ReadOnly);
+
+        ImGui::Separator();
+        ImGui::Text("DOF Debug:");
+        DebugConfig& dbg = renderState->debug;
+        ImGui::SliderFloat("Focal Distance", &cam.focalDistance, 0.5f, 30.0f);
+        ImGui::SliderFloat("Lens Radius",    &cam.lensRadius,    0.0f, 5.0f);
+        ImGui::Checkbox("Focal Plane Overlay", &dbg.showDOFOverlay);
+        if (dbg.showDOFOverlay) {
+            ImGui::SliderFloat("Focal Tolerance", &dbg.focalTolerance, 0.05f, 5.0f);
+        }
     }
     ImGui::End();
 

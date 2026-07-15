@@ -407,7 +407,9 @@ __global__ void shadeMaterial(
     Material* materials,
     int traceDepth,
     int rrMinBounces,
-    int fresnelMode)
+    int fresnelMode,
+    Camera cam,
+    DebugConfig debug)
 {
     //Memory-Bound:Occupancy is limited by the number of registers used per thread
     //so designing smallest and aligned data structure 
@@ -444,7 +446,19 @@ __global__ void shadeMaterial(
 
             // Compute intersection point on the ray
             glm::vec3 intersectionPoint = getExactPointOnRay(pathSegment.ray, intersection.t);
-            
+
+            // Debug overlay: mark first-bounce hits on the focal plane in green.
+            // Uniform branch — zero warp divergence when debug.showDOFOverlay is false.
+            if (debug.showDOFOverlay && pathSegment.remainingBounces == traceDepth) {
+                float hitDist = glm::dot(intersectionPoint - cam.position, cam.view);
+                float focalErr = fabsf(hitDist - cam.focalDistance);
+                if (focalErr < debug.focalTolerance) {
+                    pathSegment.color = glm::vec3(0.0f, 1.0f, 0.0f);
+                    pathSegment.remainingBounces = 0;
+                    return;
+                }
+            }
+
             // Check if we hit a light source (emissive material)   
             if (material.emittance > 0.0f)
             {
@@ -876,7 +890,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             iter, num_paths,
             g_dev.intersections, g_dev.paths, g_dev.materials,
             traceDepth, hst_scene->state.rrMinBounces,
-            g_opts.fresnelMode);
+            g_opts.fresnelMode,
+            cam, hst_scene->state.debug);
         prof.gpuStop(ProfilerOp::ShadeMaterial);
 
         bool allDead = compactActivePaths(num_paths);

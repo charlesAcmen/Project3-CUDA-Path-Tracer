@@ -86,6 +86,17 @@ struct Camera
     float focalDistance;    // distance from camera to plane of perfect focus
 };
 
+// Centralized debug configuration.  Passed by value to GPU kernels where
+// every thread reads the same flag → uniform branch → zero warp divergence.
+// ImGui / JSON / command-line can all set these; runtime toggling avoids
+// recompilation.
+struct DebugConfig
+{
+    bool showDOFOverlay = false;   // overlay focal-plane pixels in green
+    float focalTolerance = 0.5f;   // distance threshold (world units) for
+                                   // "at focal plane"
+};
+
 struct RenderState
 {
     Camera camera;
@@ -94,6 +105,7 @@ struct RenderState
     int rrMinBounces;  // guaranteed bounces before Russian roulette (default 3)
     std::vector<glm::vec3> image;
     std::string imageName;
+    DebugConfig debug;
 };
 
 struct PathSegment
