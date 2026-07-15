@@ -66,9 +66,6 @@ void setCompactMethod(int method) {
 void setSortByMaterial(bool enable) { g_opts.sortByMaterial = enable; }
 int  getCompactMethod()             { return g_opts.compactMethod; }
 bool getSortByMaterial()            { return g_opts.sortByMaterial; }
-void setFresnelMode(int mode)       { g_opts.fresnelMode = (mode == 1 ? 1 : 0); }
-int  getFresnelMode()              { return g_opts.fresnelMode; }
-
 // ====================================================================
 // Compaction dispatch implementations (forward-declared above).
 // ====================================================================

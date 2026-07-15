@@ -24,12 +24,11 @@ struct DeviceBuffers {
 };
 
 // Runtime-configurable options for the path tracing pipeline.
-// Previously individual g_compactMethod / g_sortByMaterial / g_fresnelMode statics.
+// Previously individual g_compactMethod / g_sortByMaterial statics.
 // (autoSave was moved to main.cpp — it is an application-level concern.)
 struct PathTracerOptions {
     int  compactMethod  = 3;     // 0=off, 1=global scan, 2=Thrust, 3=shared-mem (default)
     bool sortByMaterial = true;  // group paths by materialId before shading
-    int  fresnelMode    = 0;     // 0=Schlick (default), 1=Accurate
 };
 
 void InitDataContainer(GuiDataContainer* guiData);
@@ -42,5 +41,3 @@ void setCompactMethod(int method);
 void setSortByMaterial(bool enable);
 int  getCompactMethod();
 bool getSortByMaterial();
-void setFresnelMode(int mode);
-int  getFresnelMode();
