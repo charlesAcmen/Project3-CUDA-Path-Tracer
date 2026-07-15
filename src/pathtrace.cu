@@ -16,6 +16,7 @@
 #include "interactions.h"
 #include "profiler.h"
 #include "kernel_config.h"
+#include "postprocess/tonemap.cuh"
 
 // Note: checkCUDAError and checkCUDAErrorFn are now defined in utilities.h/cu
 
@@ -165,6 +166,12 @@ void pathtraceInit(Scene* scene)
     // TODO: initialize any extra device memeory you need
     StreamCompaction::Efficient::initCompactionWorkspace(maxPaddedPathCount);
 
+    // Post-processing display buffer: holds LDR [0,1] pixel data after
+    // ACES tone mapping + sRGB gamma.  Allocated separately from g_dev.image
+    // so the accumulation buffer stays in raw HDR for saveImage().
+    cudaMalloc(&g_dev.imageDisplay, pixelcount * sizeof(glm::vec3));
+    cudaMemset(g_dev.imageDisplay, 0, pixelcount * sizeof(glm::vec3));
+
     // Sort buffers -- always allocated (overhead is negligible); the sorting
     // function early-returns when g_opts.sortByMaterial is false at runtime.
     cudaMalloc(&g_dev.sortKeys, pixelcount * sizeof(int));
@@ -192,6 +199,7 @@ void pathtraceFree()
     cudaFree(g_dev.sortKeys);
     cudaFree(g_dev.sortIndices);
     cudaFree(g_dev.intersectionsSorted);
+    cudaFree(g_dev.imageDisplay);  // post-process LDR display buffer
     StreamCompaction::Efficient::freeCompactionWorkspace();
     // TODO: clean up any extra device memory you created
 
@@ -909,9 +917,21 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             pixelcount, g_dev.image, g_dev.paths);
     }
 
+    // ---- 3.5. Post-Processing: ACES Tone Mapping + sRGB Gamma ---------
+    // Transform the raw HDR accumulation buffer (g_dev.image) into an
+    // LDR [0,1] display buffer (g_dev.imageDisplay) using the ACES
+    // filmic tone mapping pipeline.  g_dev.image is left untouched so
+    // the cudaMemcpy below still pulls raw HDR for saveImage().
+    tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
+        g_dev.image, g_dev.imageDisplay, cam.resolution, iter);
+
     // ---- 4. Display -----------------------------------------------------
+    // sendImageToPBO reads the post-processed LDR buffer (g_dev.imageDisplay)
+    // instead of raw HDR.  Since the data is already tone-mapped and in [0,1],
+    // iter=1 makes the kernel's internal pix/iter*255 act as a simple *255
+    // scaling — the starter-code kernel body stays completely unchanged.
     sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(
-        pbo, cam.resolution, iter, g_dev.image);
+        pbo, cam.resolution, 1, g_dev.imageDisplay);
 
     cudaMemcpy(hst_scene->state.image.data(), g_dev.image,
                pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
