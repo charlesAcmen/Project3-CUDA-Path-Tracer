@@ -62,6 +62,9 @@
 // ---------------------------------------------------------------------------
 __device__ inline glm::vec3 ACESInputMat(glm::vec3 color)
 {
+    // GLSL: mat3(col0, col1, col2) * vec3 → result = r*col0 + g*col1 + b*col2
+    //       列主序：构造函数参数按列依次填充
+    // Explicit per-component form matching GLSL M*v / HLSL mul(M,v):
     return glm::vec3(
         0.59719f * color.r + 0.35458f * color.g + 0.04823f * color.b,
         0.07600f * color.r + 0.90834f * color.g + 0.01566f * color.b,
@@ -79,10 +82,13 @@ __device__ inline glm::vec3 ACESInputMat(glm::vec3 color)
 // ---------------------------------------------------------------------------
 __device__ inline glm::vec3 ACESOutputMat(glm::vec3 color)
 {
+    // GLSL: mat3(col0, col1, col2) * vec3 → result = r*col0 + g*col1 + b*col2
+    //       列主序：构造函数参数按列依次填充
+    // Explicit per-component form matching GLSL M*v / HLSL mul(M,v):
     return glm::vec3(
-         1.60475f * color.r - 0.10208f * color.g - 0.00327f * color.b,
-        -0.53108f * color.r + 1.10813f * color.g - 0.07276f * color.b,
-        -0.07367f * color.r - 0.00605f * color.g + 1.07602f * color.b);
+         1.60475f * color.r - 0.53108f * color.g - 0.07367f * color.b,
+        -0.10208f * color.r + 1.10813f * color.g - 0.00605f * color.b,
+        -0.00327f * color.r - 0.07276f * color.g + 1.07602f * color.b);
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +120,33 @@ __device__ inline glm::vec3 RRTAndODTFit(glm::vec3 v)
     glm::vec3 num = v * (v + 0.0245786f) - glm::vec3(0.000090537f);
     glm::vec3 den = v * (0.983729f * v + 0.4329510f) + glm::vec3(0.238081f);
     return num / den;
+}
+
+// ---------------------------------------------------------------------------
+// ACESFilm (Narkowicz) — Krzysztof Narkowicz's "ACES Approx" (2016)
+//                        Narkowicz 简化 ACES 逼近 (2016)
+//
+// Simpler fit that skips colour-space matrices entirely and operates
+// directly on sRGB / Rec.709 primaries.  The rational curve:
+//     f(x) = (x * (2.51*x + 0.03)) / (x * (2.43*x + 0.59) + 0.14)
+//
+// 无色彩空间矩阵的最简版本，直接在 sRGB / Rec.709 原色上运行。
+//
+// Pros / 优点: zero matrix confusion / 无矩阵困扰, well-tested / 久经考验
+// Cons / 缺点: oversaturates bright highlights / 高光过饱和 (没有 filmic desaturation)
+//
+// Reference / 参考:
+//   https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
+// ---------------------------------------------------------------------------
+__device__ inline glm::vec3 ACESFilm_Narkowicz(glm::vec3 x)
+{
+    const float a = 2.51f;
+    const float b = 0.03f;
+    const float c = 2.43f;
+    const float d = 0.59f;
+    const float e = 0.14f;
+    return glm::clamp((x * (a * x + b)) / (x * (c * x + d) + e),
+                      glm::vec3(0.0f), glm::vec3(1.0f));
 }
 
 // ---------------------------------------------------------------------------
@@ -211,8 +244,9 @@ __global__ void tonemapKernel(
     const glm::vec3* __restrict__ inputImage,   // accumulated HDR / 原始 HDR 累加 (g_dev.image)
     glm::vec3*       __restrict__ outputImage,   // LDR [0,1] display output / LDR 显示输出 (g_dev.imageDisplay)
     glm::ivec2 resolution,
-    int iter)                                    // iteration count (= accumulated samples) / 当前迭代数
-{
+    int iter,                                    // iteration count (= accumulated samples) / 当前迭代数
+    int debugMode)                               // 0 = Hill ACES / 1 = linear bypass / 2 = Narkowicz ACES
+{                                                // 0: Hill ACES   1: 线性旁路   2: Narkowicz ACES
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
 
@@ -224,9 +258,33 @@ __global__ void tonemapKernel(
         //    将累积的 HDR 样本取平均，得到该像素的平均辐射度
         glm::vec3 pix = inputImage[idx] / (float)iter;
 
-        // 2. ACES filmic tone mapping (S-curve + highlight desaturation)
-        //    ACES 电影级色调映射 (S 曲线压缩 + 高光去饱和)
-        pix = ACESFitted(pix);
+        // Guard against negative pixels: floating-point accumulation error
+        // can produce tiny negative values (~ -1e-7).  The ACES rational
+        // functions are undefined for x < 0 (Narkowicz maps -∞ → ~1.03).
+        // Clamping to zero prevents hot-pixel artifacts and NaN propagation.
+        // 防御负值像素：浮点累加误差可能产生极小负值 (~ -1e-7)。
+        // ACES 有理函数对 x < 0 行为不定 (Narkowicz 将 -∞ 映射到 ~1.03)。
+        // 截断到零防止亮斑伪影和 NaN 传播。
+        pix = glm::max(pix, glm::vec3(0.0f));
+
+        if (debugMode == 0)
+        {
+            // Hill ACES: colour-space matrices + RRT/ODT fit
+            // Hill ACES: 色彩空间矩阵 + RRT/ODT 拟合 (高光去饱和)
+            pix = ACESFitted(pix);
+        }
+        else if (debugMode == 2)
+        {
+            // Narkowicz ACES: no matrices, pure S-curve on sRGB primaries
+            // Narkowicz ACES: 无矩阵, 直接在 sRGB 原色上的 S 曲线
+            pix = ACESFilm_Narkowicz(pix);
+        }
+        else
+        {
+            // DEBUG BYPASS (debugMode==1): simple linear clamp
+            //    调试旁路: 简单线性钳制 (复现旧 sendImageToPBO 行为)
+            pix = glm::clamp(pix, glm::vec3(0.0f), glm::vec3(1.0f));
+        }
 
         // 3. Linear-light → sRGB transfer function (gamma encoding)
         //    线性光 → sRGB 编码 (伽马校正, 匹配显示器 EOTF)

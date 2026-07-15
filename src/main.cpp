@@ -424,6 +424,21 @@ void RenderImGui()
             if (ImGui::SliderFloat("Focal Tolerance", &dbg.focalTolerance, 0.05f, 5.0f))
                 camchanged = true;
         }
+
+        ImGui::Separator();
+        ImGui::Text("Tone Mapping Mode:");
+        int currentMode = getDebugMode();
+        if (ImGui::RadioButton("Hill ACES (Filmic)", &currentMode, 0)) {
+            setDebugMode(currentMode);
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Linear Bypass", &currentMode, 1)) {
+            setDebugMode(currentMode);
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Narkowicz ACES", &currentMode, 2)) {
+            setDebugMode(currentMode);
+        }
     }
     ImGui::End();
 

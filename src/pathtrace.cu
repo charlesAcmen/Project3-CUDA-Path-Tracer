@@ -67,6 +67,8 @@ void setCompactMethod(int method) {
 void setSortByMaterial(bool enable) { g_opts.sortByMaterial = enable; }
 int  getCompactMethod()             { return g_opts.compactMethod; }
 bool getSortByMaterial()            { return g_opts.sortByMaterial; }
+void setDebugMode(int mode)         { g_opts.debugMode = mode; }
+int  getDebugMode()                 { return g_opts.debugMode; }
 // ====================================================================
 // Compaction dispatch implementations (forward-declared above).
 // ====================================================================
@@ -923,7 +925,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     // filmic tone mapping pipeline.  g_dev.image is left untouched so
     // the cudaMemcpy below still pulls raw HDR for saveImage().
     tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
-        g_dev.image, g_dev.imageDisplay, cam.resolution, iter);
+        g_dev.image, g_dev.imageDisplay, cam.resolution, iter,
+        g_opts.debugMode);  // 0=Hill ACES / 1=linear bypass / 2=Narkowicz ACES
 
     // ---- 4. Display -----------------------------------------------------
     // sendImageToPBO reads the post-processed LDR buffer (g_dev.imageDisplay)
