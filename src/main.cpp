@@ -413,11 +413,15 @@ void RenderImGui()
         ImGui::Separator();
         ImGui::Text("DOF Debug:");
         DebugConfig& dbg = renderState->debug;
-        ImGui::SliderFloat("Focal Distance", &cam.focalDistance, 0.5f, 30.0f);
-        ImGui::SliderFloat("Lens Radius",    &cam.lensRadius,    0.0f, 5.0f);
-        ImGui::Checkbox("Focal Plane Overlay", &dbg.showDOFOverlay);
+        if (ImGui::SliderFloat("Focal Distance", &cam.focalDistance, 0.5f, 30.0f))
+            camchanged = true;
+        if (ImGui::SliderFloat("Lens Radius", &cam.lensRadius, 0.0f, 5.0f))
+            camchanged = true;
+        if (ImGui::Checkbox("Focal Plane Overlay", &dbg.showDOFOverlay))
+            camchanged = true;
         if (dbg.showDOFOverlay) {
-            ImGui::SliderFloat("Focal Tolerance", &dbg.focalTolerance, 0.05f, 5.0f);
+            if (ImGui::SliderFloat("Focal Tolerance", &dbg.focalTolerance, 0.05f, 5.0f))
+                camchanged = true;
         }
     }
     ImGui::End();
