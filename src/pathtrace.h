@@ -21,6 +21,7 @@ struct DeviceBuffers {
     int*                    sortKeys            = nullptr;
     int*                    sortIndices         = nullptr;
     ShadeableIntersection*  intersectionsSorted = nullptr;
+    glm::vec3*              imageDisplay        = nullptr;  // LDR [0,1] post-processed display output
 };
 
 // Runtime-configurable options for the path tracing pipeline.
