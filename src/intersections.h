@@ -46,6 +46,39 @@ __host__ __device__ inline glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v)
     return glm::vec3(m * v);
 }
 
+/**
+ * Maps two uniform random numbers in [0,1) to a point on the unit disk
+ * using concentric mapping (Shirley's method), which preserves fractional
+ * area for unbiased Monte Carlo integration over a circular aperture.
+ *
+ * Reference: PBRT v4 Section 8.3.2 "Concentric Mapping".
+ */
+__host__ __device__ inline void concentricSampleDisk(
+    float u1, float u2, float& dx, float& dy)
+{
+    float sx = 2.0f * u1 - 1.0f;
+    float sy = 2.0f * u2 - 1.0f;
+
+    // precise equality check is okay here 
+    // guarding division by zero
+    if (sx == 0.0f && sy == 0.0f) {
+        dx = 0.0f;
+        dy = 0.0f;
+        return;
+    }
+
+    float r, theta;
+    if (fabsf(sx) > fabsf(sy)) {
+        r = sx;
+        theta = (PI / 4.0f) * (sy / sx);
+    } else {
+        r = sy;
+        theta = (PI / 2.0f) - (PI / 4.0f) * (sx / sy);
+    }
+    dx = r * cosf(theta);
+    dy = r * sinf(theta);
+}
+
 // CHECKITOUT
 /**
  * Test intersection between a ray and a transformed cube. Untransformed,
