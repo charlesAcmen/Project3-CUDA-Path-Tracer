@@ -32,6 +32,8 @@ struct CliConfig {
     bool autoSave   = false;
     bool showHelp   = false;
     bool hasScene   = false;
+    int  fresnelMode = 0;   // CLI override for RenderState::fresnelMode
+    bool fresnelSet  = false;
 };
 
 static std::string startTimeString;
@@ -152,8 +154,8 @@ void printStartupSummary(const ProfilerConfig& profCfg)
     }
     printf("  Compact method: %s\n", compactName);
     printf("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
-    const char* fresnelName = (getFresnelMode() == 1 ? "Accurate" : "Schlick");
-    printf("  Fresnel mode: %s (flag=%d -> %s)\n", fresnelName, getFresnelMode(), fresnelName);
+    const char* fresnelName = (renderState->fresnelMode == 1 ? "Accurate" : "Schlick");
+    printf("  Fresnel mode: %s\n", fresnelName);
     printf("  Auto-save final image: %s\n", g_autoSave ? "yes" : "no");
     printf("======================================================================\n");
     printf("\n");
@@ -496,8 +498,8 @@ CliConfig parseFlags(int argc, char** argv)
             setSortByMaterial(v);
         } else if (arg.rfind("--fresnel=", 0) == 0) {
             int v = std::stoi(arg.substr(10));
-            v = (v == 1) ? 1 : 0;
-            setFresnelMode(v);
+            cfg.fresnelMode = (v == 1) ? 1 : 0;
+            cfg.fresnelSet  = true;
         } else if (arg.rfind("--warmup=", 0) == 0) {
             cfg.profCfg.warmupIters = std::stoi(arg.substr(9));
         }
