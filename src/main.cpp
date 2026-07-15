@@ -39,7 +39,7 @@ struct CliConfig {
 static std::string startTimeString;
 
 // Auto-save final image on completion (moved from pathtrace.cu — application-level concern)
-static bool g_autoSave = false;
+static bool g_autoSave = true;
 
 // For camera controls
 static bool leftMousePressed = false;
@@ -415,7 +415,7 @@ void RenderImGui()
         DebugConfig& dbg = renderState->debug;
         if (ImGui::SliderFloat("Focal Distance", &cam.focalDistance, 0.5f, 30.0f))
             camchanged = true;
-        if (ImGui::SliderFloat("Lens Radius", &cam.lensRadius, 0.0f, 5.0f))
+        if (ImGui::SliderFloat("Lens Radius", &cam.lensRadius, 0.0f, 1.0f))
             camchanged = true;
         if (ImGui::Checkbox("Focal Plane Overlay", &dbg.showDOFOverlay))
             camchanged = true;
