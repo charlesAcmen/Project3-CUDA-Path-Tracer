@@ -878,6 +878,10 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         sortPathsByMaterial(num_paths);  // no-op when g_opts.sortByMaterial==false
         prof.gpuStop(ProfilerOp::SortByMaterial);
 
+        ShadingConfig shadingCfg = {
+            traceDepth, hst_scene->state.rrMinBounces,
+            hst_scene->state.fresnelMode, cam, hst_scene->state.debug
+        };
         prof.gpuStart(ProfilerOp::ShadeMaterial);
         LAUNCH_KERNEL_AUTO(shadeMaterial, num_paths,
             iter, num_paths,

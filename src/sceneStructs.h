@@ -97,6 +97,18 @@ struct DebugConfig
                                    // "at focal plane"
 };
 
+// POD projection of RenderState fields for GPU kernel parameters.
+// Does NOT own data — RenderState is the single source of truth.
+// Assembled locally at kernel launch time from hst_scene->state.
+struct ShadingConfig
+{
+    int traceDepth;
+    int rrMinBounces;    // guaranteed bounces before Russian roulette
+    int fresnelMode;     // 0=Schlick, 1=Accurate
+    Camera cam;
+    DebugConfig debug;
+};
+
 struct RenderState
 {
     Camera camera;
