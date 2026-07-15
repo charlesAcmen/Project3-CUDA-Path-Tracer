@@ -20,6 +20,7 @@ build
 *.csv
 /profiler_output
 /scenes
+*.pdf
 
 
 # IDE and editor specific files
