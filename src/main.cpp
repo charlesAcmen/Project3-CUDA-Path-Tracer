@@ -29,7 +29,7 @@
 struct CliConfig {
     std::string  sceneFile;
     ProfilerConfig profCfg;
-    bool autoSave   = false;
+    bool autoSave   = true;
     bool showHelp   = false;
     bool hasScene   = false;
     int  fresnelMode = 0;   // CLI override for RenderState::fresnelMode
@@ -114,6 +114,7 @@ void printStartupHelp(const char* exeName)
     printf("    --fresnel=N    Fresnel mode: 0=Schlick (default), 1=Accurate.\n");
     printf("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
     printf("    --save         Save the final rendered image on exit.\n");
+    printf("                   (default: yes)\n");
     printf("    -h, --help     Show this help text.\n");
     printf("\n");
     printf("  Notes:\n");
