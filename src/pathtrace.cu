@@ -230,7 +230,7 @@ void pathtraceFree()
 * motion blur - jitter rays "in time"              (not yet implemented)
 * lens effect - jitter ray origin positions based on a lens  (implemented: thin-lens DOF)
 */
-__global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments)
+__global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments, int rngMode)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -241,14 +241,18 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
         segment.color = glm::vec3(1.0f, 1.0f, 1.0f);
 
-        // RNG for primary-ray generation: AA jitter + lens sampling share one engine.
-        // depth=0 groups all bounce-0 randomness per (iter, pixel) pair.
-        thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
-        thrust::uniform_real_distribution<float> u01(0, 1);
+        // RNG for primary-ray generation: dedicated dimensions for each
+        // sampling decision, so Halton uses distinct prime bases per axis.
+        //   dim 0 (prime 2) = AA jitter x
+        //   dim 1 (prime 3) = AA jitter y
+        //   dim 2 (prime 5) = lens aperture u  (only when DoF is active)
+        //   dim 3 (prime 7) = lens aperture v  (only when DoF is active)
+        RngState rngAAx = makeRngState(iter, index, 0, (RngMode)rngMode);
+        RngState rngAAy = makeRngState(iter, index, 0, (RngMode)rngMode);
 
         // Anti-aliasing: stochastic sub-pixel jitter
-        float jitterX = u01(rng) - 0.5f;   // Draw 1
-        float jitterY = u01(rng) - 0.5f;   // Draw 2
+        float jitterX = rngAAx.next(0) - 0.5f;  // dim 0 (prime 2): AA jitter x
+        float jitterY = rngAAy.next(1) - 0.5f;  // dim 1 (prime 3): AA jitter y
 
         // Pinhole ray direction (undeflected center-of-lens ray)
         glm::vec3 pinholeDir = glm::normalize(cam.view
@@ -455,8 +459,20 @@ __global__ void shadeMaterial(
         // Check if ray intersected with scene geometry
         if (intersection.t > 0.0f)
         {
-            // Setup random number generator for this path
-            thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, pathSegment.remainingBounces);
+            // Setup random number generator for this path.
+            // LCG mode: uses makeSeededRandomEngine logic (backward compatible).
+            // Halton mode: uses dimension 4+ for per-bounce sampling ---
+            //   dim 4 (prime 11) = diffuse hemisphere theta
+            //   dim 5 (prime 13) = diffuse hemisphere phi
+            //   dim 6 (prime 17) = specular lobe theta
+            //   dim 7 (prime 19) = specular lobe phi
+            //   dim 8 (prime 23) = Fresnel roulette (refractive)
+            //   dim 9 (prime 29) = path Russian roulette
+            //
+            // depth = bounceNum * 8 guarantees each bounce gets its own
+            // non-overlapping index range within the Halton sequence.
+            int bounceNum = config.traceDepth - pathSegment.remainingBounces;
+            RngState rngScatter = makeRngState(iter, idx, bounceNum * MAX_DRAWS_PER_BOUNCE, (RngMode)config.rngMode);
 
             // Get material properties at intersection point
             // material is not sorted,hence leading to uncoalesced global memory access
@@ -889,7 +905,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
     // ---- 1. Primary rays ------------------------------------------------
     generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(
-        cam, iter, traceDepth, g_dev.paths);
+        cam, iter, traceDepth, g_dev.paths, g_opts.rngMode);
     checkCUDAError("generate camera ray");
 
     int  depth     = 0;
@@ -931,7 +947,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         ShadingConfig shadingCfg = {
             traceDepth, hst_scene->state.rrMinBounces,
-            hst_scene->state.fresnelMode, cam, hst_scene->state.debug
+            hst_scene->state.fresnelMode, g_opts.rngMode, cam, hst_scene->state.debug
         };
         prof.gpuStart(ProfilerOp::ShadeMaterial);
         LAUNCH_KERNEL_AUTO(shadeMaterial, num_paths,
