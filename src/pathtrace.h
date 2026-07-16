@@ -47,7 +47,7 @@ struct BloomConfig {
 struct PathTracerOptions {
     int  compactMethod  = 3;     // 0=off, 1=global scan, 2=Thrust, 3=shared-mem (default)
     bool sortByMaterial = true;  // group paths by materialId before shading
-    int  rngMode        = 0;     // 0=LCG (default, backward compat), 1=scrambled Halton
+    int  rngMode        = 1;     // 0=LCG (default, backward compat), 1=scrambled Halton
     BloomConfig bloom;           // bloom post-processing settings
 };
 
