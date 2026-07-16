@@ -9,10 +9,6 @@
 // so that the ownership of every buffer and option is explicit.
 // ====================================================================
 
-// Maximum Gaussian blur radius for bloom (limits shared memory allocation).
-#define MAX_BLOOM_RADIUS 32
-#define BLOOM_BLOCK_SIZE 256
-
 // All GPU device buffers owned by the path tracer.
 // Previously 9 separate static dev_* pointers in pathtrace.cu.
 struct DeviceBuffers {
