@@ -47,7 +47,6 @@ struct BloomConfig {
 struct PathTracerOptions {
     int  compactMethod  = 3;     // 0=off, 1=global scan, 2=Thrust, 3=shared-mem (default)
     bool sortByMaterial = true;  // group paths by materialId before shading
-    int  debugMode      = 0;     // 0=Hill ACES, 1=linear bypass, 2=Narkowicz ACES
     BloomConfig bloom;           // bloom post-processing settings
 };
 
@@ -61,8 +60,6 @@ void setCompactMethod(int method);
 void setSortByMaterial(bool enable);
 int  getCompactMethod();
 bool getSortByMaterial();
-void setDebugMode(int mode);
-int  getDebugMode();
 
 // Bloom runtime configuration
 void setBloomEnabled(bool enable);

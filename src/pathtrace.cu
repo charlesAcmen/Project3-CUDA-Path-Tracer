@@ -69,9 +69,6 @@ void setCompactMethod(int method) {
 void setSortByMaterial(bool enable) { g_opts.sortByMaterial = enable; }
 int  getCompactMethod()             { return g_opts.compactMethod; }
 bool getSortByMaterial()            { return g_opts.sortByMaterial; }
-void setDebugMode(int mode)         { g_opts.debugMode = mode; }
-int  getDebugMode()                 { return g_opts.debugMode; }
-
 void  setBloomEnabled(bool v)       { g_opts.bloom.enabled = v; }
 bool  getBloomEnabled()             { return g_opts.bloom.enabled; }
 void  setBloomThreshold(float v)    { g_opts.bloom.threshold = v; }
@@ -825,7 +822,6 @@ static void runPostProcess(
     glm::ivec2 resolution,
     int iter,
     const BloomConfig& bloomCfg,
-    int debugMode,
     uchar4* pbo)
 {
     const dim3 blockSize2d(8, 8);
@@ -875,14 +871,14 @@ static void runPostProcess(
         // 4. Tone-map: composite blurred bloom onto HDR → ACES → sRGB → LDR
         tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
             dev.image, dev.imageDisplay, resolution, iter,
-            debugMode, dev.bloomBufA, bloomCfg.intensity);
+            dev.bloomBufA, bloomCfg.intensity);
     }
     else
     {
         // No bloom: tone-map only (zero-overhead for disabled case)
         tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
             dev.image, dev.imageDisplay, resolution, iter,
-            debugMode, nullptr, 0.0f);
+            nullptr, 0.0f);
     }
 
     // 5. Display: write LDR sRGB data to the OpenGL pixel buffer
@@ -1028,7 +1024,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
     // ---- 3.5. Post-Processing: Bloom + Tone Mapping + Display ----
     runPostProcess(g_dev, cam.resolution, iter,
-                   g_opts.bloom, g_opts.debugMode, pbo);
+                   g_opts.bloom, pbo);
 
     cudaMemcpy(hst_scene->state.image.data(), g_dev.image,
                pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);

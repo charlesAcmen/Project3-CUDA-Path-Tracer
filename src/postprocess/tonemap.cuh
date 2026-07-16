@@ -220,36 +220,24 @@ __device__ inline glm::vec3 LinearToSRGB(glm::vec3 c)
 }
 
 // ---------------------------------------------------------------------------
-// tonemapKernel — Post-processing kernel entry point / 后处理 kernel 入口
+// tonemapKernel — Post-processing kernel entry point
 //
-// Reads the raw accumulated HDR radiance from g_dev.image (sum of all
-// path samples for the current frame), averages by the iteration count,
-// optionally composites bloom, applies ACES filmic tone mapping,
-// encodes to sRGB, clamps, and writes the LDR [0,1] result to the
-// display output buffer.
-//
-// 从 g_dev.image (当前帧所有路径采样的原始 HDR 累加和) 读取数据，
-// 除以迭代次数取平均 → (可选)叠加 Bloom → ACES 电影级色调映射
-// → sRGB 伽马编码 → 钳制，最终将 LDR [0,1] 结果写入 g_dev.imageDisplay。
+// Reads the raw accumulated HDR radiance from g_dev.image, averages by
+// the iteration count, optionally composites bloom, applies ACES filmic
+// tone mapping, encodes to sRGB, clamps, and writes the LDR [0,1]
+// result to the display output buffer.
 //
 // Launched as a 2-D grid matching the framebuffer resolution.
-// 以 2-D 线程网格启动，与帧缓冲分辨率对齐。
-//
-// g_dev.image is left untouched so the cudaMemcpy D2H still pulls raw
-// HDR for saveImage(), and sendImageToPBO stays completely unchanged.
-// g_dev.image 保持不变：cudaMemcpy D2H 仍获得原始 HDR 供 saveImage(),
-// sendImageToPBO 也无需任何修改。
 //
 // Bloom compositing happens BEFORE tone mapping in linear HDR space.
 // ---------------------------------------------------------------------------
 __global__ void tonemapKernel(
-    const glm::vec3* __restrict__ inputImage,   // accumulated HDR / 原始 HDR 累加 (g_dev.image)
-    glm::vec3*       __restrict__ outputImage,   // LDR [0,1] display output / LDR 显示输出 (g_dev.imageDisplay)
+    const glm::vec3* __restrict__ inputImage,
+    glm::vec3*       __restrict__ outputImage,
     glm::ivec2 resolution,
-    int iter,                                    // iteration count (= accumulated samples) / 当前迭代数
-    int debugMode,                               // 0 = Hill ACES / 1 = linear bypass / 2 = Narkowicz ACES
-    const glm::vec3* __restrict__ bloomImage,    // blurred bloom HDR (null if disabled) / 模糊后的泛光HDR
-    float bloomIntensity)                        // bloom blend strength / 泛光叠加强度
+    int iter,
+    const glm::vec3* __restrict__ bloomImage,
+    float bloomIntensity)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -258,51 +246,25 @@ __global__ void tonemapKernel(
     {
         int idx = x + y * resolution.x;
 
-        // 1. Average accumulated HDR samples for this pixel
-        //    将累积的 HDR 样本取平均，得到该像素的平均辐射度
+        // Average accumulated HDR samples
         glm::vec3 pix = inputImage[idx] / (float)iter;
 
-        // 2. Composite bloom (in linear HDR space, before tone mapping)
-        //    bloomImage is the result of: threshold → blurH → blurV
+        // Composite bloom (in linear HDR space, before tone mapping)
         if (bloomImage != nullptr && bloomIntensity > 0.0f)
         {
             pix += bloomIntensity * bloomImage[idx];
         }
 
-        // Guard against negative pixels: floating-point accumulation error
-        // can produce tiny negative values (~ -1e-7).  The ACES rational
-        // functions are undefined for x < 0 (Narkowicz maps -∞ → ~1.03).
-        // Clamping to zero prevents hot-pixel artifacts and NaN propagation.
-        // 防御负值像素：浮点累加误差可能产生极小负值 (~ -1e-7)。
-        // ACES 有理函数对 x < 0 行为不定 (Narkowicz 将 -∞ 映射到 ~1.03)。
-        // 截断到零防止亮斑伪影和 NaN 传播。
+        // Guard against negative values from FP accumulation error
         pix = glm::max(pix, glm::vec3(0.0f));
 
-        if (debugMode == 0)
-        {
-            // Hill ACES: colour-space matrices + RRT/ODT fit
-            // Hill ACES: 色彩空间矩阵 + RRT/ODT 拟合 (高光去饱和)
-            pix = ACESFitted(pix);
-        }
-        else if (debugMode == 2)
-        {
-            // Narkowicz ACES: no matrices, pure S-curve on sRGB primaries
-            // Narkowicz ACES: 无矩阵, 直接在 sRGB 原色上的 S 曲线
-            pix = ACESFilm_Narkowicz(pix);
-        }
-        else
-        {
-            // DEBUG BYPASS (debugMode==1): simple linear clamp
-            //    调试旁路: 简单线性钳制 (复现旧 sendImageToPBO 行为)
-            pix = glm::clamp(pix, glm::vec3(0.0f), glm::vec3(1.0f));
-        }
+        // Hill ACES filmic tone mapping: sRGB→AP1 → RRT+ODT S-curve → AP1→sRGB
+        pix = ACESFitted(pix);
 
-        // 4. Linear-light → sRGB transfer function (gamma encoding)
-        //    线性光 → sRGB 编码 (伽马校正, 匹配显示器 EOTF)
+        // Linear-light → sRGB transfer function (gamma encoding)
         pix = LinearToSRGB(pix);
 
-        // 5. Clamp to valid LDR range and write to display buffer
-        //    钳制到 LDR 有效范围并写入显示缓冲
+        // Clamp to valid LDR range and write to display buffer
         pix = glm::clamp(pix, glm::vec3(0.0f), glm::vec3(1.0f));
         outputImage[idx] = pix;
     }
