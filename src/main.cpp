@@ -430,6 +430,13 @@ void RenderImGui()
 
         ImGui::Separator();
         ImGui::Separator();
+        ImGui::Text("RNG Mode:");
+        int currentRng = getRngMode();
+        if (ImGui::RadioButton("LCG", &currentRng, 0))  { setRngMode(0); camchanged = true; }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Halton", &currentRng, 1)) { setRngMode(1); camchanged = true; }
+
+        ImGui::Separator();
         ImGui::Text("Bloom:");
         bool bloomEnabled = getBloomEnabled();
         if (ImGui::Checkbox("Enable Bloom", &bloomEnabled))
