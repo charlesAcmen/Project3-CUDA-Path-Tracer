@@ -810,6 +810,87 @@ static void updateGuiAfterFrame(Profiler& prof, GuiDataContainer* gui) {
 }
 
 // ---------------------------------------------------------------------------
+// runPostProcess — Orchestrate all post-processing steps
+//
+// Pipeline for each frame:
+//   (optional) thresholdExtract → blurHorizontal → blurVertical
+//   → tonemapKernel (compositing in HDR if bloom is enabled)
+//   → sendImageToPBO (LDR display)
+//
+// Bloom is performed in LINEAR HDR SPACE before tone mapping, so the
+// threshold has physical meaning (brightness > 1.0 = actually bright).
+// ---------------------------------------------------------------------------
+static void runPostProcess(
+    DeviceBuffers& dev,
+    glm::ivec2 resolution,
+    int iter,
+    const BloomConfig& bloomCfg,
+    int debugMode,
+    uchar4* pbo)
+{
+    const dim3 blockSize2d(8, 8);
+    const dim3 blocksPerGrid2d(
+        (resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+        (resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+
+    if (bloomCfg.enabled && bloomCfg.intensity > 0.0f)
+    {
+        // Upload 1D Gaussian weights (host → device)
+        int kernelSize = bloomCfg.kernelSize();
+        std::vector<float> weights = computeGaussianWeights(bloomCfg.radius, bloomCfg.sigma);
+        cudaMemcpy(dev.bloomWeights, weights.data(),
+                   kernelSize * sizeof(float), cudaMemcpyHostToDevice);
+
+        // 1. Threshold: keep only pixels brighter than the cutoff
+        thresholdExtract<<<blocksPerGrid2d, blockSize2d>>>(
+            dev.image, dev.bloomBufA, resolution, iter, bloomCfg.threshold);
+
+        // 2. Horizontal separable Gaussian blur (shared-memory tiled)
+        {
+            dim3 gridH((resolution.x + BLOOM_BLOCK_SIZE - 1) / BLOOM_BLOCK_SIZE,
+                       resolution.y, 1);
+            dim3 blockH(BLOOM_BLOCK_SIZE, 1, 1);
+            // Shared memory: (tile + 2*radius halo) × float3
+            size_t smem = (BLOOM_BLOCK_SIZE + 2 * bloomCfg.radius) * sizeof(float) * 3;
+            blurHorizontal<<<gridH, blockH, smem>>>(
+                dev.bloomBufA, dev.bloomBufB,
+                resolution.x, resolution.y,
+                dev.bloomWeights, bloomCfg.radius);
+        }
+        checkCUDAError("bloom blurHorizontal");
+
+        // 3. Vertical separable Gaussian blur (overwrites bloomBufA with final result)
+        {
+            dim3 gridV((resolution.y + BLOOM_BLOCK_SIZE - 1) / BLOOM_BLOCK_SIZE,
+                       resolution.x, 1);
+            dim3 blockV(BLOOM_BLOCK_SIZE, 1, 1);
+            size_t smem = (BLOOM_BLOCK_SIZE + 2 * bloomCfg.radius) * sizeof(float) * 3;
+            blurVertical<<<gridV, blockV, smem>>>(
+                dev.bloomBufB, dev.bloomBufA,
+                resolution.x, resolution.y,
+                dev.bloomWeights, bloomCfg.radius);
+        }
+        checkCUDAError("bloom blurVertical");
+
+        // 4. Tone-map: composite blurred bloom onto HDR → ACES → sRGB → LDR
+        tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
+            dev.image, dev.imageDisplay, resolution, iter,
+            debugMode, dev.bloomBufA, bloomCfg.intensity);
+    }
+    else
+    {
+        // No bloom: tone-map only (zero-overhead for disabled case)
+        tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
+            dev.image, dev.imageDisplay, resolution, iter,
+            debugMode, nullptr, 0.0f);
+    }
+
+    // 5. Display: write LDR sRGB data to the OpenGL pixel buffer
+    sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(
+        pbo, resolution, 1, dev.imageDisplay);
+}
+
+// ---------------------------------------------------------------------------
 // Main path-tracing entry point (called once per frame / iteration)
 // ---------------------------------------------------------------------------
 //
@@ -945,96 +1026,9 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             pixelcount, g_dev.image, g_dev.paths);
     }
 
-    // ---- 3.5. Post-Processing: Bloom + ACES Tone Mapping + sRGB Gamma ----
-    //
-    // Bloom pipeline (all in linear HDR space, before tone mapping):
-    //   g_dev.image → thresholdExtract → bloomBufA
-    //              → blurHorizontal      → bloomBufB
-    //              → blurVertical        → bloomBufA (final blurred bloom)
-    //   tonemapKernel: HDR + intensity * bloomBufA → ACES → sRGB → imageDisplay
-    //
-    // When bloom is disabled, tonemapKernel is called directly with
-    // bloomImage=nullptr for zero-overhead backward compatibility.
-    // Bloom关闭时直接调用tonemapKernel，零开销向后兼容。
-    //
-    // 泛光管线 (全部在线性 HDR 空间进行, 色调映射之前):
-    //   g_dev.image → 阈值提取 → bloomBufA
-    //              → 水平模糊   → bloomBufB
-    //              → 垂直模糊   → bloomBufA (最终模糊泛光)
-    //   tonemapKernel: HDR + intensity * bloomBufA → ACES → sRGB → imageDisplay
-
-    if (g_opts.bloom.enabled && g_opts.bloom.intensity > 0.0f)
-    {
-        // Compute and upload 1D Gaussian weights (host → device)
-        // 计算并上传 1D 高斯权重 (主机→设备)
-        int kernelSize = g_opts.bloom.kernelSize();
-        std::vector<float> weights = computeGaussianWeights(
-            g_opts.bloom.radius, g_opts.bloom.sigma);
-        cudaMemcpy(g_dev.bloomWeights, weights.data(),
-                   kernelSize * sizeof(float), cudaMemcpyHostToDevice);
-
-        // 1. Threshold extraction (2D grid, same launch config as tonemap)
-        //    阈值提取 (2D 网格, 与 tonemap 相同启动配置)
-        thresholdExtract<<<blocksPerGrid2d, blockSize2d>>>(
-            g_dev.image, g_dev.bloomBufA, cam.resolution, iter,
-            g_opts.bloom.threshold);
-
-        // 2. Horizontal separable Gaussian blur (1D blocks, shared memory)
-        //    水平分离高斯模糊 (1D block, 共享内存)
-        {
-            dim3 blurGridH(
-                (cam.resolution.x + BLOOM_BLOCK_SIZE - 1) / BLOOM_BLOCK_SIZE,
-                cam.resolution.y, 1);
-            dim3 blurBlockH(BLOOM_BLOCK_SIZE, 1, 1);
-            size_t smemH = (BLOOM_BLOCK_SIZE + 2 * g_opts.bloom.radius)
-                           * sizeof(float) * 3;  // float3 per element
-            blurHorizontal<<<blurGridH, blurBlockH, smemH>>>(
-                g_dev.bloomBufA, g_dev.bloomBufB,
-                cam.resolution.x, cam.resolution.y,
-                g_dev.bloomWeights, g_opts.bloom.radius);
-        }
-        checkCUDAError("bloom blurHorizontal");
-
-        // 3. Vertical separable Gaussian blur (shared memory, overwrites bloomBufA)
-        //    垂直分离高斯模糊 (共享内存, 覆写 bloomBufA)
-        {
-            dim3 blurGridV(
-                (cam.resolution.y + BLOOM_BLOCK_SIZE - 1) / BLOOM_BLOCK_SIZE,
-                cam.resolution.x, 1);
-            dim3 blurBlockV(BLOOM_BLOCK_SIZE, 1, 1);
-            size_t smemV = (BLOOM_BLOCK_SIZE + 2 * g_opts.bloom.radius)
-                           * sizeof(float) * 3;
-            blurVertical<<<blurGridV, blurBlockV, smemV>>>(
-                g_dev.bloomBufB, g_dev.bloomBufA,
-                cam.resolution.x, cam.resolution.y,
-                g_dev.bloomWeights, g_opts.bloom.radius);
-        }
-        checkCUDAError("bloom blurVertical");
-
-        // 4. Tone mapping with bloom composited in HDR space
-        //    色调映射 (Bloom 已在 HDR 空间叠加)
-        tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
-            g_dev.image, g_dev.imageDisplay, cam.resolution, iter,
-            g_opts.debugMode,
-            g_dev.bloomBufA, g_opts.bloom.intensity);
-    }
-    else
-    {
-        // Bloom disabled — tone mapping only (zero-overhead backward-compatible)
-        // Bloom 关闭 — 仅色调映射 (零开销向后兼容)
-        tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
-            g_dev.image, g_dev.imageDisplay, cam.resolution, iter,
-            g_opts.debugMode,
-            nullptr, 0.0f);
-    }
-
-    // ---- 4. Display -----------------------------------------------------
-    // sendImageToPBO reads the post-processed LDR buffer (g_dev.imageDisplay)
-    // instead of raw HDR.  Since the data is already tone-mapped and in [0,1],
-    // iter=1 makes the kernel's internal pix/iter*255 act as a simple *255
-    // scaling — the starter-code kernel body stays completely unchanged.
-    sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(
-        pbo, cam.resolution, 1, g_dev.imageDisplay);
+    // ---- 3.5. Post-Processing: Bloom + Tone Mapping + Display ----
+    runPostProcess(g_dev, cam.resolution, iter,
+                   g_opts.bloom, g_opts.debugMode, pbo);
 
     cudaMemcpy(hst_scene->state.image.data(), g_dev.image,
                pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
