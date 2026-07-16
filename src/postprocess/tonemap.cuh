@@ -220,18 +220,17 @@ __device__ inline glm::vec3 LinearToSRGB(glm::vec3 c)
 }
 
 // ---------------------------------------------------------------------------
-// tonemapKernel — Post-processing kernel entry point
+// prepareDisplayKernel — Average HDR and optionally composite bloom
 //
-// Reads the raw accumulated HDR radiance from g_dev.image, averages by
-// the iteration count, optionally composites bloom, applies ACES filmic
-// tone mapping, encodes to sRGB, clamps, and writes the LDR [0,1]
-// result to the display output buffer.
+// Reads raw accumulated HDR, averages by iteration count, optionally
+// composites blurred bloom, and writes linear HDR output for further
+// processing (tone mapping).
 //
-// Launched as a 2-D grid matching the framebuffer resolution.
-//
-// Bloom compositing happens BEFORE tone mapping in linear HDR space.
+// Produces LINEAR HDR output (not yet clamped to [0,1]), because the
+// following tonemapKernel needs the full dynamic range to apply the ACES
+// S-curve correctly.
 // ---------------------------------------------------------------------------
-__global__ void tonemapKernel(
+__global__ void prepareDisplayKernel(
     const glm::vec3* __restrict__ inputImage,
     glm::vec3*       __restrict__ outputImage,
     glm::ivec2 resolution,
@@ -258,14 +257,37 @@ __global__ void tonemapKernel(
         // Guard against negative values from FP accumulation error
         pix = glm::max(pix, glm::vec3(0.0f));
 
-        // Hill ACES filmic tone mapping: sRGB→AP1 → RRT+ODT S-curve → AP1→sRGB
+        outputImage[idx] = pix;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// tonemapKernel — ACES filmic tone mapping + sRGB gamma
+//
+// Reads linear HDR input, applies Hill ACES filmic tone mapping, encodes
+// to sRGB gamma, clamps to [0,1], and writes LDR output for display.
+//
+// This kernel is PURE — it only does the display transform.  Averaging
+// and bloom compositing must be done beforehand (see prepareDisplayKernel).
+// ---------------------------------------------------------------------------
+__global__ void tonemapKernel(
+    const glm::vec3* __restrict__ inputImage,
+    glm::vec3*       __restrict__ outputImage,
+    glm::ivec2 resolution)
+{
+    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+    if (x < resolution.x && y < resolution.y)
+    {
+        int idx = x + y * resolution.x;
+        glm::vec3 pix = inputImage[idx];
+
+        // Hill ACES filmic tone mapping: sRGB→AP1 → RRT+ODT → AP1→sRGB
         pix = ACESFitted(pix);
 
         // Linear-light → sRGB transfer function (gamma encoding)
         pix = LinearToSRGB(pix);
-
-        // Clamp to valid LDR range and write to display buffer
-        pix = glm::clamp(pix, glm::vec3(0.0f), glm::vec3(1.0f));
         outputImage[idx] = pix;
     }
 }

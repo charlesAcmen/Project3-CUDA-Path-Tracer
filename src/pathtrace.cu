@@ -824,6 +824,8 @@ static void runPostProcess(
     const BloomConfig& bloomCfg,
     uchar4* pbo)
 {
+    //different from kernel config,here is memory bound,64 threads per block 
+    //enough to hide memory latency
     const dim3 blockSize2d(8, 8);
     const dim3 blocksPerGrid2d(
         (resolution.x + blockSize2d.x - 1) / blockSize2d.x,
@@ -837,11 +839,11 @@ static void runPostProcess(
         cudaMemcpy(dev.bloomWeights, weights.data(),
                    kernelSize * sizeof(float), cudaMemcpyHostToDevice);
 
-        // 1. Threshold: keep only pixels brighter than the cutoff
+        // Threshold: keep only pixels brighter than the cutoff
         thresholdExtract<<<blocksPerGrid2d, blockSize2d>>>(
             dev.image, dev.bloomBufA, resolution, iter, bloomCfg.threshold);
 
-        // 2. Horizontal separable Gaussian blur (shared-memory tiled)
+        // Horizontal separable Gaussian blur (shared-memory tiled)
         {
             dim3 gridH((resolution.x + BLOOM_BLOCK_SIZE - 1) / BLOOM_BLOCK_SIZE,
                        resolution.y, 1);
@@ -855,7 +857,7 @@ static void runPostProcess(
         }
         checkCUDAError("bloom blurHorizontal");
 
-        // 3. Vertical separable Gaussian blur (overwrites bloomBufA with final result)
+        // Vertical separable Gaussian blur (overwrites bloomBufA with final result)
         {
             dim3 gridV((resolution.y + BLOOM_BLOCK_SIZE - 1) / BLOOM_BLOCK_SIZE,
                        resolution.x, 1);
@@ -867,21 +869,19 @@ static void runPostProcess(
                 dev.bloomWeights, bloomCfg.radius);
         }
         checkCUDAError("bloom blurVertical");
-
-        // 4. Tone-map: composite blurred bloom onto HDR → ACES → sRGB → LDR
-        tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
-            dev.image, dev.imageDisplay, resolution, iter,
-            dev.bloomBufA, bloomCfg.intensity);
-    }
-    else
-    {
-        // No bloom: tone-map only (zero-overhead for disabled case)
-        tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
-            dev.image, dev.imageDisplay, resolution, iter,
-            nullptr, 0.0f);
     }
 
-    // 5. Display: write LDR sRGB data to the OpenGL pixel buffer
+    // Average HDR, composite bloom if available, write linear HDR to display buffer
+    prepareDisplayKernel<<<blocksPerGrid2d, blockSize2d>>>(
+        dev.image, dev.imageDisplay, resolution, iter,
+        (bloomCfg.enabled && bloomCfg.intensity > 0.0f) ? dev.bloomBufA : nullptr,
+        bloomCfg.intensity);
+
+    // Pure ACES filmic tone mapping + sRGB gamma (in-place on display buffer)
+    tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
+        dev.imageDisplay, dev.imageDisplay, resolution);
+
+    // Display: write LDR sRGB data to the OpenGL pixel buffer
     sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(
         pbo, resolution, 1, dev.imageDisplay);
 }
