@@ -31,7 +31,9 @@ original README content above — this is just an addition for tracking.
 
 - BSDF / scattering: implemented diffuse Lambertian scattering, perfect specular reflection, and imperfect glossy/specular reflection with roughness-driven sampling for non-perfect mirrors
 
--The refraction-oriented visual improvement is implemented, including Fresnel-based reflection/refraction selection and imperfect specular lighting for rougher specular materials- Physically-based depth-of-field is implemented by jittering rays within an aperture.
+- The refraction-oriented visual improvement is implemented, including Fresnel-based reflection/refraction selection and imperfect specular lighting for rougher specular materials.
+- Physically-based depth-of-field is implemented by jittering rays within an aperture.
+- Image post-processing includes selectable tone mapping modes: Hill ACES (full colour-matrix ACES fit) and Narkowicz ACES (simpler sRGB curve), plus a linear bypass mode.
 - The ImGui overlay supports dynamic adjustment of focal distance and aperture radius, and shows the focal plane in green at the intersection point for visual validation of depth-of-field correctness.
 Other notes:
 
