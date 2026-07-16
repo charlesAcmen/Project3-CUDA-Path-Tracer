@@ -4,7 +4,7 @@
 
 #include <glm/glm.hpp>
 
-#include <thrust/random.h>
+#include "rng.h"
 
 // CHECKITOUT
 /**
@@ -13,7 +13,7 @@
  */
 __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     glm::vec3 normal, 
-    thrust::default_random_engine& rng);
+    RngState& rng);
 
 __host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2);
 __host__ __device__ float fresnelAccurate(float cosThetaI, float n1, float n2);
@@ -56,5 +56,12 @@ __host__ __device__ void scatterRay(
     glm::vec3 intersect,
     glm::vec3 normal,
     const Material& m,
-    thrust::default_random_engine& rng,
+    RngState& rng,
     int fresnelMode);
+
+// Glossy specular: samples a direction around the reflected direction
+// using a Phong lobe with the given exponent.
+__host__ __device__ glm::vec3 samplePhongSpecularDir(
+    glm::vec3 reflectDir,
+    float exponent,
+    RngState& rng);

@@ -19,6 +19,7 @@
 #include "kernel_config.h"
 #include "postprocess/tonemap.cuh"
 #include "postprocess/bloom.cuh"
+#include "rng.h"
 
 // Note: checkCUDAError and checkCUDAErrorFn are now defined in utilities.h/cu
 
@@ -77,6 +78,8 @@ void  setBloomIntensity(float v)    { g_opts.bloom.intensity = v; }
 float getBloomIntensity()           { return g_opts.bloom.intensity; }
 void  setBloomRadius(int v)         { if (v != g_opts.bloom.radius) { g_opts.bloom.radius = v; g_opts.bloom.sigma = v * 0.5f; } }
 int   getBloomRadius()              { return g_opts.bloom.radius; }
+void  setRngMode(int mode)          { g_opts.rngMode = mode; }
+int   getRngMode()                  { return g_opts.rngMode; }
 // ====================================================================
 // Compaction dispatch implementations (forward-declared above).
 // ====================================================================
@@ -273,8 +276,10 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
             glm::vec3 pFocus = cam.position + ft * pinholeDir;
 
             // 2. Sample a point on the lens aperture via concentric disk mapping
-            float lensU = u01(rng);   // Draw 3
-            float lensV = u01(rng);   // Draw 4
+            RngState rngLensU = makeRngState(iter, index, 0, (RngMode)rngMode);
+            RngState rngLensV = makeRngState(iter, index, 0, (RngMode)rngMode);
+            float lensU = rngLensU.next(2);  // dim 2 (prime 5): lens aperture u
+            float lensV = rngLensV.next(3);  // dim 3 (prime 7): lens aperture v
             float dx, dy;
             concentricSampleDisk(lensU, lensV, dx, dy);
 
@@ -397,7 +402,7 @@ __device__ bool russianRouletteTerminate(
     int remainingBounces,
     int traceDepth,
     int rrMinBounces,
-    thrust::default_random_engine& rng)
+    RngState& rng)
 {
     // Only applies after rrMinBounces guaranteed bounces.
     if (remainingBounces <= 0 ||
@@ -409,8 +414,7 @@ __device__ bool russianRouletteTerminate(
     float p = fmaxf(fmaxf(color.r, color.g), color.b);
     p = fminf(fmaxf(p, RR_P_MIN), RR_P_MAX);
 
-    thrust::uniform_real_distribution<float> u01(0, 1);
-    if (u01(rng) < p)
+    if (rng.next(9) < p)  // dim 9 (prime 29): path Russian roulette
     {
         color /= p;    // unbiased compensation
         return false;  // survived
@@ -496,7 +500,7 @@ __global__ void shadeMaterial(
             {
                 // Non-emissive surface: scatter ray according to BSDF
                 // This updates the ray direction and attenuates color based on material
-                scatterRay(pathSegment, intersectionPoint, intersection.surfaceNormal, material, rng, config.fresnelMode);
+                scatterRay(pathSegment, intersectionPoint, intersection.surfaceNormal, material, rngScatter, config.fresnelMode);
 
                 // Russian roulette: probabilistically terminate paths whose
                 // throughput has dropped below a useful level.  Only applies
@@ -510,7 +514,7 @@ __global__ void shadeMaterial(
                 //   - Bounce 3: remainingBounces = 4 after scatter, 4 < 5? Yes -> RR starts
                 // This ensures the first rrMinBounces (3) bounces are guaranteed.
                 if (russianRouletteTerminate(pathSegment.color,
-                    pathSegment.remainingBounces, config.traceDepth, config.rrMinBounces, rng))
+                    pathSegment.remainingBounces, config.traceDepth, config.rrMinBounces, rngScatter))
                 {
                     pathSegment.remainingBounces = 0;  // terminate
                 }

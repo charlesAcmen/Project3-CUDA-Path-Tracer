@@ -2,7 +2,7 @@
 
 #include "utilities.h"
 
-#include <thrust/random.h>
+#include "rng.h"
 
 /**
  * Generates a random direction vector in a hemisphere oriented around a given surface normal,
@@ -54,11 +54,10 @@ __host__ __device__ void buildOrthonormalBasis(
 __host__ __device__ glm::vec3 samplePhongSpecularDir(
     glm::vec3 reflectDir,
     float exponent,
-    thrust::default_random_engine& rng)
+    RngState& rng)
 {
-    thrust::uniform_real_distribution<float> u01(0, 1);
-    float xi1 = u01(rng);
-    float xi2 = u01(rng);
+    float xi1 = rng.next(6);  // dim 6 (prime 17): specular lobe theta
+    float xi2 = rng.next(7);  // dim 7 (prime 19): specular lobe phi
 
     // Eq.7: cos(theta_s) = xi1^(1/(n+1))
     // Optimization: if exponent is 0.0f (i.e. maximum roughness, r=1.0f), we skip powf
@@ -82,10 +81,8 @@ __host__ __device__ glm::vec3 samplePhongSpecularDir(
 
 __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     glm::vec3 normal,
-    thrust::default_random_engine &rng)
+    RngState &rng)
 {
-    thrust::uniform_real_distribution<float> u01(0, 1);
-
     // STEP 1: Polar Coordinate Sampling (Inverse Transform Sampling)
     // ----------------------------------------------------------------
     // To achieve cosine-weighted distribution, we use the probability density function:
@@ -98,9 +95,9 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     //   cos(theta) = sqrt(xi_1)         (vertical component, weighted toward normal)
     //   sin(theta) = sqrt(1 - xi_1)     (horizontal component, from Pythagorean identity)
     
-    float up = sqrt(u01(rng)); // cos(theta) - probability of sampling decreases with angle from normal
+    float up = sqrt(rng.next(4)); // dim 4 (prime 11): diffuse hemisphere theta (cos(theta))
     float over = sqrt(1 - up * up); // sin(theta) - derived from trigonometric identity sin^2(theta) + cos^2(theta) = 1
-    float around = u01(rng) * TWO_PI; // phi - azimuthal angle, uniformly distributed in [0, 2*PI]
+    float around = rng.next(5) * TWO_PI; // dim 5 (prime 13): diffuse hemisphere phi
 
     // At this point, we have spherical coordinates (theta, phi) that represent a direction
     // in a LOCAL coordinate system where the normal is aligned with the Z-axis:
@@ -241,7 +238,7 @@ __host__ __device__ void scatterRay(
     glm::vec3 intersect,
     glm::vec3 normal,
     const Material &m,
-    thrust::default_random_engine &rng,
+    RngState &rng,
     int fresnelMode)
 {
     // Scatter a ray according to the material's BSDF.
@@ -274,8 +271,6 @@ __host__ __device__ void scatterRay(
     // The offset sign for the new ray origin is determined per-branch below by
     // checking the dot product of the new ray direction against the geometric
     // normal, so the offset always pushes the origin to the correct side.
-    thrust::uniform_real_distribution<float> u01(0, 1);
-
     switch (m.type)
     {
         case MaterialType::Refractive:
@@ -298,7 +293,7 @@ __host__ __device__ void scatterRay(
             //   reflection:  R * color / R     = color
             //   refraction: (1-R) * color / (1-R) = color
             // → Fresnel factor cancels out in both branches.
-            if (u01(rng) < reflectance)
+            if (rng.next(8) < reflectance)  // dim 8 (prime 23): Fresnel roulette
             {
                 glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
                 const float offsetSign = entering ? 1.0f : -1.0f;
