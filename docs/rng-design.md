@@ -213,10 +213,10 @@ struct RngState {
     // -- LCG branch (preserved from existing code) --
     thrust::default_random_engine lcgEngine;
 
-    // -- Halton branch (3 integers total) --
-    unsigned int haltonIndex;     // current sample index for progressive rendering
-    int haltonBase;               // prime base for current sampling dimension
-    unsigned int haltonScramble;  // per-pixel scramble (from utilhash)
+    // -- Halton branch (2 ints + 1 float) --
+    unsigned int haltonIndex;     // current sample index in the Halton sequence
+    int haltonBase;               // prime base for this sampling dimension
+    float haltonOffset;           // Cranley-Patterson rotation offset, per-pixel per-dim in [0,1)
 
     // Returns the next uniform random float in [0, 1).
     // The if-else on `mode` is warp-uniform (all threads read the same
@@ -226,8 +226,13 @@ struct RngState {
             thrust::uniform_real_distribution<float> u01(0, 1);
             return u01(lcgEngine);
         } else {
-            float val = scrambledRadicalInverse(haltonBase, haltonIndex, haltonScramble);
-            haltonIndex++;  // advance to next sample in this dimension
+            // Cranley-Patterson rotation: (Halton sample + per-pixel offset) mod 1.0.
+            // The offset decorrelates different pixels while preserving
+            // the low-discrepancy property within each pixel's sequence.
+            float raw = radicalInverse(haltonBase, haltonIndex);
+            float val = raw + haltonOffset;
+            if (val >= 1.0f) val -= 1.0f;  // mod 1.0 (branch is uniform in warp)
+            haltonIndex++;
             return val;
         }
     }
@@ -235,7 +240,9 @@ struct RngState {
 
 // Factory function — direct replacement for makeSeededRandomEngine.
 // When mode==LCG: seeds lcgEngine exactly as before (bit-identical).
-// When mode==HALTON: initialises haltonIndex, base, and scramble.
+// When mode==HALTON: initialises haltonIndex, base, and per-pixel CP offset.
+// The CP offset is derived from utilhash(pixelIndex * MAX_DIMENSIONS + dim)
+// so each (pixel, dimension) pair gets its own fixed random offset in [0, 1).
 __host__ __device__ RngState makeRngState(
     int iter, int pixelIndex, int depth, RngMode mode, int dim);
 ```
@@ -269,34 +276,41 @@ Contents:
    - `__host__ __device__` for both CPU precomputation and GPU use.
    - English comment explaining the Halton sequence and radical inverse.
 
-2. **`scrambledRadicalInverse(int base, unsigned int n, unsigned int scramble)`**
-   - Like `radicalInverse`, but permutes each digit using `(digit + scrambleDigit) % base`.
-   - `scramble` shifts right by `base` bits after each digit (each digit's
-     permutation is derived from different bits of the scramble word).
-   - Cranley-Patterson style rotation implemented per-digit.
-   - English comment explaining scrambling and its purpose.
+2. **`cpRotate(float haltonSample, float offset)`**
+   - Inline helper: returns `(haltonSample + offset) mod 1.0`.
+   - Cranley-Patterson rotation breaks inter-dimensional correlation while
+     preserving the low-discrepancy property of the base Halton sequence.
+   - `__host__ __device__`, trivial — a single addition + conditional subtract.
 
 3. **`HaltonRng` struct** (lightweight, GPU-friendly)
    ```cuda
    struct HaltonRng {
        unsigned int index;     // current position in the Halton sequence
        int base;               // prime base for this dimension (2, 3, 5, 7, ...)
-       unsigned int scramble;  // per-pixel scramble value (from utilhash)
+       float offset;           // Cranley-Patterson offset in [0, 1), per-pixel per-dim
 
-       __host__ __device__ float next();  // returns next [0,1) sample, advances index
+       __host__ __device__ float next() {
+           float raw = radicalInverse(base, index);
+           float val = raw + offset;
+           if (val >= 1.0f) val -= 1.0f;  // mod 1.0
+           index++;
+           return val;
+       }
    };
    ```
-   - `next()` calls `scrambledRadicalInverse(base, index, scramble)`, then
-     increments `index` by 1.  Each call produces the next Halton point in
-     this dimension's sequence.
+   - `next()` computes `radicalInverse(base, index)`, applies CP rotation with
+     `offset`, then increments `index`.  Each call produces the next Halton
+     point in this dimension's sequence, decorrelated per-pixel.
 
 4. **`makeHaltonRng(int iter, int pixelIndex, int bounce, int dimension)`**
    - Factory function analogous to `makeSeededRandomEngine`.
    - `dimension` selects which prime base to use (0→2, 1→3, 2→5, ...).
-   - `scramble = utilhash(pixelIndex)` for per-pixel decorrelation.
-   - `index = iter * MAX_BOUNCES + bounce` for per-bounce per-iteration
+   - `offset = float(utilhash(pixelIndex * 16 + dimension) & 0xFFFFFF) / float(0x1000000)`
+     maps a hash to a uniform float in [0, 1) for Cranley-Patterson rotation.
+     Each (pixel, dimension) pair gets its own fixed offset.
+   - `index = iter * traceDepth + bounce` for per-bounce per-iteration
      progression along the sequence.
-   - English comment explaining the seeding strategy.
+   - English comment explaining the CP offset seeding strategy.
 
 5. **Prime base table** — a `__device__ constexpr int HALTON_PRIMES[]` with
    the first 16 primes: `{2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41,
