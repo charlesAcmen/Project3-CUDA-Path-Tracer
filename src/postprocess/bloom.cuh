@@ -48,6 +48,7 @@ inline std::vector<float> computeGaussianWeights(int radius, float sigma)
     float sum = 0.0f;
     for (int i = -radius; i <= radius; i++)
     {
+        //Gaussian function: G(x) = exp(-x² / (2σ²))
         float w = expf(-static_cast<float>(i * i) / (2.0f * sigma * sigma));
         weights[i + radius] = w;
         sum += w;
@@ -116,7 +117,8 @@ __global__ void blurHorizontal(
     const float* __restrict__ weights,
     int radius)
 {
-    // Dynamic shared memory: store as float3 for direct register access
+    // Dynamic shared memory: store as float3(3 float=12 bytes,R,G,B) 
+    // for direct register access
     extern __shared__ float sharedMem[];
     float3* tile = reinterpret_cast<float3*>(sharedMem);
 
