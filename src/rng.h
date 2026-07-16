@@ -9,12 +9,19 @@
  *   HALTON — multi-dimensional Cranley-Patterson scrambled Halton
  *
  * Key design for Halton mode:
- *   rng.next(dim) uses HALTON_PRIMES[dim] as the prime base and derives
- *   the Cranley-Patterson offset from (pixelIndex, dim).  All calls within
- *   one bounce share the same haltonIndex, forming a proper multi-
- *   dimensional low-discrepancy point.  Each bounce gets its own unique
- *   index via depth = bounceNum * MAX_DRAWS_PER_BOUNCE in makeRngState,
- *   so no indices overlap between bounces.
+ *   rng.next(dim) uses HALTON_PRIMES[dim] as the prime base.  All calls
+ *   within one bounce share the same haltonIndex — this is proper multi-
+ *   dimensional Halton: different prime bases at the same index N form a
+ *   well-distributed d-dimensional point.
+ *
+ *   haltonIndex = baseOffset(pixelIndex, bounceIndex) + iter
+ *   The baseOffset is a chained hash of (pixelIndex, bounceIndex), giving
+ *   each (pixel, bounce) pair a unique start position and breaking the
+ *   structured aliasing from pixel×stride formulas.  Adding iter makes the
+ *   walk CONSECUTIVE across frames, preserving low-discrepancy convergence.
+ *
+ *   Cranley-Patterson rotation (per-pixel, per-iter, per-bounce, per-dim
+ *   offset) decorrelates adjacent pixels while keeping each pixel stratified.
  *
  * Usage:
  *   RngState rng = makeRngState(iter, pixelIdx, depth, rngMode);
@@ -100,30 +107,10 @@ __host__ __device__ inline int getHaltonPrime(int dim) {
 }
 
 /**
- * Inter-iteration stride for the Halton sequence index.
- *
- * haltonIndex = iter * HALTON_STRIDE + bounceNum * MAX_DRAWS_PER_BOUNCE
- *
- * Two overlapping constraints determine STRIDE:
- *
- *   1. Between consecutive bounces: the gap is MAX_DRAWS_PER_BOUNCE = 8.
- *      Since no bounce uses more than 8 draws (dims 4-9 = 6, plus 2 spare),
- *      each bounce occupies a unique non-overlapping index range.
- *
- *   2. Between consecutive iterations: STRIDE must exceed the total index
- *      span of all bounces in one iteration, i.e.
- *        STRIDE > traceDepth × MAX_DRAWS_PER_BOUNCE
- *      Otherwise iter N's last bounces and iter N+1's first bounces collide.
- *
- *   → STRIDE = 128 = 16 × 8, supports traceDepth up to 16.
- *   → Scene DEPTH is typically 4-12 (cornell.json uses 8), so this is
- *     generous.  If a scene somehow needs DEPTH > 16, bump STRIDE.
- */
-constexpr unsigned int HALTON_STRIDE = 128;
-
-/**
- * Halton index slots reserved per bounce.
- * Pass depth = bounceNum * MAX_DRAWS_PER_BOUNCE to makeRngState.
+ * Encodes bounce number for the `depth` argument of makeRngState.
+ * Pass depth = bounceNum * MAX_DRAWS_PER_BOUNCE so each bounce gets a
+ * distinct bounceIndex value inside the hash.  The actual multiplier (8)
+ * is arbitrary — any value works since bounceIndex goes into a chained hash.
  */
 constexpr int MAX_DRAWS_PER_BOUNCE = 8;
 
@@ -198,6 +185,39 @@ __host__ __device__ inline float cpRotate(float x, float offset)
     return val;
 }
 
+/**
+ * Produces a hash-based starting offset for the Halton sequence, unique per
+ * (pixelIndex, bounceIndex) pair.
+ *
+ * Uses CHAINED HASHING (not linear sum) to avoid any collision between the
+ * two input components: each value passes through a full utilhash mix step
+ * before combining.  Linear sum (a·p1 + b·p2) can collide when a·p1 = b·p2;
+ * for typical render depths this doesn't arise, but the chained form is at
+ * the correct end of the spectrum.
+ *
+ * The offset is then added to `iter` in makeRngState, so each pixel's Halton
+ * index WALKS CONSECUTIVELY across iterations:
+ *   iter=0: haltonIndex = baseOffset + 0
+ *   iter=1: haltonIndex = baseOffset + 1   ← consecutive!
+ *   iter=2: haltonIndex = baseOffset + 2   ← consecutive!
+ *
+ * Consecutive Halton indices are what give the sequence its O(log^d N / N)
+ * low-discrepancy convergence.  The hash start eliminates the structured
+ * aliasing from a linear offset (pixelIndex × stride), while the consecutive
+ * walk preserves the filling property.
+ *
+ * Golden-ratio constants (0x9e3779b9, 0x85ebca6b) are Bob Jenkins'
+ * proven mix additives — standard practice for chained hashing.
+ */
+__host__ __device__ inline unsigned int mixHaltonBaseOffset(
+    unsigned int pixelIndex,
+    unsigned int bounceIndex)
+{
+    unsigned int h = utilhash(pixelIndex + 0x9e3779b9u);
+    h = utilhash(h ^ (bounceIndex + 0x85ebca6bu));
+    return h;
+}
+
 // ============================================================================
 // RngState — unified RNG interface (LCG or Halton)
 // ============================================================================
@@ -210,10 +230,12 @@ __host__ __device__ inline float cpRotate(float x, float offset)
  *
  * Halton mode:
  *   - All draws share haltonIndex (set per-bounce by makeRngState).
- *   - next(dim) selects base from HALTON_PRIMES[dim], computes
- *     radicalInverse, applies CP rotation with per-(pixelIndex, dim)
- *     offset.  The index does NOT advance — every draw in a bounce is
- *     a different dimension of the SAME multi-dimensional Halton point.
+ *   - next(dim) selects the prime base by dim, computes radicalInverse,
+ *     then applies Cranley-Patterson rotation with a seed derived from
+ *     pixelIndex × iter × dim — this decorrelates adjacent pixels while
+ *     varying per iteration to prevent coherent stripe accumulation.
+ *   - The index does NOT advance — every draw in a bounce is a different
+ *     dimension of the SAME multi-dimensional Halton point.
  *   - Each bounce gets a fresh RngState with a new index.
  *
  * The if-else on mode is warp-uniform (all threads read the same global
@@ -225,9 +247,11 @@ struct RngState {
     // -- LCG branch (16 bytes) --
     thrust::default_random_engine lcgEngine;
 
-    // -- Halton branch (8 bytes) --
-    unsigned int haltonIndex;   // shared index across all dims for this bounce
-    unsigned int pixelIndex;    // for per-dim CP offset computation
+    // -- Halton branch (16 bytes) --
+    unsigned int haltonIndex;   // baseOffset(pixel, bounce) + iter — consecutive Halton index
+    unsigned int pixelIndex;    // for CP offset decorrelation (per-pixel)
+    int iter;                   // for CP offset per-iteration variation
+    unsigned int bounceIndex;   // for CP offset / index decorrelation (per bounce)
 
     /** Returns a uniform random float in [0, 1) for the given dimension. */
     __host__ __device__ float next(int dim) {
@@ -235,14 +259,25 @@ struct RngState {
             thrust::uniform_real_distribution<float> u01(0, 1);
             return u01(lcgEngine);
         } else {
-            // Select prime base from the dimension index
+            // All dimensions within a bounce share the SAME haltonIndex.
+            // This is proper multi-dimensional Halton: different prime bases
+            // at the same index N form a well-distributed d-dimensional point.
+            // (If we hashed dim into the index, each dim would be at a
+            //  different pseudo-random position — losing the correlation
+            //  structure that makes multi-dimensional Halton converge fast.)
             int base = getHaltonPrime(dim);
-            // Halton sample at the shared index for this bounce
             float raw = radicalInverse(base, haltonIndex);
-            // CP offset: per (pixelIndex, dim), deterministic, uniform in [0, 1)
+
+            // Cranley-Patterson rotation decorrelates adjacent pixels' raw
+            // Halton values.  The CP seed combines pixelIndex (per-pixel),
+            // iter (per-iteration), bounceIndex (per-bounce — prevents
+            // identical offsets across bounces), and dim (per-dimension),
+            // all with distinct prime multipliers.
             unsigned int h = utilhash(
-                (unsigned int)pixelIndex * (unsigned int)HALTON_NUM_DIMS
-                + (unsigned int)dim);
+                (unsigned int)pixelIndex * 131u
+                + (unsigned int)iter * 37u
+                + bounceIndex * 17u
+                + (unsigned int)dim * 11u);
             float offset = (float)(h & 0xFFFFFFu) * (1.0f / 16777216.0f);
             return cpRotate(raw, offset);
         }
@@ -265,15 +300,21 @@ struct RngState {
  *   derivation formula is the same.
  *
  * Halton mode:
- *   haltonIndex = iter * HALTON_STRIDE + depth
- *     - Primary rays:   depth = 0
- *     - Bounce N:       depth = N * MAX_DRAWS_PER_BOUNCE
- *   pixelIndex is stored for per-dimension CP offset computation in
- *   next(dim).
+ *   haltonIndex = baseOffset(pixelIndex, bounceIndex) + iter
+ *     - baseOffset = chained_hash(pixelIndex, bounceIndex)
+ *       gives each (pixel, bounce) pair a unique starting position,
+ *       breaking the structured aliasing from pixel×stride formulas.
+ *     - Adding iter makes the walk CONSECUTIVE across frames,
+ *       preserving O(log^d N / N) low-discrepancy convergence.
+ *     - Primary rays:  bounceIndex = 0
+ *     - Bounce N:      bounceIndex = N * MAX_DRAWS_PER_BOUNCE
+ *   pixelIndex, iter, and bounceIndex are stored separately for the
+ *   CP offset seed in next(dim), providing per-pixel, per-iteration,
+ *   per-bounce, and per-dimension decorrelation.
  *
  * @param iter        Current iteration (frame) counter
  * @param pixelIndex  Linear pixel index
- * @param depth       Depth offset (0 for primary, bounceNum * 8 for scatters)
+ * @param depth       bounceNum * MAX_DRAWS_PER_BOUNCE (bounce encoding)
  * @param mode        RNG mode (LCG or HALTON)
  * @return            Initialised RngState
  */
@@ -290,8 +331,13 @@ __host__ __device__ inline RngState makeRngState(
                 ^ utilhash((unsigned int)pixelIndex);
         state.lcgEngine = thrust::default_random_engine(h);
     } else {
-        state.haltonIndex = (unsigned int)iter * HALTON_STRIDE + (unsigned int)depth;
+        state.haltonIndex = mixHaltonBaseOffset(
+            (unsigned int)pixelIndex,
+            (unsigned int)depth)
+            + (unsigned int)iter;
         state.pixelIndex  = (unsigned int)pixelIndex;
+        state.iter        = iter;
+        state.bounceIndex = (unsigned int)depth;
     }
     return state;
 }
