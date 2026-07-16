@@ -52,6 +52,8 @@ __host__ __device__ inline unsigned int utilhash(unsigned int a)
 // Halton sequence constants
 // ============================================================================
 
+constexpr int HALTON_NUM_DIMS = 16;
+
 // --- Halton dimension assignment ---
 // Each independent sampling decision in the pipeline gets a unique
 // dimension index.  Dimensions 0-9 are currently allocated:
