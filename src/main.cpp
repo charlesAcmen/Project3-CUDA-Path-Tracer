@@ -439,6 +439,26 @@ void RenderImGui()
         if (ImGui::RadioButton("Narkowicz ACES", &currentMode, 2)) {
             setDebugMode(currentMode);
         }
+
+        ImGui::Separator();
+        ImGui::Text("Bloom:");
+        bool bloomEnabled = getBloomEnabled();
+        if (ImGui::Checkbox("Enable Bloom", &bloomEnabled))
+            setBloomEnabled(bloomEnabled);
+
+        if (bloomEnabled) {
+            float threshold = getBloomThreshold();
+            if (ImGui::SliderFloat("Threshold", &threshold, 0.1f, 10.0f, "%.2f"))
+                setBloomThreshold(threshold);
+
+            float intensity = getBloomIntensity();
+            if (ImGui::SliderFloat("Intensity", &intensity, 0.0f, 2.0f, "%.2f"))
+                setBloomIntensity(intensity);
+
+            int radius = getBloomRadius();
+            if (ImGui::SliderInt("Radius", &radius, 1, 30))
+                setBloomRadius(radius);
+        }
     }
     ImGui::End();
 
