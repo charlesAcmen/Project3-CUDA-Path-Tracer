@@ -86,26 +86,18 @@ constexpr int HALTON_NUM_DIMS = 16;
  *   dim 12 → 41, 13 → 43, 14 → 47, 15 → 53
  */
 __host__ __device__ inline int getHaltonPrime(int dim) {
-    if (dim == 0) return 2;
-    if (dim == 1) return 3;
-    if (dim == 2) return 5;
-    if (dim == 3) return 7;
-    if (dim == 4) return 11;
-    if (dim == 5) return 13;
-    if (dim == 6) return 17;
-    if (dim == 7) return 19;
-    if (dim == 8) return 23;
-    if (dim == 9) return 29;
-    if (dim == 10) return 31;
-    if (dim == 11) return 37;
-    if (dim == 12) return 41;
-    if (dim == 13) return 43;
-    if (dim == 14) return 47;
-    if (dim == 15) return 53;
-    return 2; // fallback (should not be reached)
+    // constexpr array lets the compiler emit a single indexed load
+    // from constant memory instead of a 16-branch if-else chain.
+    constexpr int primes[] = {
+        2, 3, 5, 7, 11, 13, 17, 19,
+        23, 29, 31, 37, 41, 43, 47, 53
+    };
+    // Clamp to [0, 15] -- dim >= 16 is out of range for the current
+    // dimension allocation (max used is 9).  Returning prime 2 for
+    // out-of-range dims at least avoids a crash, but the Halton
+    // sequence would collide with dim 0, so callers MUST stay in range.
+    return primes[(dim < HALTON_NUM_DIMS) ? dim : (HALTON_NUM_DIMS - 1)];
 }
-
-constexpr int HALTON_NUM_DIMS = 16;
 
 /**
  * Inter-iteration stride for the Halton sequence index.
