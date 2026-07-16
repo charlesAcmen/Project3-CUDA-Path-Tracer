@@ -257,9 +257,12 @@ struct RngState {
  * Creates an RngState in the requested mode.
  *
  * LCG mode:
- *   Seeds a thrust::default_random_engine identically to the original
- *   makeSeededRandomEngine(iter, pixelIndex, depth).  Output is bit-
- *   identical.
+ *   Seeds a thrust::default_random_engine using the same utilhash-based
+ *   formula as the original makeSeededRandomEngine.  Note: the depth
+ *   parameter now uses a bounce-indexed schedule (bounceNum * 8) instead
+ *   of the old descending-remainingBounces schedule, so LCG sequences
+ *   per-bounce are not identical to the original -- only the seed
+ *   derivation formula is the same.
  *
  * Halton mode:
  *   haltonIndex = iter * HALTON_STRIDE + depth
