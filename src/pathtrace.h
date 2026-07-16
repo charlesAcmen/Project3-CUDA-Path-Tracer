@@ -41,6 +41,20 @@ struct BloomConfig {
     int kernelSize() const { return 2 * radius + 1; }
 };
 
+// Chromatic Aberration post-processing configuration
+// 色差
+struct ChromaticAberrationConfig {
+    bool  enabled   = false;      // disabled by default
+    float intensity = 0.003f;     // radial shift magnitude (UV fraction)
+};
+
+// Vignette (corner darkening) post-processing configuration
+struct VignetteConfig {
+    bool  enabled   = false;      // disabled by default
+    float intensity = 0.5f;       // darkness at corners (0=none, 1=full black)
+    float exponent  = 2.0f;       // radial falloff power (higher=sharper falloff)
+};
+
 // Runtime-configurable options for the path tracing pipeline.
 // Previously individual g_compactMethod / g_sortByMaterial statics.
 // (autoSave was moved to main.cpp — it is an application-level concern.)
@@ -49,6 +63,8 @@ struct PathTracerOptions {
     bool sortByMaterial = true;  // group paths by materialId before shading
     int  rngMode        = 1;     // 0=LCG (default, backward compat), 1=scrambled Halton
     BloomConfig bloom;           // bloom post-processing settings
+    ChromaticAberrationConfig chromaticAberration;  // chromatic aberration settings
+    VignetteConfig vignette;                         // vignette settings
 };
 
 void InitDataContainer(GuiDataContainer* guiData);
@@ -71,6 +87,20 @@ void setBloomIntensity(float intensity);
 float getBloomIntensity();
 void setBloomRadius(int radius);
 int  getBloomRadius();
+
+// Chromatic Aberration runtime configuration
+void setChromaticAberrationEnabled(bool enable);
+bool getChromaticAberrationEnabled();
+void setChromaticAberrationIntensity(float intensity);
+float getChromaticAberrationIntensity();
+
+// Vignette runtime configuration
+void setVignetteEnabled(bool enable);
+bool getVignetteEnabled();
+void setVignetteIntensity(float intensity);
+float getVignetteIntensity();
+void setVignetteExponent(float exponent);
+float getVignetteExponent();
 
 // RNG mode: 0 = LCG (default), 1 = scrambled Halton
 void setRngMode(int mode);
