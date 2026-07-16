@@ -34,12 +34,19 @@ struct CliConfig {
     bool hasScene   = false;
     int  fresnelMode = 0;   // CLI override for RenderState::fresnelMode
     bool fresnelSet  = false;
+    std::vector<int> saveAtIterations;  // auto-save at these iteration counts
 };
 
 static std::string startTimeString;
 
 // Auto-save final image on completion (moved from pathtrace.cu — application-level concern)
 static bool g_autoSave = true;
+
+// Checkpoint iteration counts for auto-save (set via --save-at=N1,N2,...).
+// Sorted ascending.  saveImage() is triggered when iteration reaches each value.
+// g_saveAtIterIdx tracks how many checkpoints have been consumed.
+static std::vector<int> g_saveAtIterations;
+static size_t g_saveAtIterIdx = 0;
 
 // For camera controls
 static bool leftMousePressed = false;
@@ -116,6 +123,8 @@ void printStartupHelp(const char* exeName)
     printf("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
     printf("    --save         Save the final rendered image on exit.\n");
     printf("                   (default: yes)\n");
+    printf("    --save-at=N1,N2,...  Auto-save at specific iteration counts\n");
+    printf("                   (e.g., --save-at=50,200,1000).  Implies --save.\n");
     printf("    -h, --help     Show this help text.\n");
     printf("\n");
     printf("  Notes:\n");
@@ -549,6 +558,17 @@ CliConfig parseFlags(int argc, char** argv)
             cfg.profCfg.verbose = true;
         } else if (arg == "--save") {
             cfg.autoSave = true;
+        } else if (arg.rfind("--save-at=", 0) == 0) {
+            cfg.autoSave = true;  // implies --save
+            std::string list = arg.substr(10);
+            std::stringstream ss(list);
+            std::string token;
+            while (std::getline(ss, token, ',')) {
+                if (!token.empty()) {
+                    cfg.saveAtIterations.push_back(std::stoi(token));
+                }
+            }
+            std::sort(cfg.saveAtIterations.begin(), cfg.saveAtIterations.end());
         } else if (arg.rfind("--compact=", 0) == 0) {
             int v = std::stoi(arg.substr(10));
             cfg.profCfg.compactMethod = v;
@@ -603,6 +623,7 @@ int main(int argc, char** argv)
 
     CliConfig cfg = parseFlags(argc, argv);
     g_autoSave = cfg.autoSave;
+    g_saveAtIterations = std::move(cfg.saveAtIterations);
 
     if (cfg.showHelp)
     {
@@ -755,6 +776,16 @@ void runCuda()
 
         // unmap buffer object
         cudaGLUnmapBufferObject(pbo);
+
+        // Checkpoint auto-save: save image at specific iteration counts.
+        // --save-at=50,200,1000 triggers saves at iteration 50, 200, 1000.
+        // g_saveAtIterIdx tracks which checkpoints remain (list is sorted).
+        while (g_saveAtIterIdx < g_saveAtIterations.size()
+               && iteration >= g_saveAtIterations[g_saveAtIterIdx])
+        {
+            saveImage();
+            g_saveAtIterIdx++;
+        }
     }
     else
     {
