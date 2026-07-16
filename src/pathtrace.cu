@@ -96,18 +96,6 @@ static int compactCoreSharedMem(int n, PathSegment* dst, const PathSegment* src)
     return StreamCompaction::Efficient::compactPathSegmentsSharedMemory(n, dst, src);
 }
 
-//index:spatial correlation,ensuring that the different pixels will have different random seeds
-//depth:depth correlation ,ensuring that generated random number in different bounces is independent for a ray
-//iter:temporal correlation,ensuring that the generated random number in different iterations is independent for a pixel
-//iter ensures ray trace is different in every iterations.
-//Note that engine is created whenever determining new ray direction,do NOT fill the engine in the PathSegment struct
-//for optimizing gpu memory bandwidth by utilizing GPU high calculation performance
-__host__ __device__ thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth)
-{
-    int h = utilhash((1 << 31) | (depth << 22) | iter) ^ utilhash(index);
-    return thrust::default_random_engine(h);
-}
-
 //Kernel that writes the image to the OpenGL PBO directly.
 __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image)
 {
