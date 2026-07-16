@@ -455,6 +455,31 @@ void RenderImGui()
             if (ImGui::SliderInt("Radius", &radius, 1, 30))
                 setBloomRadius(radius);
         }
+
+        ImGui::Separator();
+        ImGui::Text("Chromatic Aberration (色差):");
+        bool caEnabled = getChromaticAberrationEnabled();
+        if (ImGui::Checkbox("Enable Chromatic Aberration", &caEnabled))
+            setChromaticAberrationEnabled(caEnabled);
+        if (caEnabled) {
+            float caIntensity = getChromaticAberrationIntensity();
+            if (ImGui::SliderFloat("CA Intensity", &caIntensity, 0.0f, 0.02f, "%.5f"))
+                setChromaticAberrationIntensity(caIntensity);
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Vignette (暗角):");
+        bool vigEnabled = getVignetteEnabled();
+        if (ImGui::Checkbox("Enable Vignette", &vigEnabled))
+            setVignetteEnabled(vigEnabled);
+        if (vigEnabled) {
+            float vigIntensity = getVignetteIntensity();
+            if (ImGui::SliderFloat("Vignette Intensity", &vigIntensity, 0.0f, 1.0f, "%.2f"))
+                setVignetteIntensity(vigIntensity);
+            float vigExponent = getVignetteExponent();
+            if (ImGui::SliderFloat("Vignette Exponent", &vigExponent, 0.5f, 8.0f, "%.1f"))
+                setVignetteExponent(vigExponent);
+        }
     }
     ImGui::End();
 
