@@ -112,6 +112,7 @@ void printStartupHelp(const char* exeName)
     printf("                   3=shared-memory scan (default).\n");
     printf("    --sort=N       Material sorting: 0=off, nonzero=on (default on).\n");
     printf("    --fresnel=N    Fresnel mode: 0=Schlick (default), 1=Accurate.\n");
+    printf("    --rng=N        RNG mode: 0=LCG (default), 1=scrambled Halton.\n");
     printf("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
     printf("    --save         Save the final rendered image on exit.\n");
     printf("                   (default: yes)\n");
@@ -157,6 +158,8 @@ void printStartupSummary(const ProfilerConfig& profCfg)
     printf("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
     const char* fresnelName = (renderState->fresnelMode == 1 ? "Accurate" : "Schlick");
     printf("  Fresnel mode: %s\n", fresnelName);
+    const char* rngName = (getRngMode() == 1 ? "Scrambled Halton" : "LCG");
+    printf("  RNG mode: %s\n", rngName);
     printf("  Auto-save final image: %s\n", g_autoSave ? "yes" : "no");
     printf("======================================================================\n");
     printf("\n");
@@ -526,6 +529,9 @@ CliConfig parseFlags(int argc, char** argv)
             int v = std::stoi(arg.substr(10));
             cfg.fresnelMode = (v == 1) ? 1 : 0;
             cfg.fresnelSet  = true;
+        } else if (arg.rfind("--rng=", 0) == 0) {
+            int v = std::stoi(arg.substr(6));
+            setRngMode(v);
         } else if (arg.rfind("--warmup=", 0) == 0) {
             cfg.profCfg.warmupIters = std::stoi(arg.substr(9));
         }

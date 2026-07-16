@@ -105,6 +105,7 @@ struct ShadingConfig
     int traceDepth;
     int rrMinBounces;    // guaranteed bounces before Russian roulette
     int fresnelMode;     // 0=Schlick, 1=Accurate
+    int rngMode;         // 0=LCG, 1=scrambled Halton
     Camera cam;
     DebugConfig debug;
 };
