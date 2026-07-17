@@ -54,7 +54,7 @@ struct ProfilerConfig {
     // This ensures CSV metadata always matches actual runtime configuration, and you only
     // need to change defaults in ONE place (pathtrace.cu).
     int         compactMethod  = 3;       // 0=none, 1=global-mem scan, 2=Thrust, 3=shared-mem scan (default)
-    bool        sortByMaterial = true;    // placeholder, auto-synced from pathtrace.cu
+    bool        sortByMaterial = false;   // placeholder, auto-synced from pathtrace.cu
 };
 
 // ---------------------------------------------------------------------------

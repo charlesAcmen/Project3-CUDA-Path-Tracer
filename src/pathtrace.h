@@ -60,7 +60,7 @@ struct VignetteConfig {
 // (autoSave was moved to main.cpp — it is an application-level concern.)
 struct PathTracerOptions {
     int  compactMethod  = 3;     // 0=off, 1=global scan, 2=Thrust, 3=shared-mem (default)
-    bool sortByMaterial = true;  // group paths by materialId before shading
+    bool sortByMaterial = false; // group paths by materialId before shading (default off — see docs/benchmarking-guide.md)
     int  rngMode        = 1;     // 0=LCG (default, backward compat), 1=scrambled Halton
     BloomConfig bloom;           // bloom post-processing settings
     ChromaticAberrationConfig chromaticAberration;  // chromatic aberration settings
