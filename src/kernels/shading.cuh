@@ -105,13 +105,6 @@ __global__ void shadeMaterial(
 
         if (intersection.t > 0.0f)
         {
-            // RNG for this bounce.
-            //   dim 4 (prime 11) = diffuse hemisphere theta
-            //   dim 5 (prime 13) = diffuse hemisphere phi
-            //   dim 6 (prime 17) = specular lobe theta
-            //   dim 7 (prime 19) = specular lobe phi
-            //   dim 8 (prime 23) = Fresnel roulette
-            //   dim 9 (prime 29) = Russian roulette
             int bounceNum = config.traceDepth - pathSegment.remainingBounces;
             RngState rngScatter = makeRngState(iter, pathSegment.pixelIndex,
                 bounceNum * MAX_DRAWS_PER_BOUNCE, (RngMode)config.rngMode);

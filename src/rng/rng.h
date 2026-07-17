@@ -60,7 +60,7 @@ constexpr int HALTON_NUM_DIMS = 16;
 
 // --- Halton dimension assignment ---
 // Each independent sampling decision in the pipeline gets a unique
-// dimension index.  Dimensions 0-9 are currently allocated:
+// dimension index.  All 16 available dimensions are now allocated:
 //
 //   Dim  Prime  Usage                          Location
 //   ---  -----  -----------------------------  ----------------------------
@@ -74,14 +74,18 @@ constexpr int HALTON_NUM_DIMS = 16;
 //    7    19    Specular lobe φ                samplePhongSpecularDir
 //    8    23    Fresnel roulette               scatterRay (refractive branch)
 //    9    29    Path Russian roulette          russianRouletteTerminate
+//   10    31    Light selection                sampleLightSource
+//   11    37    Light surface U                samplePointOnLight
+//   12    41    Light surface V                samplePointOnLight
 //   ---  -----  -----------------------------  ----------------------------
-//   10+  31+   Available for extensions (MIS, light sampling, etc.)
 
 /** Named constants for Halton dimension indices.
  *
  *  Use in place of raw integers at every rng.next() call site:
  *    rng.next(HaltonDim::AaJitterX)     instead of  rng.next(0)
  *    rng.next(HaltonDim::DiffuseTheta)  instead of  rng.next(4)
+ *
+ *  Dimensions 10-12 are used for direct lighting (next-event estimation).
  */
 namespace HaltonDim {
     constexpr int AaJitterX      = 0;
@@ -94,6 +98,10 @@ namespace HaltonDim {
     constexpr int SpecularPhi    = 7;
     constexpr int FresnelRR      = 8;
     constexpr int PathRR         = 9;
+    // --- Direct lighting (next-event estimation) ---
+    constexpr int LightSelect   = 10;   // prime 31: pick which emissive geometry
+    constexpr int LightSurfaceU = 11;   // prime 37: u coord on light surface
+    constexpr int LightSurfaceV = 12;   // prime 41: v coord on light surface
 }
 
 /**
