@@ -50,8 +50,8 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         RngState rng = makeRngState(iter, index, 0, (RngMode)rngMode);
 
         // Anti-aliasing: stochastic sub-pixel jitter
-        float jitterX = rng.next(0) - 0.5f;
-        float jitterY = rng.next(1) - 0.5f;
+        float jitterX = rng.next(HaltonDim::AaJitterX) - 0.5f;
+        float jitterY = rng.next(HaltonDim::AaJitterY) - 0.5f;
 
         // Pinhole ray direction (centre-of-lens ray, undeflected)
         glm::vec3 pinholeDir = glm::normalize(cam.view
@@ -67,8 +67,8 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
             glm::vec3 pFocus = cam.position + ft * pinholeDir;
 
             // 2. Sample a point on the lens aperture via concentric disk mapping
-            float lensU = rng.next(2);  // dim 2 (prime 5): aperture u
-            float lensV = rng.next(3);  // dim 3 (prime 7): aperture v
+            float lensU = rng.next(HaltonDim::LensApertureU);  // dim 2 (prime 5): aperture u
+            float lensV = rng.next(HaltonDim::LensApertureV);  // dim 3 (prime 7): aperture v
             float dx, dy;
             concentricSampleDisk(lensU, lensV, dx, dy);
 

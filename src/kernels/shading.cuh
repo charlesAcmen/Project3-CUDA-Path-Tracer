@@ -49,7 +49,7 @@ __device__ bool russianRouletteTerminate(
     float p = fmaxf(fmaxf(color.r, color.g), color.b);
     p = fminf(fmaxf(p, RR_P_MIN), RR_P_MAX);
 
-    if (rng.next(9) < p)  // dim 9 (prime 29): RR
+    if (rng.next(HaltonDim::PathRR) < p)  // dim 9 (prime 29): RR
     {
         color /= p;
         return false;  // survived

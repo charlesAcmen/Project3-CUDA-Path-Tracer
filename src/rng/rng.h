@@ -77,6 +77,25 @@ constexpr int HALTON_NUM_DIMS = 16;
 //   ---  -----  -----------------------------  ----------------------------
 //   10+  31+   Available for extensions (MIS, light sampling, etc.)
 
+/** Named constants for Halton dimension indices.
+ *
+ *  Use in place of raw integers at every rng.next() call site:
+ *    rng.next(HaltonDim::AaJitterX)     instead of  rng.next(0)
+ *    rng.next(HaltonDim::DiffuseTheta)  instead of  rng.next(4)
+ */
+namespace HaltonDim {
+    constexpr int AaJitterX      = 0;
+    constexpr int AaJitterY      = 1;
+    constexpr int LensApertureU  = 2;
+    constexpr int LensApertureV  = 3;
+    constexpr int DiffuseTheta   = 4;
+    constexpr int DiffusePhi     = 5;
+    constexpr int SpecularTheta  = 6;
+    constexpr int SpecularPhi    = 7;
+    constexpr int FresnelRR      = 8;
+    constexpr int PathRR         = 9;
+}
+
 /**
  * Returns the n-th prime number for use as a Halton sequence base.
  *

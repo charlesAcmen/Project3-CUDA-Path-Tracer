@@ -56,8 +56,8 @@ __host__ __device__ glm::vec3 samplePhongSpecularDir(
     float exponent,
     RngState& rng)
 {
-    float xi1 = rng.next(6);  // dim 6 (prime 17): specular lobe theta
-    float xi2 = rng.next(7);  // dim 7 (prime 19): specular lobe phi
+    float xi1 = rng.next(HaltonDim::SpecularTheta);  // dim 6 (prime 17): specular lobe theta
+    float xi2 = rng.next(HaltonDim::SpecularPhi);  // dim 7 (prime 19): specular lobe phi
 
     // Eq.7: cos(theta_s) = xi1^(1/(n+1))
     // Optimization: if exponent is 0.0f (i.e. maximum roughness, r=1.0f), we skip powf
@@ -95,9 +95,9 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     //   cos(theta) = sqrt(xi_1)         (vertical component, weighted toward normal)
     //   sin(theta) = sqrt(1 - xi_1)     (horizontal component, from Pythagorean identity)
     
-    float up = sqrt(rng.next(4)); // dim 4 (prime 11): diffuse hemisphere theta (cos(theta))
+    float up = sqrt(rng.next(HaltonDim::DiffuseTheta)); // dim 4 (prime 11): diffuse hemisphere theta (cos(theta))
     float over = sqrt(1 - up * up); // sin(theta) - derived from trigonometric identity sin^2(theta) + cos^2(theta) = 1
-    float around = rng.next(5) * TWO_PI; // dim 5 (prime 13): diffuse hemisphere phi
+    float around = rng.next(HaltonDim::DiffusePhi) * TWO_PI; // dim 5 (prime 13): diffuse hemisphere phi
 
     // At this point, we have spherical coordinates (theta, phi) that represent a direction
     // in a LOCAL coordinate system where the normal is aligned with the Z-axis:
@@ -293,7 +293,7 @@ __host__ __device__ void scatterRay(
             //   reflection:  R * color / R     = color
             //   refraction: (1-R) * color / (1-R) = color
             // → Fresnel factor cancels out in both branches.
-            if (rng.next(8) < reflectance)  // dim 8 (prime 23): Fresnel roulette
+            if (rng.next(HaltonDim::FresnelRR) < reflectance)  // dim 8 (prime 23): Fresnel roulette
             {
                 glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
                 const float offsetSign = entering ? 1.0f : -1.0f;
