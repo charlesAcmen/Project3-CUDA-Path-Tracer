@@ -9,9 +9,11 @@ plotted with the companion Python scripts.  When you use
 `scripts/benchmark_runner.py`, each full benchmark batch is archived under
 `profiler_output/runs/<run-id>/` so old runs do not get overwritten.
 
-Only code you wrote or modified is measured.  Starter-code kernels
-(`generateRayFromCamera`, `computeIntersections`, `finalGather`,
-`sendImageToPBO`) are deliberately excluded.
+Only user-authored or user-modified code and the post-processing pipeline are
+measured.  Starter-code kernels (`generateRayFromCamera`, `computeIntersections`,
+`finalGather`) are deliberately excluded from per-operation timing, though they
+are included in the frame-level wall-clock time recorded by `beginFrame` /
+`endFrame`.
 
 ## Quick Start
 
@@ -96,9 +98,9 @@ output (not present as zero-valued rows).  Paths terminate via the
 | Value | Meaning |
 |-------|---------|
 | `0` | **Disabled.** Terminated paths are guarded by `remainingBounces` in `shadeMaterial`. No compaction overhead. |
-| `1` | Custom work-efficient scan-based compaction (from Project 2). **Default.** |
+| `1` | Custom work-efficient scan-based compaction (from Project 2). |
 | `2` | **Thrust `copy_if`** — reference implementation used in benchmarks. |
-| `3` | Shared-memory multi-block scan-based compaction (GPU Gems 3, Ch. 39). |
+| `3` | Shared-memory multi-block scan-based compaction (GPU Gems 3, Ch. 39). **Default.** |
 
 ### Material Sorting (`--sort=N`)
 
@@ -287,7 +289,7 @@ One row per measured operation per bounce per iteration.
 |--------|------|-------------|
 | `iteration` | int | Frame number (0-based) |
 | `bounce_depth` | int | Bounce index within this iteration |
-| `operation` | string | `ShadeMaterial`, `GatherTerminatedPaths`, `SortByMaterial`, `CompactPaths` |
+| `operation` | string | `ShadeMaterial`, `GatherTerminatedPaths`, `SortByMaterial`, `CompactPaths`, `ComputeIntersections`, `BloomPass`, `PostProcessTail` |
 | `time_ms` | float | Elapsed time in milliseconds |
 | `num_active_paths` | int | Active path count at start of this bounce |
 | `compact_method` | int | `0`, `1`, or `2` |
@@ -326,20 +328,32 @@ Per-operation aggregate statistics (warmup iterations excluded).
 |-----------|-------|------|-----------------|
 | `shadeMaterial` | GPU | Every bounce | BSDF evaluation + Russian roulette. Affected by material sorting (warp divergence) and path count (fewer threads when compaction is on). |
 | `gatherTerminatedPaths` | GPU | Every bounce (inside `compactActivePaths`) | Banking dead-path colors into the accumulation buffer. **Absent from CSV when `--compact=0`** (kernel never launched). |
-| `sortPathsByMaterial` | CPU | Every bounce | Thrust `sort_by_key` + double `gather`. Time is near-0 when `--sort=0` (early return). **This is typically the largest measured beneficiary of compaction** — fewer active paths → fewer elements to sort. |
+| `sortPathsByMaterial` | GPU | Every bounce | Thrust `sort_by_key` + double `gather`. Time is near-0 when `--sort=0` (early return). **This is typically the largest measured beneficiary of compaction** — fewer active paths → fewer elements to sort. |
 | `compactActivePaths` | CPU | Every bounce | Thrust `copy_if` (or custom scan). Includes `cudaDeviceSynchronize` cost from internal Thrust calls. **Absent from CSV when `--compact=0`.** |
+| `computeIntersections` | GPU | Every bounce | Ray-geometry intersection test (linear scene scan). Benefits from compaction (fewer active paths → fewer tests). |
+| `BloomPass` | GPU | Once per frame (after bounce loop) | Full bloom pipeline: `thresholdExtract` + separable Gaussian blur (horizontal + vertical). Only recorded when bloom is enabled (`intensity > 0`). |
+| `PostProcessTail` | GPU | Once per frame (after bounce loop) | Remaining display pipeline: `prepareDisplayKernel` + `tonemapKernel` + (optional) chromatic aberration + (optional) vignette + `sendImageToPBO`. Always recorded. |
 
 Additionally, `num_active_paths` is recorded at the start of every bounce
 (path survival metadata).
 
-### NOT measured (starter code)
+### NOT measured (starter code / trivial)
 
-- `generateRayFromCamera` — primary ray generation
-- `computeIntersections` — ray-geometry intersection test
-- `finalGather` — final path accumulation
-- `sendImageToPBO` — tone-mapping and display
+- `generateRayFromCamera` — primary ray generation (trivial, single kernel launch)
+- `finalGather` — final HDR accumulation (only runs when compaction is off)
 
-These were part of the original project skeleton and were not authored here.
+These were part of the original project skeleton and are not individually timed.
+`sendImageToPBO` is now included inside `PostProcessTail`.
+
+### Note on per-operation vs frame timing
+
+The `beginFrame` / `endFrame` wall-clock timer in `main.cpp` wraps the entire
+`pathtrace()` call, including all measured and unmeasured operations, the
+post-processing pipeline, and the `cudaMemcpy` D2H of the accumulation buffer.
+This is the best measure of real per-iteration cost and is reported in
+`frame_times.csv`.  The per-operation timings in `timing.csv` sum to less than
+the frame time — the difference is the unmeasured work (primary ray generation,
+`finalGather`, `cudaMemcpy`, driver overhead).
 
 ---
 
@@ -354,6 +368,8 @@ When `--benchmark` is active, the "Path Tracer Analytics" window shows:
   - `GatherTerminatedPaths`
   - `SortByMaterial`
   - `CompactPaths`
+  - `BloomPass` (post-process: bloom pipeline)
+  - `PostProcessTail` (post-process: tonemap + CA + vignette + PBO)
 - Bounce count for the most recent frame
 
 This is useful for spot-checking during development without waiting for CSV
