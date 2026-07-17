@@ -48,10 +48,12 @@ static void runPostProcess(
         (resolution.x + blockSize2d.x - 1) / blockSize2d.x,
         (resolution.y + blockSize2d.y - 1) / blockSize2d.y);
 
-    // ---- Bloom (linear HDR space) ----
+    // ---- Bloom (linear HDR space) — timed as BloomPass ----
     bool bloomHasRun = (bloomCfg.enabled && bloomCfg.intensity > 0.0f);
     if (bloomHasRun)
     {
+        g_profiler().gpuStart(ProfilerOp::BloomPass);
+
         int kernelSize = bloomCfg.kernelSize();
         std::vector<float> weights = computeGaussianWeights(bloomCfg.radius, bloomCfg.sigma);
         cudaMemcpy(dev.bloomWeights, weights.data(),
@@ -86,7 +88,13 @@ static void runPostProcess(
                 dev.bloomWeights, bloomCfg.radius);
         }
         checkCUDAError("bloom blurVertical");
+
+        g_profiler().gpuStop(ProfilerOp::BloomPass);
     }
+
+    // ---- Remaining post-process (prepareDisplay → tonemap → CA → vignette → PBO)
+    //      timed together as PostProcessTail ----
+    g_profiler().gpuStart(ProfilerOp::PostProcessTail);
 
     // ---- Prepare display buffer: average HDR, composite bloom ----
     prepareDisplayKernel<<<blocksPerGrid2d, blockSize2d>>>(
@@ -131,4 +139,6 @@ static void runPostProcess(
     // ---- Display: write LDR sRGB data to OpenGL pixel buffer ----
     sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(
         pbo, resolution, 1, dev.imageDisplay);
+
+    g_profiler().gpuStop(ProfilerOp::PostProcessTail);
 }
