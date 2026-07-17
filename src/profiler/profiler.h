@@ -20,6 +20,13 @@ enum class ProfilerOp : int {
                                //   copy_if returns a host-visible iterator, forcing
                                //   an internal sync; CPU timer naturally captures it.
     ComputeIntersections,      // GPU kernel -- GPU timer (starter code)
+
+    // Post-processing pipeline — GPU timers (all use cudaEvent on the
+    // default stream, so each section is measured independently while
+    // still correctly sequencing with the kernel launches between them).
+    BloomPass,                 // thresholdExtract + blurH + blurV
+    PostProcessTail,           // prepareDisplayKernel + tonemap + CA + vignette + PBO
+
     COUNT
 };
 

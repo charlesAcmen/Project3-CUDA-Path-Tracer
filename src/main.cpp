@@ -408,6 +408,8 @@ void RenderImGui()
         ImGui::Text("  GatherTerminatedPaths: %.3f ms", imguiData->perKernelMs[1]);
         ImGui::Text("  SortByMaterial:        %.3f ms", imguiData->perKernelMs[2]);
         ImGui::Text("  CompactPaths:          %.3f ms", imguiData->perKernelMs[3]);
+        ImGui::Text("  BloomPass:             %.3f ms", imguiData->perKernelMs[5]);
+        ImGui::Text("  PostProcessTail:       %.3f ms", imguiData->perKernelMs[6]);
         ImGui::Text("Bounces Last Frame: %d", imguiData->lastBounceCount);
     }
 

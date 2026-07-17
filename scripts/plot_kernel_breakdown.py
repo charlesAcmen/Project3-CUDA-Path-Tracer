@@ -16,6 +16,8 @@ OP_COLORS = {
     "GatherTerminatedPaths": "#F58518",
     "SortByMaterial":        "#E45756",
     "CompactPaths":          "#72B7B2",
+    "BloomPass":             "#54A24B",
+    "PostProcessTail":       "#Eeca3b",
 }
 
 
@@ -33,7 +35,8 @@ def main_raw(timing_csv: str, output: str) -> None:
 
     bounces = sorted(bounce_ops.keys())
     ops = ["ComputeIntersections", "SortByMaterial", "ShadeMaterial",
-           "GatherTerminatedPaths", "CompactPaths"]
+           "GatherTerminatedPaths", "CompactPaths",
+           "BloomPass", "PostProcessTail"]
     ops_present = [op for op in ops if any(op in bounce_ops[b] for b in bounces)]
 
     means = {op: [] for op in ops_present}

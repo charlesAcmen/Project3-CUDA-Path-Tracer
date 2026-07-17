@@ -24,6 +24,8 @@ const char* profilerOpName(ProfilerOp op)
         case ProfilerOp::SortByMaterial:          return "SortByMaterial";
         case ProfilerOp::CompactPaths:            return "CompactPaths";
         case ProfilerOp::ComputeIntersections:    return "ComputeIntersections";
+        case ProfilerOp::BloomPass:               return "BloomPass";
+        case ProfilerOp::PostProcessTail:         return "PostProcessTail";
         default:                                  return "Unknown";
     }
 }
@@ -261,7 +263,8 @@ void Profiler::updateGuiData(GuiDataContainer* guiData)
     if (!m_cfg.enabled || !guiData) return;
 
     // Reset timing array
-    for (int i = 0; i < 5; ++i) {
+    const int numOps = static_cast<int>(ProfilerOp::COUNT);
+    for (int i = 0; i < numOps; ++i) {
         guiData->perKernelMs[i] = 0.0f;
     }
 
@@ -269,7 +272,7 @@ void Profiler::updateGuiData(GuiDataContainer* guiData)
     for (const auto& rec : m_timingRecords) {
         if (rec.iteration == m_currentIteration) {
             int idx = static_cast<int>(rec.op);
-            if (idx >= 0 && idx < 5) {
+            if (idx >= 0 && idx < numOps) {
                 guiData->perKernelMs[idx] += rec.time_ms;
             }
         }

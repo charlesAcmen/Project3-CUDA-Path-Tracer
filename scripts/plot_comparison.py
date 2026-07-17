@@ -19,6 +19,8 @@ OP_COLORS = {
     "GatherTerminatedPaths": "#F58518",
     "SortByMaterial":        "#E45756",
     "CompactPaths":          "#72B7B2",
+    "BloomPass":             "#54A24B",
+    "PostProcessTail":       "#Eeca3b",
 }
 
 

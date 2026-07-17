@@ -17,9 +17,9 @@ public:
     GuiDataContainer() : TracedDepth(0) {}
     int TracedDepth;
 
-    // Per-frame timing summary (populated by profiler, displayed by ImGui)
-    float lastFrameTotalMs = 0.0f;
-    float perKernelMs[5] = {};  // ShadeMaterial, GatherTerminatedPaths, SortByMaterial, CompactPaths, ComputeIntersections
+    // Per-frame timing summary (populated by profiler, displayed by ImGui).
+    // Sized to match ProfilerOp::COUNT in profiler.h.
+    float perKernelMs[7] = {};
     int   lastBounceCount = 0;
 };
 
