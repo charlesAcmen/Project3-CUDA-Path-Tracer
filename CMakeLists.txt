@@ -61,7 +61,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src/stream_compaction)
 
 set(headers
     src/image.h
-    src/interactions.h
+    src/interactions/interactions.h
     src/intersections.h
     src/glslUtility.hpp
     src/pathtrace.h
@@ -80,7 +80,7 @@ set(sources
     src/pathtrace.cu
     src/profiler.cu
     src/intersections.cu
-    src/interactions.cu
+    src/interactions/interactions.cu
     src/scene.cpp
     src/utilities.cu
 )

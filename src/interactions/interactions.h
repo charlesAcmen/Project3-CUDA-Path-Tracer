@@ -4,7 +4,7 @@
 
 #include <glm/glm.hpp>
 
-#include "rng.h"
+#include "rng/rng.h"
 
 // CHECKITOUT
 /**

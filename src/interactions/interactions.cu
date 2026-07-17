@@ -1,8 +1,8 @@
-#include "interactions.h"
+#include "interactions/interactions.h"
 
 #include "utilities.h"
 
-#include "rng.h"
+#include "rng/rng.h"
 
 /**
  * Generates a random direction vector in a hemisphere oriented around a given surface normal,
