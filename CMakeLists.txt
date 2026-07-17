@@ -84,41 +84,14 @@ set(sources
     src/scene.cpp
     src/utilities.cu
 )
-
-set(imgui_headers
-    src/ImGui/imconfig.h
-    src/ImGui/imgui.h
-    src/ImGui/imgui_impl_glfw.h
-    src/ImGui/imgui_impl_opengl3.h
-    src/ImGui/imgui_impl_opengl3_loader.h
-    src/ImGui/imgui_internal.h
-    src/ImGui/imstb_rectpack.h
-    src/ImGui/imstb_textedit.h
-    src/ImGui/imstb_truetype.h
-)
-
-set(imgui_sources
-    src/ImGui/imgui.cpp
-    src/ImGui/imgui_demo.cpp
-    src/ImGui/imgui_draw.cpp
-    src/ImGui/imgui_impl_glfw.cpp
-    src/ImGui/imgui_impl_opengl3.cpp
-    src/ImGui/imgui_tables.cpp
-    src/ImGui/imgui_widgets.cpp
-)
-
 list(SORT headers)
 list(SORT sources)
-list(SORT imgui_headers)
-list(SORT imgui_sources)
 
 source_group("Headers" FILES ${headers})
 source_group("Sources" FILES ${sources})
-source_group("ImGui\\Headers" FILES ${imgui_headers})
-source_group("ImGui\\Sources" FILES ${imgui_sources})
 
-#add_subdirectory(src/ImGui)
-add_subdirectory(stream_compaction)
+add_subdirectory(src/ImGui)
+add_subdirectory(src/stream_compaction)
 
 # Helper function to create path tracer executable with specific configuration
 # (Currently not used - all configuration is runtime-based via command-line flags)
@@ -155,10 +128,11 @@ add_subdirectory(stream_compaction)
 #   --benchmark  (enable CSV profiler output)
 #
 # Defaults are set in pathtrace.cu and can be overridden at runtime.
-add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers} ${imgui_sources} ${imgui_headers})
+add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers})
 target_link_libraries(${CMAKE_PROJECT_NAME}
     ${GL_LIBRARIES}
     stream_compaction
+    imgui
 )
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES native)
