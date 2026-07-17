@@ -29,8 +29,24 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <cerrno>
 #include <vector>
 #include <algorithm>
+
+#ifdef _WIN32
+#include <direct.h>   // _mkdir
+#else
+#include <sys/stat.h> // mkdir
+#endif
+
+// Helper: create directory (recursive single-level for our use case)
+static bool ensureDir(const char* path) {
+#ifdef _WIN32
+    return _mkdir(path) == 0 || errno == EEXIST;
+#else
+    return mkdir(path, 0755) == 0 || errno == EEXIST;
+#endif
+}
 
 // Include the project's actual RNG header
 // Compiled with -I../../src so this resolves to src/rng/rng.h
@@ -45,7 +61,7 @@ struct Args {
     int    numPixels  = 4;       // number of pixels to simulate
     int    numBounces = 2;       // bounce depths (0 = primary ray, 1 = first scatter)
     int    numDims    = 10;      // dimensions 0..9 (matches current HALTON_NUM_DIMS allocation)
-    const char* outFile = "rng_data.csv";
+    const char* outFile = "profiler_output/rng_test/rng_data.csv";
 };
 
 static void printUsage(const char* prog) {
@@ -113,6 +129,12 @@ int main(int argc, char** argv) {
         args.outFile);
 
     FILE* f = fopen(args.outFile, "w");
+    if (!f) {
+        // Try creating the output directory and retry
+        ensureDir("profiler_output");
+        ensureDir("profiler_output/rng_test");
+        f = fopen(args.outFile, "w");
+    }
     if (!f) {
         fprintf(stderr, "Error: cannot open %s for writing\n", args.outFile);
         return 1;
