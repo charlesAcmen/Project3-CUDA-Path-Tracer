@@ -8,7 +8,7 @@
 // ====================================================================
 
 #include "sceneStructs.h"
-#include "rng.h"
+#include "rng/rng.h"
 #include "intersections.h"  // concentricSampleDisk
 
 /**

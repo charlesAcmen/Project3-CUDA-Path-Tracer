@@ -25,7 +25,7 @@
 #include "interactions.h"    // scatterRay, fresnel*, classifyRefraction
 #include "profiler.h"
 #include "kernel_config.h"
-#include "rng.h"
+#include "rng/rng.h"
 #include "efficient.h"       // StreamCompaction::Efficient
 
 // Post-processing kernels (needed by pipeline/postprocess.cuh)

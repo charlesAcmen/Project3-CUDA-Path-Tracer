@@ -65,8 +65,8 @@ set(headers
     src/intersections.h
     src/glslUtility.hpp
     src/pathtrace.h
-    src/profiler.h
-    src/rng.h
+    src/profiler/profiler.h
+    src/rng/rng.h
     src/scene.h
     src/sceneStructs.h
     src/utilities.h
