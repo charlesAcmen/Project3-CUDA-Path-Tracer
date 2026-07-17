@@ -10,8 +10,8 @@
 
 #include "sceneStructs.h"
 #include "scene.h"          // ShadingConfig
-#include "interactions.h"   // scatterRay
-#include "rng.h"
+#include "interactions/interactions.h"   // scatterRay
+#include "rng/rng.h"
 #include "constants.h"
 
 /**

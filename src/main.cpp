@@ -1,7 +1,7 @@
 #include "glslUtility.hpp"
 #include "image.h"
 #include "pathtrace.h"
-#include "profiler.h"
+#include "profiler/profiler.h"
 #include "scene.h"
 #include "sceneStructs.h"
 #include "utilities.h"
@@ -472,7 +472,7 @@ void RenderImGui()
             setChromaticAberrationEnabled(caEnabled);
         if (caEnabled) {
             float caIntensity = getChromaticAberrationIntensity();
-            if (ImGui::SliderFloat("CA Intensity", &caIntensity, 0.0f, 0.02f, "%.5f"))
+            if (ImGui::SliderFloat("CA Intensity", &caIntensity, 0.0f, 0.008f, "%.5f"))
                 setChromaticAberrationIntensity(caIntensity);
         }
 

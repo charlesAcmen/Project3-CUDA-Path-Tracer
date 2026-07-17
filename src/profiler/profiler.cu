@@ -1,4 +1,4 @@
-#include "profiler.h"
+#include "profiler/profiler.h"
 #include "utilities.h"  // for GuiDataContainer
 
 #include <cstdio>

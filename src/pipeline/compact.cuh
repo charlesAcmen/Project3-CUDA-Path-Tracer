@@ -11,7 +11,7 @@
 // ====================================================================
 
 #include "sceneStructs.h"
-#include "profiler.h"
+#include "profiler/profiler.h"
 #include "kernel_config.h"  // LAUNCH_KERNEL_AUTO
 #include "efficient.h"      // StreamCompaction::Efficient
 #include <thrust/copy.h>

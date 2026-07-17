@@ -22,8 +22,8 @@
 #include "glm/gtx/norm.hpp"
 
 #include "intersections.h"   // getPointOnRay, getExactPointOnRay, concentricSampleDisk
-#include "interactions.h"    // scatterRay, fresnel*, classifyRefraction
-#include "profiler.h"
+#include "interactions/interactions.h"    // scatterRay, fresnel*, classifyRefraction
+#include "profiler/profiler.h"
 #include "kernel_config.h"
 #include "rng/rng.h"
 #include "efficient.h"       // StreamCompaction::Efficient

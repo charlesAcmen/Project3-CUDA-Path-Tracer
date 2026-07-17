@@ -78,7 +78,7 @@ set(sources
     src/image.cpp
     src/glslUtility.cpp
     src/pathtrace.cu
-    src/profiler.cu
+    src/profiler/profiler.cu
     src/intersections.cu
     src/interactions/interactions.cu
     src/scene.cpp
