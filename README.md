@@ -1,52 +1,99 @@
-CUDA Path Tracer
-================
+# CUDA Path Tracer
 
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 3**
 
-* (TODO) YOUR NAME HERE
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+This repository contains a CUDA-based Monte Carlo path tracer with a refactored modular architecture. It renders globally illuminated scenes using GPU kernels, OpenGL/GLFW interop, and an ImGui-based debug overlay.
 
-### (TODO: Your README)
+## What this project includes
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+- A full GPU path tracing pipeline with ray generation, intersection testing, shading, and accumulation
+- Refactored source organization for scene loading, RNG, intersections, interactions, pipeline control, profiling, and post-processing
+- Advanced rendering features such as:
+  - stream compaction
+  - material sorting
+  - diffuse/specular/refraction-aware scattering
+  - depth-of-field
+  - tone mapping and bloom post-processing
+  - benchmark-oriented CLI and profiler hooks
 
+## Project structure
 
-Development notes — Implemented features
----------------------------------------
+```text
+src/
+├── main.cpp                  # Window, input handling, render loop
+├── pathtrace.cu / pathtrace.h
+│                              # Core path tracing pipeline and dispatch logic
+├── intersections.cu / intersections.h
+│                              # Ray-primitive intersection tests
+├── interactions/             # BSDF / scattering related logic
+├── pipeline/                 # Rendering pipeline helpers and execution flow
+├── postprocess/              # Tone mapping and bloom passes
+├── profiler/                 # Timing / profiling utilities
+├── rng/                      # RNG implementations and sampler state
+├── scene.cpp / scene.h       # Scene loading from JSON
+├── sceneStructs.h            # Shared data structures
+├── stream_compaction/        # Path compaction implementations
+└── utilities.*               # Math constants and shared helpers
+```
 
-Below are the items from `INSTRUCTION.md` / project notes and which ones
-are currently implemented in the codebase (for developer record). Keep the
-original README content above — this is just an addition for tracking.
+Other important folders:
 
-- Stream compaction: implemented three working variants
-	- Global-memory scan version (compact method 1)
-	- Thrust `copy_if` reference version (compact method 2)
-	- Shared-memory multi-block scan version (compact method 3) — default
-	- `0` disables compaction entirely
+- `scenes/` — input scene JSON files
+- `outputs/` — rendered output images and generated results
+- `docs/` — design notes and benchmarking guidance
+- `build/` — CMake build output
 
-- Russian roulette: implemented (path termination via Russian roulette where applicable)
+## Build and run
 
-- Material sorting: implemented (`sort by material` path + intersection permutation before shading)
+### Windows / Visual Studio
 
-- BSDF / scattering: implemented diffuse Lambertian scattering, perfect specular reflection, and imperfect glossy/specular reflection with roughness-driven sampling for non-perfect mirrors
+```powershell
+cmake -B build
+cmake --build build --config Debug
+```
 
-- The refraction-oriented visual improvement is implemented, including Fresnel-based reflection/refraction selection and imperfect specular lighting for rougher specular materials.
-- Physically-based depth-of-field is implemented by jittering rays within an aperture.
-- Random-number generation has been upgraded from the original LCG-based path to a unified Halton-based sampler. The implementation in `src/rng.h` provides a shared `RngState` interface for both LCG and Halton modes, with Halton mode using prime-base radical inverse sampling plus Cranley-Patterson rotation. The sequence start point is now hash-based per `(pixelIndex, bounceIndex)` instead of a simple linear packing, which removes the structured aliasing that caused stripe-like artifacts; the index still advances consecutively across iterations to preserve low-discrepancy convergence. The sampling calls in `src/pathtrace.cu` now use this RNG for AA jitter, depth-of-field lens sampling, diffuse/specular scattering, Fresnel roulette, and Russian roulette.
-- Image post-processing includes selectable tone mapping modes: Hill ACES (full colour-matrix ACES fit) and Narkowicz ACES (simpler sRGB curve), plus a linear bypass mode.
-- Bloom post-processing is implemented and wired into the display pipeline. The GPU pass operates on the accumulated HDR image in linear HDR space before tone mapping: bright pixels are first isolated by a threshold-extraction kernel, then blurred with a two-pass separable Gaussian filter (horizontal + vertical) implemented with shared-memory tiled CUDA kernels, and finally composited back into the HDR image before ACES tone mapping and sRGB gamma correction. The effect is controllable from the ImGui overlay via enable/threshold/intensity/radius parameters, and the implementation lives in `src/postprocess/bloom.cuh` and `src/pathtrace.cu`.
-- The ImGui overlay supports dynamic adjustment of focal distance and aperture radius, and shows the focal plane in green at the intersection point for visual validation of depth-of-field correctness.
-Other notes:
+Then run the executable with a scene file:
 
-- The runtime mappings are in `src/pathtrace.cu` (see `g_compactMethod` and
-	`setCompactMethod`). The dispatch table (`g_compactCore`) points to the
-	corresponding function for each method.
-- Profiler and CLI flags (`--compact`, `--sort`, `--benchmark`, `--save`,
-	`--verbose`, `--warmup`) control runtime behavior and are documented in
-	`docs/benchmarking-guide.md`. The default compact method in code is
-	the shared-memory multi-block scan (method 3).
+```powershell
+build\bin\Debug\cis565_path_tracer.exe scenes\cornell.json
+```
 
-If you think I missed anything that's implemented, tell me and I'll update
-this note (keeping the existing README content intact).
+### Linux / WSL
+
+```bash
+make
+# or
+make Release
+```
+
+Run:
+
+```bash
+./build/bin/cis565_path_tracer scenes/cornell.json
+```
+
+## Basic usage
+
+- Launch the program with a scene JSON file.
+- Use the mouse to orbit / zoom / pan the camera.
+- Press `Space` to reset the camera view.
+- Press `S` to save the current image.
+- Press `Esc` to save and exit.
+
+## Notes for contributors
+
+- The main render loop is driven by the path tracer entry point in `src/pathtrace.cu`.
+- Runtime behavior can be controlled with benchmark-oriented flags documented in `docs/benchmarking-guide.md`.
+- The project does not ship with a formal test suite; visual inspection of rendered output is the primary validation method.
+
+## Implemented features
+
+- Stream compaction with multiple implementations
+- Russian roulette path termination
+- Material sorting for better GPU execution coherence
+- Diffuse, specular, and refraction-aware scattering
+- Depth-of-field camera model
+- Halton-based sampling and improved RNG structure
+- Tone mapping and bloom post-processing
+- ImGui overlay for interactive tuning
 
