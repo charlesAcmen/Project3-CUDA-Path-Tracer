@@ -11,7 +11,7 @@
 #include <stdexcept>
 
 // Use unified CUDA error checking from utilities module
-#include "../src/utilities.h"
+#include "utilities.h"
 
 inline int ilog2(int x) {
     int lg = 0;

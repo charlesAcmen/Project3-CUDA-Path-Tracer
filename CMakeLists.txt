@@ -57,7 +57,7 @@ set(GLM_ROOT_DIR "${CMAKE_SOURCE_DIR}/external")
 find_package(GLM REQUIRED)
 include_directories(${GLM_INCLUDE_DIRS})
 include_directories(${CMAKE_SOURCE_DIR}/src)
-include_directories(${CMAKE_SOURCE_DIR}/stream_compaction)
+include_directories(${CMAKE_SOURCE_DIR}/src/stream_compaction)
 
 set(headers
     src/image.h
