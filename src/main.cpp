@@ -71,6 +71,11 @@ int iteration;
 int width;
 int height;
 
+// Window dimensions — may be larger than the render resolution
+// to provide space for the ImGui overlay panel.
+int windowWidth;
+int windowHeight;
+
 GLuint positionLocation = 0;
 GLuint texcoordsLocation = 1;
 GLuint pbo;
@@ -316,7 +321,7 @@ bool init()
         exit(EXIT_FAILURE);
     }
 
-    window = glfwCreateWindow(width, height, "CIS 565 Path Tracer", NULL, NULL);
+    window = glfwCreateWindow(windowWidth, windowHeight, "CIS 565 Path Tracer", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
@@ -512,6 +517,13 @@ void mainLoop()
 
         std::string title = "CIS565 Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
         glfwSetWindowTitle(window, title.c_str());
+        // Centre the rendered scene inside the larger window so ImGui has room.
+        int fbW, fbH;
+        glfwGetFramebufferSize(window, &fbW, &fbH);
+        int vpX = (fbW - width) / 2;
+        int vpY = (fbH - height) / 2;
+        glViewport(vpX, vpY, width, height);
+
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
         glBindTexture(GL_TEXTURE_2D, displayImage);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
@@ -656,6 +668,13 @@ int main(int argc, char** argv)
     Camera& cam = renderState->camera;
     width = cam.resolution.x;
     height = cam.resolution.y;
+
+    // Make the window slightly larger than the render resolution so the
+    // ImGui panel (anchored to the left or right) doesn't cover the image.
+    // The render is displayed centered inside the window via glViewport.
+    const int IMGUI_PANEL_GUESS = 320;
+    windowWidth  = width + IMGUI_PANEL_GUESS;
+    windowHeight = height + 80;
 
     glm::vec3 view = cam.view;
     glm::vec3 up = cam.up;
