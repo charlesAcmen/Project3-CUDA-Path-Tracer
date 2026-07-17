@@ -40,9 +40,6 @@
  * Jenkins-style bit-mixing hash used to seed random number generators.
  * Provides spatial, temporal, and bounce-depth decorrelation when
  * combined with pixel index, iteration, and bounce depth.
- *
- * Originally defined in intersections.h (moved to rng.h for semantic
- * cohesion — hashing is an RNG concern, not an intersection concern).
  */
 __host__ __device__ inline unsigned int utilhash(unsigned int a)
 {
@@ -275,7 +272,6 @@ struct RngState {
             // all with distinct prime multipliers.
             unsigned int h = utilhash(
                 (unsigned int)pixelIndex * 131u
-                + (unsigned int)iter * 37u
                 + bounceIndex * 17u
                 + (unsigned int)dim * 11u);
             float offset = (float)(h & 0xFFFFFFu) * (1.0f / 16777216.0f);
