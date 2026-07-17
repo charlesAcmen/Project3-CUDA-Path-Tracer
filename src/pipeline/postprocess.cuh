@@ -49,7 +49,8 @@ static void runPostProcess(
         (resolution.y + blockSize2d.y - 1) / blockSize2d.y);
 
     // ---- Bloom (linear HDR space) ----
-    if (bloomCfg.enabled && bloomCfg.intensity > 0.0f)
+    bool bloomHasRun = (bloomCfg.enabled && bloomCfg.intensity > 0.0f);
+    if (bloomHasRun)
     {
         int kernelSize = bloomCfg.kernelSize();
         std::vector<float> weights = computeGaussianWeights(bloomCfg.radius, bloomCfg.sigma);
@@ -90,13 +91,13 @@ static void runPostProcess(
     // ---- Prepare display buffer: average HDR, composite bloom ----
     prepareDisplayKernel<<<blocksPerGrid2d, blockSize2d>>>(
         dev.image, dev.imageDisplay, resolution, iter,
-        (bloomCfg.enabled && bloomCfg.intensity > 0.0f) ? dev.bloomBufA : nullptr,
+        bloomHasRun ? dev.bloomBufA : nullptr,
         bloomCfg.intensity);
-
+    checkCUDAError("prepareDisplayKernel");
     // ---- Tone mapping: ACES filmic + sRGB gamma (in-place) ----
     tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
         dev.imageDisplay, dev.imageDisplay, resolution);
-
+    checkCUDAError("tonemapKernel");
     // ---- Chromatic Aberration (sRGB, after tone mapping) ----
     // Writes to bloomBufB as scratch, then copies back or chains into
     // vignette to avoid an extra D2D memcpy.
