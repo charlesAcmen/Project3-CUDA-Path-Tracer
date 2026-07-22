@@ -5,6 +5,7 @@
 #include "scene.h"
 #include "sceneStructs.h"
 #include "utilities.h"
+#include "window_setup.h"  // init, initTextures, initCuda, initPBO, etc.
 
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
@@ -32,7 +33,7 @@
 std::string  startTimeString;
 
 // Auto-save final image on completion (moved from pathtrace.cu — application-level concern)
-static bool g_autoSave = true;
+bool g_autoSave = true;
 
 // Checkpoint iteration counts for auto-save (set via --save-at=N1,N2,...).
 // Sorted ascending.  saveImage() is triggered when iteration reaches each value.
@@ -147,7 +148,7 @@ void RenderImGui()
     static int counter = 0;
 
     ImGui::Begin("Path Tracer Analytics");                  // Create a window called "Hello, world!" and append into it.
-    
+
     // LOOK: Un-Comment to check the output window and usage
     //ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
     //ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
@@ -182,7 +183,7 @@ void RenderImGui()
         ImGui::Text("Camera Settings (JSON format):");
         Camera& cam = renderState->camera;
         char jsonBuf[384];
-        sprintf(jsonBuf, 
+        sprintf(jsonBuf,
             "\"EYE\": [%.4f, %.4f, %.4f],\n"
             "\"LOOKAT\": [%.4f, %.4f, %.4f],\n"
             "\"UP\": [%.4f, %.4f, %.4f],\n"
