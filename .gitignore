@@ -19,7 +19,7 @@ build
 # /docs
 *.csv
 /profiler_output
-/scenes
+# /scenes
 *.pdf
 
 
