@@ -66,6 +66,115 @@ In this initial implementation, NEE is only evaluated for `MaterialType::Diffuse
 
 ---
 
+## Multiple Importance Sampling (MIS) — Power Heuristic
+
+### Motivation
+
+Pure NEE (one strategy — light sampling) produces fireflies when the
+light-sampled direction coincides with a low-weight region of the BSDF.
+For diffuse surfaces this is less severe than for glossy ones, but even
+the cosine-weighted BSDF can have arbitrarily small values near the
+horizon (cosθ → 0), causing the `fr * G / p_A` ratio to explode.
+
+MIS eliminates fireflies at the source by combining **two** sampling
+strategies and down-weighting each where its PDF is small relative
+to the other.
+
+### Combined Two-Strategy Estimator
+
+At each non-emissive diffuse surface hit, evaluate both strategies
+and weight by the power heuristic (β=2):
+
+```
+L_direct = w_light * f(ω_light) / p_light(ω_light)
+         + w_bsdf  * f(ω_bsdf)  / p_bsdf(ω_bsdf)
+
+where:
+
+  f(ω) = throughput * fr(ω) * Le(ω) * V(ω) * |cosθ_receiver|
+       (the integrand — incident radiance × BSDF × cosine)
+
+  w_s(ω) = p_s(ω)² / (p_light(ω)² + p_bsdf(ω)²)
+         (power heuristic, β=2)
+
+  w_light(ω) + w_bsdf(ω) = 1  for any ω where both PDFs > 0
+```
+
+The estimator is unbiased (proof in PBRTv4 §14.6).
+
+### Strategy 1 — Light Sampling (existing NEE, now weighted)
+
+The existing `evaluateDirectLighting` already computes:
+
+```
+f(ω_light) / p_light(ω_light) = throughput * fr * Le * V * G / p_A
+```
+
+Add the MIS weight to the existing contribution before atomicAdd:
+
+```
+p_light_solidAngle = p_A * |cosθ_light| / r²    (area → solid-angle PDF)
+p_bsdf(ω_light)    = |cosθ_receiver| / PI       (cosine-weighted hemisphere PDF)
+w_light            = p_light² / (p_light² + p_bsdf²)
+
+directContrib *= w_light
+```
+
+When `|cosθ_receiver| → 0` (light at the horizon), `p_bsdf → 0` and
+`w_light → 1` — light sampling naturally gets full weight where BSDF
+sampling cannot reach.
+
+### Strategy 2 — BSDF Sampling (new)
+
+After `scatterRay` sets the continuation ray direction `ω_bsdf`, trace
+the scattered ray against all scene geometry to find the closest hit:
+
+- **Closest hit is emissive**: the scattered ray reaches a light source
+  directly. Compute:
+  ```
+  Le = emittedRadiance of the hit light
+  p_bsdf(ω_bsdf) = |dot(normal, ω_bsdf)| / PI
+  p_light_solidAngle(ω_bsdf) = (1/(numLights * lightArea))
+                                 * |dot(lightNormal, -ω_bsdf)| / dist²
+  w_bsdf = p_bsdf² / (p_bsdf² + p_light_solidAngle²)
+  contrib_bsdf = w_bsdf * pathSegment.color * Le
+                (pathSegment.color after scatterRay carries f/p_bsdf)
+  ```
+  Accumulate via `atomicAdd`, then **terminate the path** (set
+  `remainingBounces = 0`).  The direct portion has been fully accounted
+  for; the next bounce must not double-count it via the emissive-hit
+  branch.
+
+- **Closest hit is non-emissive, or no hit**: the BSDF direction does
+  not directly reach a light.  The path continues normally with indirect
+  scattering — BSDF sampling contributes zero direct light this bounce.
+
+### Geometry Traversal
+
+The BSDF ray is traced using the same O(numGeoms) loop as the shadow ray
+test, reusing `boxIntersectionTest` / `sphereIntersectionTest`.  A single
+pass finds the closest intersection; if the hit geometry's index matches
+a `LightInfo` entry, it is emissive.
+
+### Implementation Notes
+
+- **Diffuse only**: MIS is only applied for `MaterialType::Diffuse`,
+  consistent with the existing NEE guard.  Specular/refractive materials
+  continue to rely solely on BSDF sampling for direct light.
+- **No new fields**: MIS weights are computed on-the-fly from known
+  quantities (PDFs, cosines).  No changes to `PathSegment`, `ShadingConfig`,
+  or `LightInfo`.
+- **Path termination**: When BSDF sampling hits a light, termination
+  prevents double-counting through the emissive-hit path in the next
+  iteration of `shadeMaterial`.  This is correct because an emissive
+  surface does not reflect light in the current material model — there
+  is no indirect component to lose.
+- **Power heuristic β=2**: Standard choice.  Higher β reduces variance
+  further but can increase bias in the presence of PDF estimation error;
+  β=2 is the PBRT default.
+
+---
+
 ## RNG Dimensions
 
 Added to the existing Halton sequence (all 16 dimensions now used):
