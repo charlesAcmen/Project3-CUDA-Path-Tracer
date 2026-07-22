@@ -1,4 +1,4 @@
-#include "glslUtility.hpp"
+#include "cli.h"           // CliConfig, parseFlags, printStartupHelp, printStartupSummary
 #include "image.h"
 #include "pathtrace.h"
 #include "profiler/profiler.h"
@@ -25,19 +25,11 @@
 #include <sstream>
 #include <string>
 
-// Parsed command-line configuration returned by parseFlags()
-struct CliConfig {
-    std::string  sceneFile;
-    ProfilerConfig profCfg;
-    bool autoSave   = true;
-    bool showHelp   = false;
-    bool hasScene   = false;
-    int  fresnelMode = 0;   // CLI override for RenderState::fresnelMode
-    bool fresnelSet  = false;
-    std::vector<int> saveAtIterations;  // auto-save at these iteration counts
-};
+// ====================================================================
+// Global State
+// ====================================================================
 
-static std::string startTimeString;
+std::string  startTimeString;
 
 // Auto-save final image on completion (moved from pathtrace.cu — application-level concern)
 static bool g_autoSave = true;
@@ -103,263 +95,39 @@ std::string currentTimeString()
     return std::string(buf);
 }
 
-void printStartupHelp(const char* exeName)
+// ====================================================================
+// Image Save
+// ====================================================================
+
+void saveImage()
 {
-    printf("\n");
-    printf("======================================================================\n");
-    printf("  CIS 565 Path Tracer - Command Line Help\n");
-    printf("======================================================================\n");
-    printf("  Usage:\n");
-    printf("    %s SCENEFILE.json [options]\n", exeName);
-    printf("\n");
-    printf("  Examples:\n");
-    printf("    %s ../scenes/cornell.json\n", exeName);
-    printf("    %s ../scenes/cornell.json --benchmark --compact=2 --warmup=1\n", exeName);
-    printf("    %s ../scenes/cornell.json --benchmark --sort=0 --save\n", exeName);
-    printf("\n");
-    printf("  Options:\n");
-    printf("    --benchmark    Enable profiler CSV output.\n");
-    printf("    --verbose      Print per-bounce path counts to the console.\n");
-    printf("    --compact=N    Compaction mode: 0=off, 1=global scan, 2=Thrust copy_if,\n");
-    printf("                   3=shared-memory scan (default).\n");
-    printf("    --sort=N       Material sorting: 0=off, nonzero=on (default on).\n");
-    printf("    --fresnel=N    Fresnel mode: 0=Schlick (default), 1=Accurate.\n");
-    printf("    --rng=N        RNG mode: 0=LCG (default), 1=scrambled Halton.\n");
-    printf("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
-    printf("    --save         Save the final rendered image on exit.\n");
-    printf("                   (default: yes)\n");
-    printf("    --save-at=N1,N2,...  Auto-save at specific iteration counts\n");
-    printf("                   (e.g., --save-at=50,200,1000).  Implies --save.\n");
-    printf("    -h, --help     Show this help text.\n");
-    printf("\n");
-    printf("  Notes:\n");
-    printf("    - Flags and scene file are order-independent.\n");
-    printf("    - Profiler CSVs are written to profiler_output/<scene>_<timestamp>/\n");
-    printf("      when --benchmark is enabled.\n");
-    printf("    - Nonzero values for --sort are treated as enabled.\n");
-    printf("    - Only compact values 0..3 have defined behavior.\n");
-    printf("======================================================================\n");
-    printf("\n");
-}
+    float samples = iteration;
+    // output image file
+    Image img(width, height);
 
-// Print a concise startup summary of key runtime options and scene info.
-void printStartupSummary(const ProfilerConfig& profCfg)
-{
-    printf("\n");
-    printf("======================================================================\n");
-    printf("  Startup Summary\n");
-    printf("======================================================================\n");
-    printf("  Scene: %s\n", profCfg.sceneName.c_str());
-    printf("  Timestamp: %s\n", startTimeString.c_str());
-    printf("  Resolution: %d x %d\n", width, height);
-    if (renderState) {
-        printf("  Trace iterations (depth): %d\n", renderState->iterations);
-    }
-    printf("  Profiler: %s\n", profCfg.enabled ? "ENABLED" : "disabled");
-    if (profCfg.enabled) {
-        printf("    Warmup iters: %d\n", profCfg.warmupIters);
-        printf("    Verbose logging: %s\n", profCfg.verbose ? "yes" : "no");
-    }
-    const char* compactName = "Unknown";
-    switch (profCfg.compactMethod) {
-        case 0: compactName = "Disabled (no compaction)"; break;
-        case 1: compactName = "Global-memory scan (custom)"; break;
-        case 2: compactName = "Thrust copy_if"; break;
-        case 3: compactName = "Shared-memory multi-block scan"; break;
-        default: compactName = "Shared-memory multi-block scan (default)"; break;
-    }
-    printf("  Compact method: %s\n", compactName);
-    printf("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
-    const char* fresnelName = (renderState->fresnelMode == 1 ? "Accurate" : "Schlick");
-    printf("  Fresnel mode: %s\n", fresnelName);
-    const char* rngName = (getRngMode() == 1 ? "Scrambled Halton" : "LCG");
-    printf("  RNG mode: %s\n", rngName);
-    printf("  Auto-save final image: %s\n", g_autoSave ? "yes" : "no");
-    printf("======================================================================\n");
-    printf("\n");
-}
-
-//-------------------------------
-//----------SETUP STUFF----------
-//-------------------------------
-
-void initTextures()
-{
-    glGenTextures(1, &displayImage);
-    glBindTexture(GL_TEXTURE_2D, displayImage);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
-}
-
-void initVAO(void)
-{
-    GLfloat vertices[] = {
-        -1.0f, -1.0f,
-        1.0f, -1.0f,
-        1.0f,  1.0f,
-        -1.0f,  1.0f,
-    };
-
-    GLfloat texcoords[] = {
-        1.0f, 1.0f,
-        0.0f, 1.0f,
-        0.0f, 0.0f,
-        1.0f, 0.0f
-    };
-
-    GLushort indices[] = { 0, 1, 3, 3, 1, 2 };
-
-    GLuint vertexBufferObjID[3];
-    glGenBuffers(3, vertexBufferObjID);
-
-    glBindBuffer(GL_ARRAY_BUFFER, vertexBufferObjID[0]);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    glVertexAttribPointer((GLuint)positionLocation, 2, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(positionLocation);
-
-    glBindBuffer(GL_ARRAY_BUFFER, vertexBufferObjID[1]);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(texcoords), texcoords, GL_STATIC_DRAW);
-    glVertexAttribPointer((GLuint)texcoordsLocation, 2, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(texcoordsLocation);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vertexBufferObjID[2]);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-}
-
-GLuint initShader()
-{
-    const char* attribLocations[] = { "Position", "Texcoords" };
-    GLuint program = glslUtility::createDefaultProgram(attribLocations, 2);
-    GLint location;
-
-    //glUseProgram(program);
-    if ((location = glGetUniformLocation(program, "u_image")) != -1)
+    for (int x = 0; x < width; x++)
     {
-        glUniform1i(location, 0);
+        for (int y = 0; y < height; y++)
+        {
+            int index = x + (y * width);
+            glm::vec3 pix = renderState->image[index];
+            img.setPixel(width - 1 - x, y, glm::vec3(pix) / samples);
+        }
     }
 
-    return program;
+    std::string filename = renderState->imageName;
+    std::ostringstream ss;
+    ss << filename << "." << startTimeString << "." << samples << "samp";
+    filename = ss.str();
+
+    // CHECKITOUT
+    img.savePNG(filename);
+    //img.saveHDR(filename);  // Save a Radiance HDR file
 }
 
-void deletePBO(GLuint* pbo)
-{
-    if (pbo)
-    {
-        // unregister this buffer object with CUDA
-        cudaGLUnregisterBufferObject(*pbo);
-
-        glBindBuffer(GL_ARRAY_BUFFER, *pbo);
-        glDeleteBuffers(1, pbo);
-
-        *pbo = (GLuint)NULL;
-    }
-}
-
-void deleteTexture(GLuint* tex)
-{
-    glDeleteTextures(1, tex);
-    *tex = (GLuint)NULL;
-}
-
-void cleanupCuda()
-{
-    if (pbo)
-    {
-        deletePBO(&pbo);
-    }
-    if (displayImage)
-    {
-        deleteTexture(&displayImage);
-    }
-}
-
-void initCuda()
-{
-    // On newer CUDA + driver combos the GL stack may have already implicitly
-    // initialised a CUDA context (e.g. through GLFW/GLEW), causing the
-    // deprecated cudaGLSetGLDevice(0) to leave a stale cudaErrorSetOnActiveProcess.
-    // Drain any such error so it doesn't surface at the first checkCUDAError call.
-    cudaGetLastError();
-
-    cudaGLSetGLDevice(0);
-
-    // Clean up on program exit
-    atexit(cleanupCuda);
-}
-
-void initPBO()
-{
-    // set up vertex data parameter
-    int num_texels = width * height;
-    int num_values = num_texels * 4;
-    int size_tex_data = sizeof(GLubyte) * num_values;
-
-    // Generate a buffer ID called a PBO (Pixel Buffer Object)
-    glGenBuffers(1, &pbo);
-
-    // Make this the current UNPACK buffer (OpenGL is state-based)
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-
-    // Allocate data for the buffer. 4-channel 8-bit image
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, size_tex_data, NULL, GL_DYNAMIC_COPY);
-    cudaGLRegisterBufferObject(pbo);
-    cudaGetLastError(); // drain stale error, same reasoning as initCuda()
-}
-
-void errorCallback(int error, const char* description)
-{
-    fprintf(stderr, "%s\n", description);
-}
-
-bool init()
-{
-    glfwSetErrorCallback(errorCallback);
-
-    if (!glfwInit())
-    {
-        exit(EXIT_FAILURE);
-    }
-
-    window = glfwCreateWindow(windowWidth, windowHeight, "CIS 565 Path Tracer", NULL, NULL);
-    if (!window)
-    {
-        glfwTerminate();
-        return false;
-    }
-    glfwMakeContextCurrent(window);
-    glfwSetKeyCallback(window, keyCallback);
-    glfwSetCursorPosCallback(window, mousePositionCallback);
-    glfwSetMouseButtonCallback(window, mouseButtonCallback);
-
-    // Set up GL context
-    glewExperimental = GL_TRUE;
-    if (glewInit() != GLEW_OK)
-    {
-        return false;
-    }
-    printf("Opengl Version:%s\n", glGetString(GL_VERSION));
-    //Set up ImGui
-
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    io = &ImGui::GetIO(); (void)io;
-    ImGui::StyleColorsLight();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 120");
-
-    // Initialize other stuff
-    initVAO();
-    initTextures();
-    initCuda();
-    initPBO();
-    GLuint passthroughProgram = initShader();
-
-    glUseProgram(passthroughProgram);
-    glActiveTexture(GL_TEXTURE0);
-
-    return true;
-}
+// ====================================================================
+// ImGui Panel
+// ====================================================================
 
 void InitImguiData(GuiDataContainer* guiData)
 {
@@ -551,79 +319,9 @@ void mainLoop()
     glfwTerminate();
 }
 
-CliConfig parseFlags(int argc, char** argv)
-{
-    CliConfig cfg;
-
-    // Seed ProfilerConfig with runtime defaults from pathtrace.cu, so that
-    // CSV metadata matches actual behaviour even when no CLI flag is given.
-    cfg.profCfg.compactMethod  = getCompactMethod();
-    cfg.profCfg.sortByMaterial = getSortByMaterial();
-
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-
-        // ----- Named flags -----
-        if (arg == "-h" || arg == "--help") {
-            cfg.showHelp = true;
-        } else if (arg == "--benchmark") {
-            cfg.profCfg.enabled = true;
-        } else if (arg == "--verbose") {
-            cfg.profCfg.verbose = true;
-        } else if (arg == "--save") {
-            cfg.autoSave = true;
-        } else if (arg.rfind("--save-at=", 0) == 0) {
-            cfg.autoSave = true;  // implies --save
-            std::string list = arg.substr(10);
-            std::stringstream ss(list);
-            std::string token;
-            while (std::getline(ss, token, ',')) {
-                if (!token.empty()) {
-                    cfg.saveAtIterations.push_back(std::stoi(token));
-                }
-            }
-            std::sort(cfg.saveAtIterations.begin(), cfg.saveAtIterations.end());
-        } else if (arg.rfind("--compact=", 0) == 0) {
-            int v = std::stoi(arg.substr(10));
-            cfg.profCfg.compactMethod = v;
-            setCompactMethod(v);
-        } else if (arg.rfind("--sort=", 0) == 0) {
-            bool v = (std::stoi(arg.substr(7)) != 0);
-            cfg.profCfg.sortByMaterial = v;
-            setSortByMaterial(v);
-        } else if (arg.rfind("--fresnel=", 0) == 0) {
-            int v = std::stoi(arg.substr(10));
-            cfg.fresnelMode = (v == 1) ? 1 : 0;
-            cfg.fresnelSet  = true;
-        } else if (arg.rfind("--rng=", 0) == 0) {
-            int v = std::stoi(arg.substr(6));
-            setRngMode(v);
-        } else if (arg.rfind("--warmup=", 0) == 0) {
-            cfg.profCfg.warmupIters = std::stoi(arg.substr(9));
-        }
-        // ----- Positional argument: scene file -----
-        else {
-            cfg.sceneFile = arg;
-            cfg.hasScene  = true;
-        }
-    }
-
-    // Derive a clean scene name for CSV output (strip path + extension)
-    if (cfg.hasScene) {
-        std::string s = cfg.sceneFile;
-        size_t slash = s.find_last_of("/\\");
-        if (slash != std::string::npos) s = s.substr(slash + 1);
-        size_t dot = s.find_last_of('.');
-        if (dot != std::string::npos) s = s.substr(0, dot);
-        cfg.profCfg.sceneName = s;
-    }
-
-    return cfg;
-}
-
-//-------------------------------
-//-------------MAIN--------------
-//-------------------------------
+// ====================================================================
+// Entry Point
+// ====================================================================
 
 int main(int argc, char** argv)
 {
