@@ -313,6 +313,13 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
     middleMousePressed = (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS);
 }
 
+void scrollCallback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    zoom *= (yoffset > 0.0) ? 0.85f : 1.15f;
+    zoom = std::fmax(0.1f, zoom);
+    camchanged = true;
+}
+
 void mousePositionCallback(GLFWwindow* window, double xpos, double ypos)
 {
     if (xpos == lastX || ypos == lastY)
@@ -338,15 +345,12 @@ void mousePositionCallback(GLFWwindow* window, double xpos, double ypos)
     {
         renderState = &scene->state;
         Camera& cam = renderState->camera;
-        glm::vec3 forward = cam.view;
-        forward.y = 0.0f;
-        forward = glm::normalize(forward);
-        glm::vec3 right = cam.right;
-        right.y = 0.0f;
-        right = glm::normalize(right);
 
-        cam.lookAt -= (float)(xpos - lastX) * right * 0.01f;
-        cam.lookAt += (float)(ypos - lastY) * forward * 0.01f;
+        // Pan lookAt in the camera's image plane (screen space).
+        //   Horizontal: along the camera's right vector
+        //   Vertical:   along the camera's up vector (Y unlocked)
+        cam.lookAt -= (float)(xpos - lastX) * cam.right * 0.01f;
+        cam.lookAt += (float)(ypos - lastY) * cam.up    * 0.01f;
         camchanged = true;
     }
 
