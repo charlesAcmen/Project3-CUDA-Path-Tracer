@@ -44,6 +44,7 @@ extern ImGuiIO*     io;
 extern void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 extern void mousePositionCallback(GLFWwindow* window, double xpos, double ypos);
 extern void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
+extern void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);
 
 // ---- Functions ----
 
@@ -195,6 +196,7 @@ bool init()
     glfwSetKeyCallback(window, keyCallback);
     glfwSetCursorPosCallback(window, mousePositionCallback);
     glfwSetMouseButtonCallback(window, mouseButtonCallback);
+    glfwSetScrollCallback(window, scrollCallback);
 
     // Set up GL context
     glewExperimental = GL_TRUE;
