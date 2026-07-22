@@ -36,7 +36,7 @@ struct DeviceBuffers {
 
 // Bloom post-processing configuration
 struct BloomConfig {
-    bool  enabled   = true;      // enable bloom effect
+    bool  enabled   = false;     // enable bloom effect (off by default — avoid firefly amplification)
     float threshold = 1.0f;      // brightness cutoff in HDR
     float intensity = 0.5f;      // bloom blend strength
     int   radius    = 10;        // Gaussian blur radius (pixels)
