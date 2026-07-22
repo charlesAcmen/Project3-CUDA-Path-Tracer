@@ -1,0 +1,18 @@
+# 4-Sided Pyramid (square base, 6 triangles)
+# Apex at top center, base on y=0 plane
+
+v  0.00  1.00  0.00
+v -0.50  0.00  0.50
+v  0.50  0.00  0.50
+v  0.50  0.00 -0.50
+v -0.50  0.00 -0.50
+
+# 4 triangular faces
+f 1 2 3
+f 1 3 4
+f 1 4 5
+f 1 5 2
+
+# Base (square split into 2 triangles)
+f 3 2 5
+f 3 5 4

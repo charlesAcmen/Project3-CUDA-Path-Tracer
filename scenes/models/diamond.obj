@@ -1,0 +1,19 @@
+# Octahedron (diamond) — 8 triangular faces, 6 vertices
+# Two square-base pyramids stacked base-to-base
+
+v  0.00  0.50  0.00
+v  0.50  0.00  0.00
+v  0.00  0.00  0.50
+v -0.50  0.00  0.00
+v  0.00  0.00 -0.50
+v  0.00 -0.50  0.00
+
+# All windings reversed so normals point outward
+f 1 3 2
+f 1 4 3
+f 1 5 4
+f 1 2 5
+f 6 2 3
+f 6 3 4
+f 6 4 5
+f 6 5 2
