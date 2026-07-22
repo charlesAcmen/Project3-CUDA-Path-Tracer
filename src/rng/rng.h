@@ -75,8 +75,9 @@ constexpr int HALTON_NUM_DIMS = 16;
 //    8    23    Fresnel roulette               scatterRay (refractive branch)
 //    9    29    Path Russian roulette          russianRouletteTerminate
 //   10    31    Light selection                sampleLightSource
-//   11    37    Light surface U                samplePointOnLight
-//   12    41    Light surface V                samplePointOnLight
+//   11    37    Light surface U / sphere θ     samplePointOnLight / sampleSphereSurface
+//   12    41    Light surface V / sphere φ     samplePointOnLight / sampleSphereSurface
+//   13    43    Light surface W / cube face    sampleCubeSurface (face selection)
 //   ---  -----  -----------------------------  ----------------------------
 
 /** Named constants for Halton dimension indices.
@@ -102,6 +103,7 @@ namespace HaltonDim {
     constexpr int LightSelect   = 10;   // prime 31: pick which emissive geometry
     constexpr int LightSurfaceU = 11;   // prime 37: u coord on light surface
     constexpr int LightSurfaceV = 12;   // prime 41: v coord on light surface
+    constexpr int LightSurfaceW = 13;   // prime 43: cube face selection (independent dim)
 }
 
 /**

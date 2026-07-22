@@ -93,12 +93,14 @@ __global__ void computeIntersections(
         if (hit_geom_index == -1)
         {
             intersections[path_index].t = -1.0f;
+            intersections[path_index].geomIndex = -1;
         }
         else
         {
             intersections[path_index].t = t_min;
             intersections[path_index].materialId = geoms[hit_geom_index].materialid;
             intersections[path_index].surfaceNormal = normal;
+            intersections[path_index].geomIndex = hit_geom_index;
         }
     }
 }

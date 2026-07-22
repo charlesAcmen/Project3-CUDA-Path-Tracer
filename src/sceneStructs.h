@@ -97,6 +97,23 @@ struct DebugConfig
                                    // "at focal plane"
 };
 
+/**
+ * LightInfo — Compact description of one emissive geometry (light source).
+ *
+ * Stored in a GPU device array for next-event estimation in the shading
+ * kernel.  Each emissive geometry in the scene produces one entry.
+ *
+ * The emittedRadiance field is pre-multiplied at init time (color × emittance)
+ * so the shading kernel does not need to look up the Material array for the
+ * emission value — one fewer device-memory load per direct-light evaluation.
+ */
+struct LightInfo {
+    int geomIndex;              // index into the device geoms array
+    float area;                 // world-space surface area (for PDF computation)
+    float inverseArea;          // 1/area (precomputed to avoid GPU division)
+    glm::vec3 emittedRadiance;  // material.color * material.emittance = Le
+};
+
 // POD projection of RenderState fields for GPU kernel parameters.
 // Does NOT own data — RenderState is the single source of truth.
 // Assembled locally at kernel launch time from hst_scene->state.
@@ -108,6 +125,13 @@ struct ShadingConfig
     int rngMode;         // 0=LCG, 1=scrambled Halton
     Camera cam;
     DebugConfig debug;
+
+    // --- Direct lighting (next-event estimation) ---
+    int      numLights;      // number of emissive geometries (0 = skip NEE)
+    LightInfo* lightInfos;   // device array of LightInfo (nullptr if none)
+    Geom*      geoms;        // device array of all geoms (for light-sampling transforms)
+    int        numGeoms;     // total geometry count (for shadow ray bounds)
+    float      totalLightArea; // sum of emissive surface areas (for PDF denominator)
 };
 
 struct RenderState
@@ -140,4 +164,7 @@ struct ShadeableIntersection
   //t < 0.0f: no intersection with an object(initial value)
   glm::vec3 surfaceNormal;
   int materialId;
+  int geomIndex;        // index of the hit geometry in the device geoms array (-1 = miss).
+                        // Needed for direct lighting (light sampling transforms)
+                        // and future SSS (geometry containment tests).
 };
