@@ -27,11 +27,6 @@ struct DeviceBuffers {
     glm::vec3*              bloomBufA           = nullptr;  // threshold + final blur result (HDR)
     glm::vec3*              bloomBufB           = nullptr;  // horizontal blur output (HDR ping-pong)
     float*                  bloomWeights        = nullptr;  // 1D Gaussian kernel weights (device)
-
-    // Direct lighting (next-event estimation)
-    LightInfo*              lightInfos          = nullptr;  // device array of emissive-geometry descriptors
-    int                     numLights           = 0;        // count of emissive geometries
-    float                   totalLightArea      = 0.0f;     // sum of emissive surface areas (for PDF)
 };
 
 // Bloom post-processing configuration

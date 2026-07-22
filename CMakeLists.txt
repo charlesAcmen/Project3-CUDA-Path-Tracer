@@ -65,7 +65,6 @@ set(headers
     src/interactions/interactions.h
     src/intersections.h
     src/glslUtility.hpp
-    src/lighting/light_sampling.h
     src/pathtrace.h
     src/profiler/profiler.h
     src/rng/rng.h

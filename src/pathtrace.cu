@@ -27,7 +27,6 @@
 #include "kernel_config.h"
 #include "rng/rng.h"
 #include "efficient.h"       // StreamCompaction::Efficient
-#include "lighting/light_sampling.h"  // computeGeomSurfaceArea, LightInfo
 
 // Post-processing kernels (needed by pipeline/postprocess.cuh)
 #include "postprocess/tonemap.cuh"
@@ -134,41 +133,7 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&g_dev.materials, scene->materials.size() * sizeof(Material));
     cudaMemcpy(g_dev.materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
 
-    // ---- Build the emissive geometry (light) list for direct lighting ----
-    // Scan all geometries; any geometry whose material has emittance > 0 is
-    // a light source.  For each light, precompute:
-    //   - surface area (for PDF computation)
-    //   - emitted radiance = color * emittance (avoids device memory lookup later)
-    {
-        std::vector<LightInfo> h_lights;
-        float totalArea = 0.0f;
-        for (int i = 0; i < (int)scene->geoms.size(); i++)
-        {
-            const Material& mat = scene->materials[scene->geoms[i].materialid];
-            if (mat.emittance > 0.0f)
-            {
-                LightInfo li;
-                li.geomIndex      = i;
-                li.area           = computeGeomSurfaceArea(scene->geoms[i]);
-                li.inverseArea    = 1.0f / li.area;
-                li.emittedRadiance = mat.color * mat.emittance;
-                totalArea += li.area;
-                h_lights.push_back(li);
-            }
-        }
-
-        g_dev.numLights = (int)h_lights.size();
-        g_dev.totalLightArea = totalArea;
-
-        if (g_dev.numLights > 0)
-        {
-            cudaMalloc(&g_dev.lightInfos, g_dev.numLights * sizeof(LightInfo));
-            cudaMemcpy(g_dev.lightInfos, h_lights.data(),
-                       g_dev.numLights * sizeof(LightInfo),
-                       cudaMemcpyHostToDevice);
-        }
-    }
-    checkCUDAError("build light list");
+    checkCUDAError("copy geoms and materials");
 
     cudaMalloc(&g_dev.intersections, pixelcount * sizeof(ShadeableIntersection));
     cudaMemset(g_dev.intersections, 0, pixelcount * sizeof(ShadeableIntersection));
@@ -221,10 +186,6 @@ void pathtraceFree()
     cudaFree(g_dev.bloomBufA);     // bloom ping-pong buffer A
     cudaFree(g_dev.bloomBufB);     // bloom ping-pong buffer B
     cudaFree(g_dev.bloomWeights);  // bloom Gaussian weight buffer
-    cudaFree(g_dev.lightInfos);    // emissive-geometry descriptor array
-    g_dev.lightInfos = nullptr;
-    g_dev.numLights = 0;
-    g_dev.totalLightArea = 0.0f;
     StreamCompaction::Efficient::freeCompactionWorkspace();
 
     checkCUDAError("pathtraceFree");
@@ -311,16 +272,13 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         ShadingConfig shadingCfg = {
             traceDepth, hst_scene->state.rrMinBounces,
-            hst_scene->state.fresnelMode, g_opts.rngMode, cam, hst_scene->state.debug,
-            g_dev.numLights, g_dev.lightInfos, g_dev.geoms,
-            (int)hst_scene->geoms.size(), g_dev.totalLightArea
+            hst_scene->state.fresnelMode, g_opts.rngMode, cam, hst_scene->state.debug
         };
         prof.gpuStart(ProfilerOp::ShadeMaterial);
         LAUNCH_KERNEL_AUTO(shadeMaterial, num_paths,
             iter, num_paths,
             g_dev.intersections, g_dev.paths, g_dev.materials,
-            shadingCfg,
-            g_dev.image);
+            shadingCfg);
         prof.gpuStop(ProfilerOp::ShadeMaterial);
 
         bool allDead = compactActivePaths(num_paths);

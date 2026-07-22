@@ -60,7 +60,8 @@ constexpr int HALTON_NUM_DIMS = 16;
 
 // --- Halton dimension assignment ---
 // Each independent sampling decision in the pipeline gets a unique
-// dimension index.  All 16 available dimensions are now allocated:
+// dimension index.  Currently 10 dimensions allocated (0–9); 6 remain
+// available for future features (e.g., direct lighting).
 //
 //   Dim  Prime  Usage                          Location
 //   ---  -----  -----------------------------  ----------------------------
@@ -74,10 +75,6 @@ constexpr int HALTON_NUM_DIMS = 16;
 //    7    19    Specular lobe φ                samplePhongSpecularDir
 //    8    23    Fresnel roulette               scatterRay (refractive branch)
 //    9    29    Path Russian roulette          russianRouletteTerminate
-//   10    31    Light selection                sampleLightSource
-//   11    37    Light surface U / sphere θ     samplePointOnLight / sampleSphereSurface
-//   12    41    Light surface V / sphere φ     samplePointOnLight / sampleSphereSurface
-//   13    43    Light surface W / cube face    sampleCubeSurface (face selection)
 //   ---  -----  -----------------------------  ----------------------------
 
 /** Named constants for Halton dimension indices.
@@ -86,7 +83,7 @@ constexpr int HALTON_NUM_DIMS = 16;
  *    rng.next(HaltonDim::AaJitterX)     instead of  rng.next(0)
  *    rng.next(HaltonDim::DiffuseTheta)  instead of  rng.next(4)
  *
- *  Dimensions 10-12 are used for direct lighting (next-event estimation).
+ *  Dimensions 0-9 are allocated; 10-15 are reserved for future use.
  */
 namespace HaltonDim {
     constexpr int AaJitterX      = 0;
@@ -99,11 +96,6 @@ namespace HaltonDim {
     constexpr int SpecularPhi    = 7;
     constexpr int FresnelRR      = 8;
     constexpr int PathRR         = 9;
-    // --- Direct lighting (next-event estimation) ---
-    constexpr int LightSelect   = 10;   // prime 31: pick which emissive geometry
-    constexpr int LightSurfaceU = 11;   // prime 37: u coord on light surface
-    constexpr int LightSurfaceV = 12;   // prime 41: v coord on light surface
-    constexpr int LightSurfaceW = 13;   // prime 43: cube face selection (independent dim)
 }
 
 /**
