@@ -113,7 +113,7 @@ void deletePBO(GLuint* pbo)
         // unregister this buffer object with CUDA
         cudaGLUnregisterBufferObject(*pbo);
 
-        glBindBuffer(GL_ARRAY_BUFFER, pbo);
+        glBindBuffer(GL_ARRAY_BUFFER, *pbo);
         glDeleteBuffers(1, pbo);
 
         *pbo = (GLuint)NULL;
