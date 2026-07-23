@@ -18,7 +18,23 @@ struct Scene {
     std::vector<Material> materials;
     RenderState state;
 
-    // Flat array of all mesh triangles (object-space).  Each mesh geometry
-    // references a contiguous slice via Geom::meshTriangleOffset / ::count.
+    // Flat array of all mesh triangles (object-space).  Each mesh
+    // geometry references a contiguous slice via
+    // Geom::meshTriangleOffset / ::meshTriangleCount.
     std::vector<Triangle> hostTriangles;
 };
+
+// ---- Scene Statistics -------------------------------------------------
+// Lightweight descriptor of scene complexity.  Useful for startup
+// summary, ImGui overlay, and Profiler CSV metadata.
+
+struct SceneStats {
+    int numObjects    = 0;
+    int numMeshes     = 0;
+    int numSpheres    = 0;
+    int numCubes      = 0;
+    int numMaterials  = 0;
+    int numTriangles  = 0;
+};
+
+SceneStats computeSceneStats(const Scene& scene);

@@ -3,6 +3,7 @@
 #include "pathtrace.h"
 #include "profiler/profiler.h"
 #include "scene.h"
+#include "scene_loader.h"
 #include "sceneStructs.h"
 #include "utilities.h"
 #include "window_setup.h"  // init, initTextures, initCuda, initPBO, etc.
@@ -519,7 +520,7 @@ int main(int argc, char** argv)
     const char* sceneFile  = cfg.sceneFile.c_str();
 
     // Load scene file
-    scene = new Scene(sceneFile);
+    scene = new Scene(SceneLoader::loadFromJSON(sceneFile));
 
     //Create Instance for ImGUIData
     guiData = new GuiDataContainer();
@@ -576,6 +577,18 @@ int main(int argc, char** argv)
 
     // Print concise runtime summary before rendering
     printStartupSummary(profCfg);
+
+    // Scene complexity summary
+    {
+        SceneStats stats = computeSceneStats(*scene);
+        printf("  Scene objects: %d  (meshes: %d  spheres: %d  cubes: %d)\n",
+               stats.numObjects, stats.numMeshes,
+               stats.numSpheres, stats.numCubes);
+        printf("  Mesh triangles: %d\n", stats.numTriangles);
+        printf("  Materials: %d\n", stats.numMaterials);
+        printf("======================================================================\n");
+        printf("\n");
+    }
 
     // GLFW main loop
     mainLoop();
