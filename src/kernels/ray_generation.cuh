@@ -24,7 +24,7 @@
  * Depth of field:  thin-lens ray perturbation via RNG dim 2–3
  * Motion blur:     (not yet implemented — jitter ray "in time")
  */
-__global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments, int rngMode)
+__global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments, RngMode rngMode)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -47,7 +47,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         //   dim 1 (prime 3)  = AA jitter y
         //   dim 2 (prime 5)  = lens aperture u  (only when DoF is active)
         //   dim 3 (prime 7)  = lens aperture v  (only when DoF is active)
-        RngState rng = makeRngState(iter, index, 0, (RngMode)rngMode);
+        RngState rng = makeRngState(iter, index, 0, rngMode);
 
         // Anti-aliasing: stochastic sub-pixel jitter
         float jitterX = rng.next(HaltonDim::AaJitterX) - 0.5f;
