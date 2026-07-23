@@ -11,18 +11,6 @@
 #include <string>
 #include <vector>
 
-class GuiDataContainer
-{
-public:
-    GuiDataContainer() : TracedDepth(0) {}
-    int TracedDepth;
-
-    // Per-frame timing summary (populated by profiler, displayed by ImGui).
-    // Sized to match ProfilerOp::COUNT in profiler.h.
-    float perKernelMs[7] = {};
-    int   lastBounceCount = 0;
-};
-
 namespace utilityCore
 {
     extern float clamp(float f, float min, float max);

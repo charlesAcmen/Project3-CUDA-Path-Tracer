@@ -32,6 +32,19 @@ enum class ProfilerOp : int {
     COUNT
 };
 
+// Compile-time count of profiler operations.  Use this instead of
+// magic numbers in GUI data arrays.
+inline constexpr int kProfilerOpCount = static_cast<int>(ProfilerOp::COUNT);
+
+// ---- GUI Data Transfer Object ------------------------------------------
+// Thin channel from Profiler → ImGui.  Populated each frame by
+// Profiler::updateGuiData() and read by main.cpp's ImGui panel.
+struct GuiDataContainer {
+    int   TracedDepth             = 0;
+    float perKernelMs[kProfilerOpCount] = {};
+    int   lastBounceCount         = 0;
+};
+
 const char* profilerOpName(ProfilerOp op);
 
 // ---------------------------------------------------------------------------
@@ -129,8 +142,9 @@ public:
     bool enabled() const { return m_cfg.enabled; }
     bool verbose() const { return m_cfg.verbose; }
 
-    // ---- GUI data update ----
-    void updateGuiData(class GuiDataContainer* guiData);
+    // ---- GUI data ----
+    void updateGuiData();                            // sync internal timing → m_guiData
+    GuiDataContainer& guiData() { return m_guiData; }
 
 private:
     ProfilerConfig m_cfg;
@@ -150,6 +164,10 @@ private:
 
     // Current iteration context
     int m_currentIteration = 0;
+
+    // Inline GUI data — read by main.cpp::RenderImGui.
+    // No external pointer needed; Profiler owns it directly.
+    GuiDataContainer m_guiData;
 
     // Frame timing state
     std::chrono::high_resolution_clock::time_point m_frameStartTime;

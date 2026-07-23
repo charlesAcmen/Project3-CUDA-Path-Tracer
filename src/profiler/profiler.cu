@@ -1,5 +1,4 @@
 #include "profiler/profiler.h"
-#include "utilities.h"  // for GuiDataContainer
 
 #include <cstdio>
 #include <ctime>
@@ -258,14 +257,13 @@ void Profiler::endFrame()
 // ---------------------------------------------------------------------------
 // GUI data update
 // ---------------------------------------------------------------------------
-void Profiler::updateGuiData(GuiDataContainer* guiData)
+void Profiler::updateGuiData()
 {
-    if (!m_cfg.enabled || !guiData) return;
-
+    if (!m_cfg.enabled) return;
     // Reset timing array
-    const int numOps = static_cast<int>(ProfilerOp::COUNT);
+    const int numOps = kProfilerOpCount;
     for (int i = 0; i < numOps; ++i) {
-        guiData->perKernelMs[i] = 0.0f;
+        m_guiData.perKernelMs[i] = 0.0f;
     }
 
     // Sum up all timing records from the current iteration
@@ -273,14 +271,14 @@ void Profiler::updateGuiData(GuiDataContainer* guiData)
         if (rec.iteration == m_currentIteration) {
             int idx = static_cast<int>(rec.op);
             if (idx >= 0 && idx < numOps) {
-                guiData->perKernelMs[idx] += rec.time_ms;
+                m_guiData.perKernelMs[idx] += rec.time_ms;
             }
         }
     }
 
     // Update bounce count from the last recorded bounce
     if (!m_pathCounts.empty()) {
-        guiData->lastBounceCount = s_lastBounce + 1; // +1 because bounce is 0-indexed
+        m_guiData.lastBounceCount = s_lastBounce + 1; // +1 because bounce is 0-indexed
     }
 }
 
