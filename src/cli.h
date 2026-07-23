@@ -6,7 +6,7 @@
 
 #include "profiler/profiler.h"
 #include "pathtrace.h"       // getCompactMethod, setCompactMethod, etc.
-#include "sceneStructs.h"    // RenderState
+#include "sceneStructs.h"    // RenderState, CompactMethod, RngMode
 
 #include <algorithm>
 #include <cstdio>
@@ -32,9 +32,9 @@ struct CliConfig {
     ProfilerConfig profCfg;
     bool autoSave   = true;
     bool showHelp   = false;
-    bool hasScene   = false;
-    int  fresnelMode = 0;   // CLI override for RenderState::fresnelMode
-    bool fresnelSet  = false;
+    bool hasScene    = false;
+    FresnelMode fresnelMode = FresnelMode::Schlick;
+    bool fresnelSet = false;
     std::vector<int> saveAtIterations;  // auto-save at these iteration counts
 };
 
@@ -99,11 +99,10 @@ void printStartupSummary(const ProfilerConfig& profCfg)
     }
     const char* compactName = "Unknown";
     switch (profCfg.compactMethod) {
-        case 0: compactName = "Disabled (no compaction)"; break;
-        case 1: compactName = "Global-memory scan (custom)"; break;
-        case 2: compactName = "Thrust copy_if"; break;
-        case 3: compactName = "Shared-memory multi-block scan"; break;
-        default: compactName = "Shared-memory multi-block scan (default)"; break;
+        case CompactMethod::Off:        compactName = "Disabled (no compaction)"; break;
+        case CompactMethod::GlobalScan: compactName = "Global-memory scan (custom)"; break;
+        case CompactMethod::Thrust:     compactName = "Thrust copy_if"; break;
+        case CompactMethod::SharedMem:  compactName = "Shared-memory multi-block scan"; break;
     }
     printf("  Compact method: %s\n", compactName);
     printf("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
@@ -150,19 +149,19 @@ CliConfig parseFlags(int argc, char** argv)
             std::sort(cfg.saveAtIterations.begin(), cfg.saveAtIterations.end());
         } else if (arg.rfind("--compact=", 0) == 0) {
             int v = std::stoi(arg.substr(10));
-            cfg.profCfg.compactMethod = v;
-            setCompactMethod(v);
+            cfg.profCfg.compactMethod = static_cast<CompactMethod>(v);
+            setCompactMethod(static_cast<CompactMethod>(v));
         } else if (arg.rfind("--sort=", 0) == 0) {
             bool v = (std::stoi(arg.substr(7)) != 0);
             cfg.profCfg.sortByMaterial = v;
             setSortByMaterial(v);
         } else if (arg.rfind("--fresnel=", 0) == 0) {
             int v = std::stoi(arg.substr(10));
-            cfg.fresnelMode = (v == 1) ? 1 : 0;
+            cfg.fresnelMode = (v == 1) ? FresnelMode::Accurate : FresnelMode::Schlick;
             cfg.fresnelSet  = true;
         } else if (arg.rfind("--rng=", 0) == 0) {
             int v = std::stoi(arg.substr(6));
-            setRngMode(v);
+            setRngMode(static_cast<RngMode>(v));
         } else if (arg.rfind("--warmup=", 0) == 0) {
             cfg.profCfg.warmupIters = std::stoi(arg.substr(9));
         }
