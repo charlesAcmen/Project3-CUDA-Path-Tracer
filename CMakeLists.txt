@@ -69,6 +69,7 @@ set(headers
     src/profiler/profiler.h
     src/rng/rng.h
     src/scene.h
+    src/scene_loader.h
     src/sceneStructs.h
     src/utilities.h
 )
@@ -83,6 +84,7 @@ set(sources
     src/intersections.cu
     src/interactions/interactions.cu
     src/scene.cpp
+    src/scene_loader.cpp
     src/utilities.cu
 )
 list(SORT headers)
