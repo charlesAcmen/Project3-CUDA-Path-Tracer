@@ -18,6 +18,9 @@ AGENTS.md
 build
 # /docs
 *.csv
+
+# User-local runtime config (not checked in)
+config.local.json
 /profiler_output
 # /scenes
 *.pdf
