@@ -109,9 +109,10 @@ void printStartupSummary(const ProfilerConfig& profCfg)
     }
     printf("  Compact method: %s\n", compactName);
     printf("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
-    const char* fresnelName = (renderState->fresnelMode == 1 ? "Accurate" : "Schlick");
+    const char* fresnelName = (renderState->fresnelMode == FresnelMode::Accurate
+                               ? "Accurate" : "Schlick");
     printf("  Fresnel mode: %s\n", fresnelName);
-    const char* rngName = (getRngMode() == 1 ? "Scrambled Halton" : "LCG");
+    const char* rngName = (getRngMode() == RngMode::HALTON ? "Scrambled Halton" : "LCG");
     printf("  RNG mode: %s\n", rngName);
     printf("  Auto-save final image: %s\n", g_autoSave ? "yes" : "no");
     printf("======================================================================\n");
