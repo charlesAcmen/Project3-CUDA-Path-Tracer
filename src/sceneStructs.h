@@ -113,12 +113,28 @@ struct DebugConfig
 // POD projection of RenderState fields for GPU kernel parameters.
 // Does NOT own data — RenderState is the single source of truth.
 // Assembled locally at kernel launch time from hst_scene->state.
+// ---- Typed enums for runtime configuration ---------------------------
+// Numeric values match the legacy --compact=N / --rng=N
+// CLI flags so existing usage is backwards-compatible.
+
+enum class CompactMethod : int {
+    Off        = 0,
+    GlobalScan = 1,
+    Thrust     = 2,
+    SharedMem  = 3
+};
+
+enum class RngMode : int {
+    LCG    = 0,
+    HALTON = 1
+};
+
 struct ShadingConfig
 {
-    int traceDepth;
-    int rrMinBounces;    // guaranteed bounces before Russian roulette
-    int fresnelMode;     // 0=Schlick, 1=Accurate
-    int rngMode;         // 0=LCG, 1=scrambled Halton
+    int           traceDepth;
+    int           rrMinBounces;    // guaranteed bounces before Russian roulette
+    FresnelMode   fresnelMode;     // Schlick / Accurate
+    RngMode       rngMode;         // LCG / Halton
     Camera cam;
     DebugConfig debug;
 };
