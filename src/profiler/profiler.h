@@ -5,6 +5,8 @@
 #include <vector>
 #include <cuda_runtime.h>
 
+#include "sceneStructs.h"   // CompactMethod, FresnelMode, RngMode
+
 // ---------------------------------------------------------------------------
 // Enumeration of every measurable operation.
 // Starter-code kernels previously excluded are now measured when they are
@@ -53,8 +55,8 @@ struct ProfilerConfig {
     // 
     // This ensures CSV metadata always matches actual runtime configuration, and you only
     // need to change defaults in ONE place (pathtrace.cu).
-    int         compactMethod  = 3;       // 0=none, 1=global-mem scan, 2=Thrust, 3=shared-mem scan (default)
-    bool        sortByMaterial = false;   // placeholder, auto-synced from pathtrace.cu
+    CompactMethod compactMethod  = CompactMethod::SharedMem;
+    bool          sortByMaterial = false;
 };
 
 // ---------------------------------------------------------------------------

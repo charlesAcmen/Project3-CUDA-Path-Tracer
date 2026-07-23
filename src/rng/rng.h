@@ -1,5 +1,7 @@
 #pragma once
 
+#include "sceneStructs.h"   // RngMode, shared with ShadingConfig
+
 /**
  * @file rng.h
  * @brief Unified random number generation for GPU Monte Carlo path tracing.
@@ -133,13 +135,9 @@ __host__ __device__ inline int getHaltonPrime(int dim) {
 constexpr int MAX_DRAWS_PER_BOUNCE = 8;
 
 // ============================================================================
-// RNG mode selection
+// RNG mode selection  (RngMode defined in sceneStructs.h, shared with
+// ShadingConfig and PathTracerOptions)
 // ============================================================================
-
-enum class RngMode : int {
-    LCG    = 0,  // thrust::default_random_engine (backward compatible)
-    HALTON = 1   // Cranley-Patterson scrambled Halton
-};
 
 // ============================================================================
 // Halton radical inverse

@@ -108,7 +108,7 @@ __global__ void shadeMaterial(
         {
             int bounceNum = config.traceDepth - pathSegment.remainingBounces;
             RngState rngScatter = makeRngState(iter, pathSegment.pixelIndex,
-                bounceNum * MAX_DRAWS_PER_BOUNCE, (RngMode)config.rngMode);
+                bounceNum * MAX_DRAWS_PER_BOUNCE, config.rngMode);
 
             Material material = materials[intersection.materialId];
 

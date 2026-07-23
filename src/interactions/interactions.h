@@ -17,7 +17,7 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
 
 __host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2);
 __host__ __device__ float fresnelAccurate(float cosThetaI, float n1, float n2);
-__host__ __device__ float selectFresnelEvaluator(int fresnelMode, float cosThetaI, float n1, float n2);
+__host__ __device__ float selectFresnelEvaluator(FresnelMode fresnelMode, float cosThetaI, float n1, float n2);
 __host__ __device__ HitSide classifyRefraction(
     glm::vec3 rayDir,
     glm::vec3 surfaceNormal,
@@ -57,7 +57,7 @@ __host__ __device__ void scatterRay(
     glm::vec3 normal,
     const Material& m,
     RngState& rng,
-    int fresnelMode);
+    FresnelMode fresnelMode);
 
 // Glossy specular: samples a direction around the reflected direction
 // using a Phong lobe with the given exponent.

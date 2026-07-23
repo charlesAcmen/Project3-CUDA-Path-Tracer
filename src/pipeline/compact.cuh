@@ -46,7 +46,7 @@ static int compactCoreSharedMem(int n, PathSegment* dst, const PathSegment* src)
  * Gather terminated path colors into the accumulation buffer, then
  * stream-compact the PathSegment array to remove dead entries.
  *
- * Compaction is only applied when g_opts.compactMethod != 0.
+ * Compaction is only applied when g_opts.compactMethod != CompactMethod::Off.
  * Uses ping-pong buffers (g_dev.paths <-> g_dev.pathsCompacted)
  * to avoid a separate allocation per bounce.
  *
@@ -59,7 +59,7 @@ static bool compactActivePaths(int& num_paths)
     Profiler& prof = g_profiler();
 
     // Compaction disabled → nothing to do
-    if (g_opts.compactMethod == 0) {
+    if (g_opts.compactMethod == CompactMethod::Off) {
         return false;
     }
 
@@ -78,9 +78,9 @@ static bool compactActivePaths(int& num_paths)
     //    cudaMemcpy for the survivor count).
     prof.cpuStart(ProfilerOp::CompactPaths);
     int survivors = 0;
-    if (g_opts.compactMethod == 1) {
+    if (g_opts.compactMethod == CompactMethod::GlobalScan) {
         survivors = compactCoreGlobalMem(num_paths, g_dev.pathsCompacted, g_dev.paths);
-    } else if (g_opts.compactMethod == 2) {
+    } else if (g_opts.compactMethod == CompactMethod::Thrust) {
         survivors = compactCoreThrust(num_paths, g_dev.pathsCompacted, g_dev.paths);
     } else {
         survivors = compactCoreSharedMem(num_paths, g_dev.pathsCompacted, g_dev.paths);
