@@ -1,4 +1,5 @@
 #include "cli.h"           // CliConfig, parseFlags, printStartupHelp, printStartupSummary
+#include "config.h"        // loadConfigFile
 #include "image.h"
 #include "pathtrace.h"
 #include "profiler/profiler.h"
@@ -476,6 +477,10 @@ void mainLoop()
 int main(int argc, char** argv)
 {
     startTimeString = currentTimeString();
+
+    // Load config.local.json (lowest priority) — CLI flags below override.
+    // If config.local.json doesn't exist this is a no-op (code defaults).
+    loadConfigFile("");
 
     if (argc < 2)
     {

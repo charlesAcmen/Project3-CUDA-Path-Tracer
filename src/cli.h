@@ -4,6 +4,7 @@
 // CLI argument parsing and startup output.
 // ====================================================================
 
+#include "config.h"          // loadConfigFile
 #include "profiler/profiler.h"
 #include "pathtrace.h"       // getCompactMethod, setCompactMethod, etc.
 #include "sceneStructs.h"    // RenderState, CompactMethod, RngMode
@@ -67,6 +68,8 @@ void printStartupHelp(const char* exeName)
     printf("                   (default: yes)\n");
     printf("    --save-at=N1,N2,...  Auto-save at specific iteration counts\n");
     printf("                   (e.g., --save-at=50,200,1000).  Implies --save.\n");
+    printf("    --config=PATH  Load runtime config from a JSON file.\n");
+    printf("                   Default: config.local.json in CWD.\n");
     printf("    -h, --help     Show this help text.\n");
     printf("\n");
     printf("  Notes:\n");
@@ -147,6 +150,10 @@ CliConfig parseFlags(int argc, char** argv)
                 }
             }
             std::sort(cfg.saveAtIterations.begin(), cfg.saveAtIterations.end());
+        } else if (arg.rfind("--config=", 0) == 0) {
+            // --config loads at parse time (lowest priority), so later
+            // --compact / --sort / --rng flags override it naturally.
+            loadConfigFile(arg.substr(9));
         } else if (arg.rfind("--compact=", 0) == 0) {
             int v = std::stoi(arg.substr(10));
             cfg.profCfg.compactMethod = static_cast<CompactMethod>(v);
