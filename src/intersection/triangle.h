@@ -60,7 +60,7 @@ __device__ inline bool triangleIntersectionTest(
     if (v < 0.0f || u + v > 1.0f) return false;
 
     float t = f * glm::dot(e2, q);
-    if (t < 0.0f) return false;
+    if (t < EPSILON) return false;
 
     outT = t;
 
