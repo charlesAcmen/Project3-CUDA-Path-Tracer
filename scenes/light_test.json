@@ -1,0 +1,29 @@
+{
+    "Materials": {
+        "light": {
+            "TYPE": "Emitting",
+            "RGB": [1.0, 1.0, 1.0],
+            "EMITTANCE": 5.0
+        }
+    },
+    "Camera": {
+        "RES": [800, 800],
+        "FOVY": 45.0,
+        "ITERATIONS": 10000,
+        "DEPTH": 4,
+        "FILE": "light_test",
+        "EYE": [0.0, 5.0, 10.5],
+        "LOOKAT": [0.0, 5.0, 0.0],
+        "UP": [0.0, 1.0, 0.0]
+    },
+    "Objects": [
+        {
+            "TYPE": "mesh",
+            "MATERIAL": "light",
+            "FILE": "models/cube.obj",
+            "TRANS": [0.0, 5.0, 0.0],
+            "ROTAT": [0.0, 0.0, 0.0],
+            "SCALE": [3.0, 0.3, 3.0]
+        }
+    ]
+}

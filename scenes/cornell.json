@@ -5,7 +5,7 @@
         {
             "TYPE":"Emitting",
             "RGB":[1.0, 1.0, 1.0],
-            "EMITTANCE":5.0
+            "EMITTANCE":20.0
         },
         "diffuse_white":
         {
@@ -44,50 +44,57 @@
     "Objects":
     [
         {
-            "TYPE":"cube",
+            "TYPE":"mesh",
             "MATERIAL":"light",
+            "FILE":"models/light.obj",
             "TRANS":[0.0,10.0,0.0],
             "ROTAT":[0.0,0.0,0.0],
             "SCALE":[3.0,0.3,3.0]
         },
         {
-            "TYPE":"cube",
+            "TYPE":"mesh",
             "MATERIAL":"diffuse_white",
+            "FILE":"models/cube.obj",
             "TRANS":[0.0,0.0,0.0],
             "ROTAT":[0.0,0.0,0.0],
             "SCALE":[10.0,0.01,10.0]
         },
         {
-            "TYPE":"cube",
+            "TYPE":"mesh",
             "MATERIAL":"diffuse_white",
+            "FILE":"models/cube.obj",
             "TRANS":[0.0,10.0,0.0],
             "ROTAT":[0.0,0.0,90.0],
             "SCALE":[0.01,10.0,10.0]
         },
         {
-            "TYPE":"cube",
+            "TYPE":"mesh",
             "MATERIAL":"diffuse_white",
+            "FILE":"models/cube.obj",
             "TRANS":[0.0,5.0,-5.0],
             "ROTAT":[0.0,90.0,0.0],
             "SCALE":[0.01,10.0,10.0]
         },
         {
-            "TYPE":"cube",
+            "TYPE":"mesh",
             "MATERIAL":"diffuse_red",
+            "FILE":"models/cube.obj",
             "TRANS":[-5.0,5.0,0.0],
             "ROTAT":[0.0,0.0,0.0],
             "SCALE":[0.01,10.0,10.0]
         },
         {
-            "TYPE":"cube",
+            "TYPE":"mesh",
             "MATERIAL":"diffuse_green",
+            "FILE":"models/cube.obj",
             "TRANS":[5.0,5.0,0.0],
             "ROTAT":[0.0,0.0,0.0],
             "SCALE":[0.01,10.0,10.0]
         },
         {
-            "TYPE":"sphere",
+            "TYPE":"mesh",
             "MATERIAL":"diffuse_white",
+            "FILE":"models/sphere.obj",
             "TRANS":[-1.0,4.0,-1.0],
             "ROTAT":[0.0,0.0,0.0],
             "SCALE":[3.0,3.0,3.0]
