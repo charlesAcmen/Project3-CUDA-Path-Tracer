@@ -108,10 +108,11 @@ __global__ void computeIntersections(
 
         if (!hit) continue;
 
-        // ---- Record closest hit (world space) ----
-        // Surface point:   transform object-space hit via geom.transform
-        // Surface normal:  transform via invTranspose (preserves
-        //                  orthogonality under non-uniform scaling).
+        // ---- Record closest hit (world-space) ----
+        // Only overwrite if this mesh's closest triangle is nearer than
+        // the best hit found so far across all geometries.
+        if (closestT >= t_min) continue;
+
         t_min = closestT;
         hit_geom_index = i;
         hit_normal = glm::normalize(multiplyMV(
