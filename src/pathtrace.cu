@@ -45,7 +45,6 @@
 static PathTracerOptions g_opts;
 static DeviceBuffers g_dev;
 static Scene* hst_scene = NULL;
-static GuiDataContainer* guiData = NULL;
 static bool s_initialized = false;
 
 // ====================================================================
@@ -103,13 +102,8 @@ float getVignetteExponent()                  { return g_opts.vignette.exponent; 
 #include "pipeline/postprocess.cuh"   // calls sendImageToPBO from accumulation
 
 // ====================================================================
-// Data Container & Resource Management
+// Resource Management
 // ====================================================================
-
-void InitDataContainer(GuiDataContainer* imGuiData)
-{
-    guiData = imGuiData;
-}
 
 void pathtraceInit(Scene* scene)
 {
@@ -201,10 +195,11 @@ static void debugPrintBounce(int iter, int depth, int num_paths) {
     }
 }
 
-// Update the ImGui trace-depth display and per-kernel timing after each frame.
-static void updateGuiAfterFrame(Profiler& prof, GuiDataContainer* gui) {
-    if (prof.enabled() && gui != NULL) {
-        prof.updateGuiData(gui);
+// Update the ImGui trace-depth display after each frame.
+// Per-kernel timing is synced by Profiler::updateGuiData() internally.
+static void updateGuiAfterFrame(Profiler& prof) {
+    if (prof.enabled()) {
+        prof.updateGuiData();
     }
 }
 
@@ -313,5 +308,5 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     checkCUDAError("pathtrace");
 
     prof.endIteration();
-    updateGuiAfterFrame(prof, guiData);
+    updateGuiAfterFrame(prof);
 }
