@@ -1,7 +1,6 @@
 #pragma once
 
 #include "scene.h"
-#include "utilities.h"
 
 // ====================================================================
 // Organizing structures for the path tracer's GPU resources and
