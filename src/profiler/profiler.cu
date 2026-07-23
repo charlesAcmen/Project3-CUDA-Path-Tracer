@@ -329,7 +329,7 @@ void Profiler::writeTimingCSV(const std::string& filepath)
           << profilerOpName(r.op) << ","
           << r.time_ms << ","
           << r.num_active_paths << ","
-          << m_cfg.compactMethod << ","
+          << static_cast<int>(m_cfg.compactMethod) << ","
           << (m_cfg.sortByMaterial ? 1 : 0) << "\n";
     }
 }
@@ -349,7 +349,7 @@ void Profiler::writePathSurvivalCSV(const std::string& filepath)
         f << p.iteration << ","
           << p.bounce << ","
           << p.num_paths << ","
-          << m_cfg.compactMethod << ","
+          << static_cast<int>(m_cfg.compactMethod) << ","
           << (m_cfg.sortByMaterial ? 1 : 0) << "\n";
     }
 }
@@ -425,7 +425,7 @@ void Profiler::writeFrameTimesCSV(const std::string& filepath)
     {
         f << r.iteration << ","
           << r.frame_time_ms << ","
-          << m_cfg.compactMethod << ","
+          << static_cast<int>(m_cfg.compactMethod) << ","
           << (m_cfg.sortByMaterial ? 1 : 0) << "\n";
     }
 }
