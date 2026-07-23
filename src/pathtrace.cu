@@ -66,6 +66,8 @@ void  setBloomIntensity(float v)    { g_opts.bloom.intensity = v; }
 float getBloomIntensity()           { return g_opts.bloom.intensity; }
 void  setBloomRadius(int v)         { if (v != g_opts.bloom.radius) { g_opts.bloom.radius = v; g_opts.bloom.sigma = v * 0.5f; } }
 int   getBloomRadius()              { return g_opts.bloom.radius; }
+void  setBloomSigma(float v)        { g_opts.bloom.sigma = v; }
+float getBloomSigma()               { return g_opts.bloom.sigma; }
 void  setRngMode(RngMode mode)      { g_opts.rngMode = mode; }
 RngMode getRngMode()                { return g_opts.rngMode; }
 void  setChromaticAberrationEnabled(bool v)  { g_opts.chromaticAberration.enabled = v; }
@@ -106,7 +108,6 @@ float getVignetteExponent()                  { return g_opts.vignette.exponent; 
 void pathtraceInit(Scene* scene)
 {
     hst_scene = scene;
-    setCompactMethod(g_opts.compactMethod);
 
     const Camera& cam = hst_scene->state.camera;
     const int pixelcount = cam.resolution.x * cam.resolution.y;

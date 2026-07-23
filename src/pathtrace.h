@@ -85,6 +85,8 @@ void setBloomIntensity(float intensity);
 float getBloomIntensity();
 void setBloomRadius(int radius);
 int  getBloomRadius();
+void setBloomSigma(float sigma);
+float getBloomSigma();
 
 // Chromatic Aberration runtime configuration
 void setChromaticAberrationEnabled(bool enable);

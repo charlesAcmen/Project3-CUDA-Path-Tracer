@@ -123,8 +123,20 @@ CliConfig parseFlags(int argc, char** argv)
 {
     CliConfig cfg;
 
-    // Seed ProfilerConfig with runtime defaults from pathtrace.cu, so that
-    // CSV metadata matches actual behaviour even when no CLI flag is given.
+    // ---- Pre-scan: process --config= FIRST so its values are always
+    // lowest priority regardless of argument order.  Individual flags
+    // like --compact / --sort / --rng / --fresnel override it later.
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a.rfind("--config=", 0) == 0) {
+            loadConfigFile(a.substr(9));
+            break;  // only the first --config= matters
+        }
+    }
+
+    // Seed ProfilerConfig with current runtime state (now including any
+    // config file values loaded above).  CSV metadata will match
+    // runtime behaviour automatically.
     cfg.profCfg.compactMethod  = getCompactMethod();
     cfg.profCfg.sortByMaterial = getSortByMaterial();
 
@@ -152,9 +164,8 @@ CliConfig parseFlags(int argc, char** argv)
             }
             std::sort(cfg.saveAtIterations.begin(), cfg.saveAtIterations.end());
         } else if (arg.rfind("--config=", 0) == 0) {
-            // --config loads at parse time (lowest priority), so later
-            // --compact / --sort / --rng flags override it naturally.
-            loadConfigFile(arg.substr(9));
+            // Already handled in the pre-scan above — skip.
+            continue;
         } else if (arg.rfind("--compact=", 0) == 0) {
             int v = std::stoi(arg.substr(10));
             cfg.profCfg.compactMethod = static_cast<CompactMethod>(v);

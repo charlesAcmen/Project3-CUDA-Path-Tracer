@@ -50,6 +50,7 @@ void loadConfigFile(const std::string& explicitPath)
         if (b.contains("threshold")) setBloomThreshold(b["threshold"].get<float>());
         if (b.contains("intensity")) setBloomIntensity(b["intensity"].get<float>());
         if (b.contains("radius"))    setBloomRadius(b["radius"].get<int>());
+        if (b.contains("sigma"))     setBloomSigma(b["sigma"].get<float>());
     }
 
     // Chromatic aberration
