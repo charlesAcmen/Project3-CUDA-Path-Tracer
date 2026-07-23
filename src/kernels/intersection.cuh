@@ -60,7 +60,7 @@ __global__ void computeIntersections(
 
     PathSegment pathSegment = pathSegments[path_index];
 
-    float t_min = FLT_MAX;
+    float t_min = LARGE_T;
     int   hit_geom_index = -1;
     glm::vec3 hit_normal;
 
@@ -85,7 +85,7 @@ __global__ void computeIntersections(
         if (deviceTriangles == nullptr || geom.meshTriangleCount <= 0)
             continue;
 
-        float closestT = 1e30f;
+        float closestT = LARGE_T;
         bool  hit = false;
         glm::vec3 objNormal;
 

@@ -14,3 +14,4 @@
 #define ROUGHNESS_THRESHOLD 0.001f
 #define RR_P_MIN          0.2f
 #define RR_P_MAX          1.0f
+#define LARGE_T           1e30f       // sentinel > any valid ray–scene intersection
