@@ -258,7 +258,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         prof.gpuStart(ProfilerOp::ComputeIntersections);
         LAUNCH_KERNEL_AUTO(computeIntersections, num_paths,
             depth, num_paths, g_dev.paths,
-            g_dev.geoms, hst_scene->geoms.size(), g_dev.intersections);
+            g_dev.geoms, hst_scene->geoms.size(), g_dev.intersections,
+            g_dev.deviceTriangles);
         prof.gpuStop(ProfilerOp::ComputeIntersections);
         checkCUDAError("trace one bounce");
         depth++;
@@ -272,7 +273,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         ShadingConfig shadingCfg = {
             traceDepth, hst_scene->state.rrMinBounces,
-            hst_scene->state.fresnelMode, g_opts.rngMode, cam, hst_scene->state.debug
+            hst_scene->state.fresnelMode,
+            g_opts.rngMode, cam, hst_scene->state.debug
         };
         prof.gpuStart(ProfilerOp::ShadeMaterial);
         LAUNCH_KERNEL_AUTO(shadeMaterial, num_paths,
@@ -285,15 +287,13 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         done = allDead || (depth >= traceDepth);
 
         debugPrintBounce(iter, depth, num_paths);
-
-        if (guiData != NULL)
-            guiData->TracedDepth = depth;
+        g_profiler().guiData().TracedDepth = depth;
     }
 
     // ---- 3. Accumulation (only needed when compaction is disabled) -------
     // When compaction is on, all terminated paths were already gathered
     // by gatherTerminatedPaths inside compactActivePaths.
-    if (g_opts.compactMethod == 0)
+    if (g_opts.compactMethod == CompactMethod::Off)
     {
         dim3 numBlocks((pixelcount + blockSize1d - 1) / blockSize1d);
         LAUNCH_KERNEL_AUTO(finalGather, pixelcount,

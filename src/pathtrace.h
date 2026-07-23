@@ -10,7 +10,6 @@
 // ====================================================================
 
 // All GPU device buffers owned by the path tracer.
-// Previously 9 separate static dev_* pointers in pathtrace.cu.
 struct DeviceBuffers {
     glm::vec3*              image               = nullptr;
     PathSegment*            paths               = nullptr;
@@ -44,38 +43,36 @@ struct BloomConfig {
 // Chromatic Aberration post-processing configuration
 // 色差
 struct ChromaticAberrationConfig {
-    bool  enabled   = false;      // disabled by default
+    bool  enabled   = false;
     float intensity = 0.003f;     // radial shift magnitude (UV fraction)
 };
 
 // Vignette (corner darkening) post-processing configuration
 struct VignetteConfig {
-    bool  enabled   = false;      // disabled by default
-    float intensity = 0.5f;       // darkness at corners (0=none, 1=full black)
-    float exponent  = 2.0f;       // radial falloff power (higher=sharper falloff)
+    bool  enabled   = false;
+    float intensity = 0.5f;       // darkness at corners
+    float exponent  = 2.0f;       // radial falloff power
 };
 
 // Runtime-configurable options for the path tracing pipeline.
-// Previously individual g_compactMethod / g_sortByMaterial statics.
-// (autoSave was moved to main.cpp — it is an application-level concern.)
 struct PathTracerOptions {
-    int  compactMethod  = 3;     // 0=off, 1=global scan, 2=Thrust, 3=shared-mem (default)
-    bool sortByMaterial = false; // group paths by materialId before shading (default off — see docs/benchmarking-guide.md)
-    int  rngMode        = 1;     // 0=LCG (default, backward compat), 1=scrambled Halton
-    BloomConfig bloom;           // bloom post-processing settings
-    ChromaticAberrationConfig chromaticAberration;  // chromatic aberration settings
-    VignetteConfig vignette;                         // vignette settings
+    CompactMethod     compactMethod    = CompactMethod::SharedMem;
+    bool              sortByMaterial   = false;
+    RngMode           rngMode          = RngMode::LCG;
+    BloomConfig       bloom;
+    ChromaticAberrationConfig chromaticAberration;
+    VignetteConfig    vignette;
 };
 
 void InitDataContainer(GuiDataContainer* guiData);
 void pathtraceInit(Scene *scene);
 void pathtraceFree();
-void pathtrace(uchar4 *pbo, int frame, int iteration);
+void pathtrace(uchar4* pbo, int frame, int iteration);
 
-// Runtime configuration overrides (call before pathtraceInit)
-void setCompactMethod(int method);
+// Runtime configuration overrides — called before pathtraceInit or at runtime.
+void setCompactMethod(CompactMethod method);
+CompactMethod getCompactMethod();
 void setSortByMaterial(bool enable);
-int  getCompactMethod();
 bool getSortByMaterial();
 
 // Bloom runtime configuration
@@ -102,6 +99,5 @@ float getVignetteIntensity();
 void setVignetteExponent(float exponent);
 float getVignetteExponent();
 
-// RNG mode: 0 = LCG (default), 1 = scrambled Halton
-void setRngMode(int mode);
-int  getRngMode();
+void setRngMode(RngMode mode);
+RngMode getRngMode();
