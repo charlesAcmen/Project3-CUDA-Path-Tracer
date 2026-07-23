@@ -11,7 +11,8 @@
 // ====================================================================
 
 #include "sceneStructs.h"
-#include "intersections.h"   // boxIntersectionTest, sphereIntersectionTest
+#include "intersection/intersections.h"   // multiplyMV
+#include "intersection/triangle.h"  // triangleIntersectionTest
 
 /**
  * Dispatch a single geometry intersection test based on type.

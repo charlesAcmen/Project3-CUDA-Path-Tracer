@@ -9,7 +9,7 @@
 
 #include "sceneStructs.h"
 #include "rng/rng.h"
-#include "intersections.h"  // concentricSampleDisk
+#include "intersection/intersections.h"   // concentricSampleDisk
 
 /**
  * Generate initial PathSegments with camera rays through each pixel.

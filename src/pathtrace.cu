@@ -21,7 +21,7 @@
 #include "glm/glm.hpp"
 #include "glm/gtx/norm.hpp"
 
-#include "intersections.h"   // getPointOnRay, getExactPointOnRay, concentricSampleDisk
+#include "intersection/intersections.h"   // getPointOnRay, getExactPointOnRay, concentricSampleDisk
 #include "interactions/interactions.h"    // scatterRay, fresnel*, classifyRefraction
 #include "profiler/profiler.h"
 #include "kernel_config.h"
