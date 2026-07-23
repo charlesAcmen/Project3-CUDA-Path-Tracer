@@ -187,10 +187,10 @@ void RenderImGui()
         ImGui::Separator();
         ImGui::Separator();
         ImGui::Text("RNG Mode:");
-        int currentRng = getRngMode();
-        if (ImGui::RadioButton("LCG", &currentRng, 0))  { setRngMode(0); camchanged = true; }
+        int currentRng = static_cast<int>(getRngMode());
+        if (ImGui::RadioButton("LCG", &currentRng, 0))  { setRngMode(RngMode::LCG); camchanged = true; }
         ImGui::SameLine();
-        if (ImGui::RadioButton("Halton", &currentRng, 1)) { setRngMode(1); camchanged = true; }
+        if (ImGui::RadioButton("Halton", &currentRng, 1)) { setRngMode(RngMode::HALTON); camchanged = true; }
 
         ImGui::Separator();
         ImGui::Text("Bloom:");
