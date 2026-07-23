@@ -64,7 +64,7 @@ set(headers
     src/config.h
     src/image.h
     src/interactions/interactions.h
-    src/intersections.h
+    src/intersection/intersections.h
     src/glslUtility.hpp
     src/pathtrace.h
     src/profiler/profiler.h
@@ -83,7 +83,7 @@ set(sources
     src/glslUtility.cpp
     src/pathtrace.cu
     src/profiler/profiler.cu
-    src/intersections.cu
+    src/intersection/intersections.cu
     src/interactions/interactions.cu
     src/scene.cpp
     src/scene_loader.cpp

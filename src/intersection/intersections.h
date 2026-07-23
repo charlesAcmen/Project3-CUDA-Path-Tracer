@@ -1,5 +1,17 @@
 #pragma once
 
+// ====================================================================
+// Ray Utility Functions & Legacy Intersection Declarations
+//
+// Provides getPointOnRay, multiplyMV, and concentricSampleDisk used by
+// the kernel code.  Also declares boxIntersectionTest and
+// sphereIntersectionTest (implemented in intersections.cu) — these are
+// preserved for reference but are NOT called by the path tracer, which
+// uses only triangle-mesh intersection (intersection/triangle.h).
+//
+// All geometries should be triangulated at load time.
+// ====================================================================
+
 #include "constants.h"
 #include "sceneStructs.h"
 
