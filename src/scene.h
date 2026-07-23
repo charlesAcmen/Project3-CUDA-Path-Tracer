@@ -1,22 +1,20 @@
 #pragma once
 
+// ====================================================================
+// Scene Data Container
+//
+// Pure data — no parsing, no file I/O.  Populated by SceneLoader or
+// constructed programmatically for testing.
+//
+// Mesh triangles live in a flat hostTriangles vector; each Geom with
+// type == MESH references a slice via meshTriangleOffset / ::count.
+// ====================================================================
+
 #include "sceneStructs.h"
 #include <vector>
 
-class Scene
-{
-private:
-    void loadFromJSON(const std::string& jsonName);
-
-    // Load a single OBJ file and append its triangles into hostTriangles.
-    // Returns (offset, count) into hostTriangles for the loaded mesh.
-    // objPath is resolved relative to the JSON scene file's directory.
-    std::pair<int, int> loadOBJ(const std::string& objPath);
-
-public:
-    Scene(std::string filename);
-
-    std::vector<Geom> geoms;
+struct Scene {
+    std::vector<Geom>     geoms;
     std::vector<Material> materials;
     RenderState state;
 
