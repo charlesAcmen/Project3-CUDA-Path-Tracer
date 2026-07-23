@@ -58,7 +58,6 @@ glm::vec3 cameraPosition;
 glm::vec3 ogLookAt; // for recentering the camera
 
 Scene* scene;
-GuiDataContainer* guiData;
 RenderState* renderState;
 int iteration;
 
@@ -76,7 +75,6 @@ GLuint pbo;
 GLuint displayImage;
 
 GLFWwindow* window;
-GuiDataContainer* imguiData = NULL;
 ImGuiIO* io = nullptr;
 bool mouseOverImGuiWinow = false;
 
@@ -127,10 +125,6 @@ void saveImage()
 // ImGui Panel
 // ====================================================================
 
-void InitImguiData(GuiDataContainer* guiData)
-{
-    imguiData = guiData;
-}
 
 
 void RenderImGui()
@@ -143,20 +137,20 @@ void RenderImGui()
 
     ImGui::Begin("Path Tracer Analytics");
 
-    ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
+    ImGui::Text("Traced Depth %d", g_profiler().guiData().TracedDepth);
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
     if (g_profiler().enabled()) {
         ImGui::Separator();
         ImGui::Text("Per-Kernel Timing (last frame):");
-        ImGui::Text("  ComputeIntersections:  %.3f ms", imguiData->perKernelMs[4]);
-        ImGui::Text("  ShadeMaterial:         %.3f ms", imguiData->perKernelMs[0]);
-        ImGui::Text("  GatherTerminatedPaths: %.3f ms", imguiData->perKernelMs[1]);
-        ImGui::Text("  SortByMaterial:        %.3f ms", imguiData->perKernelMs[2]);
-        ImGui::Text("  CompactPaths:          %.3f ms", imguiData->perKernelMs[3]);
-        ImGui::Text("  BloomPass:             %.3f ms", imguiData->perKernelMs[5]);
-        ImGui::Text("  PostProcessTail:       %.3f ms", imguiData->perKernelMs[6]);
-        ImGui::Text("Bounces Last Frame: %d", imguiData->lastBounceCount);
+        ImGui::Text("  ComputeIntersections:  %.3f ms", g_profiler().guiData().perKernelMs[4]);
+        ImGui::Text("  ShadeMaterial:         %.3f ms", g_profiler().guiData().perKernelMs[0]);
+        ImGui::Text("  GatherTerminatedPaths: %.3f ms", g_profiler().guiData().perKernelMs[1]);
+        ImGui::Text("  SortByMaterial:        %.3f ms", g_profiler().guiData().perKernelMs[2]);
+        ImGui::Text("  CompactPaths:          %.3f ms", g_profiler().guiData().perKernelMs[3]);
+        ImGui::Text("  BloomPass:             %.3f ms", g_profiler().guiData().perKernelMs[5]);
+        ImGui::Text("  PostProcessTail:       %.3f ms", g_profiler().guiData().perKernelMs[6]);
+        ImGui::Text("Bounces Last Frame: %d", g_profiler().guiData().lastBounceCount);
     }
 
     if (renderState != nullptr) {
@@ -512,9 +506,6 @@ int main(int argc, char** argv)
     // Load scene file
     scene = new Scene(SceneLoader::loadFromJSON(sceneFile));
 
-    //Create Instance for ImGUIData
-    guiData = new GuiDataContainer();
-
     // Set up camera stuff from loaded path tracer settings
     iteration = 0;
     renderState = &scene->state;
@@ -560,10 +551,6 @@ int main(int argc, char** argv)
     if (profCfg.enabled) {
         atexit([]() { g_profiler().shutdown(); });
     }
-
-    // Initialize ImGui Data
-    InitImguiData(guiData);
-    InitDataContainer(guiData);
 
     // Print concise runtime summary before rendering
     printStartupSummary(profCfg);
