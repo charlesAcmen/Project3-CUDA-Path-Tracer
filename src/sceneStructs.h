@@ -12,7 +12,15 @@
 enum GeomType
 {
     SPHERE,
-    CUBE
+    CUBE,
+    MESH
+};
+
+// Object-space triangle backed by an OBJ mesh.
+// The intersection test transforms rays to object space via
+// the geometry's inverseTransform, keeping triangles untransformed.
+struct Triangle {
+    glm::vec3 v0, v1, v2;  // three vertex positions in object space
 };
 
 struct Ray
@@ -31,6 +39,11 @@ struct Geom
     glm::mat4 transform;
     glm::mat4 inverseTransform;
     glm::mat4 invTranspose;
+
+    // Mesh geometry: slice into the device-wide flat triangle array.
+    // Set to (-1, 0) for non-mesh primitives.
+    int meshTriangleOffset;   // first triangle index in the device array
+    int meshTriangleCount;    // number of triangles belonging to this mesh
 };
 
 enum class MaterialType
