@@ -127,6 +127,19 @@ void pathtraceInit(Scene* scene)
 
     checkCUDAError("copy geoms and materials");
 
+    // ---- Mesh triangles ----
+    // Copy the flat triangle array to device so the intersection kernel
+    // can test rays against mesh geometry.
+    {
+        int n = (int)scene->hostTriangles.size();
+        if (n > 0)
+        {
+            cudaMalloc(&g_dev.deviceTriangles, n * sizeof(Triangle));
+            cudaMemcpy(g_dev.deviceTriangles, scene->hostTriangles.data(),
+                       n * sizeof(Triangle), cudaMemcpyHostToDevice);
+        }
+    }
+
     cudaMalloc(&g_dev.intersections, pixelcount * sizeof(ShadeableIntersection));
     cudaMemset(g_dev.intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
@@ -178,6 +191,8 @@ void pathtraceFree()
     cudaFree(g_dev.bloomBufA);     // bloom ping-pong buffer A
     cudaFree(g_dev.bloomBufB);     // bloom ping-pong buffer B
     cudaFree(g_dev.bloomWeights);  // bloom Gaussian weight buffer
+    cudaFree(g_dev.deviceTriangles);
+    g_dev.deviceTriangles = nullptr;
     StreamCompaction::Efficient::freeCompactionWorkspace();
 
     checkCUDAError("pathtraceFree");

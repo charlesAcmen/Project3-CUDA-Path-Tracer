@@ -25,6 +25,9 @@ struct DeviceBuffers {
     glm::vec3*              bloomBufA           = nullptr;  // threshold + final blur result (HDR)
     glm::vec3*              bloomBufB           = nullptr;  // horizontal blur output (HDR ping-pong)
     float*                  bloomWeights        = nullptr;  // 1D Gaussian kernel weights (device)
+
+    // Mesh geometry (OBJ)
+    Triangle*               deviceTriangles     = nullptr;
 };
 
 // Bloom post-processing configuration
