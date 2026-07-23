@@ -239,7 +239,7 @@ void RenderImGui()
         }
 
         ImGui::Separator();
-        ImGui::Text("Chromatic Aberration (色差):");
+        ImGui::Text("Chromatic Aberration:");
         bool caEnabled = getChromaticAberrationEnabled();
         if (ImGui::Checkbox("Enable Chromatic Aberration", &caEnabled))
             setChromaticAberrationEnabled(caEnabled);
@@ -250,7 +250,7 @@ void RenderImGui()
         }
 
         ImGui::Separator();
-        ImGui::Text("Vignette (暗角):");
+        ImGui::Text("Vignette:");
         bool vigEnabled = getVignetteEnabled();
         if (ImGui::Checkbox("Enable Vignette", &vigEnabled))
             setVignetteEnabled(vigEnabled);
