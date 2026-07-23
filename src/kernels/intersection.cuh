@@ -3,11 +3,19 @@
 // ====================================================================
 // Intersection Testing Kernel
 //
-// Contains the device helper and kernel that perform ray-geometry
-// intersection tests.  Currently a naive O(N) linear scan; the intent
-// is that a BVH traversal replaces this function when acceleration
-// structures are added (see intersectSingleGeom — add new primitives
-// like TRIANGLE by extending the if/else chain).
+// Naive O(N_geoms × N_paths) linear scan over all geometries for every
+// active path.  Each thread processes one path and records the closest
+// hit into the ShadeableIntersection buffer.
+//
+// All geometries are expected to be MESH (triangulated).  Every ray is
+// transformed to object space before the triangle test via the geom's
+// inverseTransform; non-mesh types silently miss (-1).
+//
+// Triangle intersection logic (Möller-Trumbore via GLM) lives in
+// intersection/triangle.h.  No primitive-type dispatcher exists — mesh
+// is the only geometry primitive supported.
+//
+// TODO: replace linear scan with BVH traversal for O(log N) scaling.
 // ====================================================================
 
 #include "sceneStructs.h"
@@ -15,34 +23,20 @@
 #include "intersection/triangle.h"  // triangleIntersectionTest
 
 /**
- * Dispatch a single geometry intersection test based on type.
+ * Compute the nearest ray–mesh intersection for every active path.
  *
- * Extract so that adding a new primitive (triangle, metaball, CSG …)
- * only requires extending this function — the loop in
- * computeIntersections stays unchanged.
+ * Naive linear scan: each thread iterates over all scene geometries,
+ * transforms the ray to object space, and tests against the mesh's
+ * triangle slice.  The closest hit (smallest t > 0) is recorded.
  *
- * Returns parametric distance t along the ray, or -1 on miss.
- */
-__device__ float intersectSingleGeom(
-    const Geom& geom,
-    const Ray& ray,
-    glm::vec3& outPoint,
-    glm::vec3& outNormal,
-    bool& outOutside)
-{
-    if (geom.type == CUBE)
-    {
-        return boxIntersectionTest(geom, ray, outPoint, outNormal, outOutside);
-    }
-    else if (geom.type == SPHERE)
-    {
-        return sphereIntersectionTest(geom, ray, outPoint, outNormal, outOutside);
-    }
-    // TODO: add more intersection tests here... triangle? metaball? CSG?
-    return -1.0f;
-}
+ * \param depth             Current bounce depth (unused — reserved)
+ * \param num_paths         Number of active paths
+ * \param pathSegments      Active-path buffer
+ * \param geoms             Host-side geom array (copied to device)
+ * \param geoms_size        Number of geoms
+ * \param intersections     [out] Closest-hit result per path
+ * \param deviceTriangles   Flat triangle array (all meshes)
 
-/**
  * Compute the nearest ray-geometry intersection for every active path.
  *
  * Naive O(N_geoms × N_paths) linear scan.  Each thread processes one path
@@ -58,48 +52,80 @@ __global__ void computeIntersections(
     PathSegment* pathSegments,
     Geom* geoms,
     int geoms_size,
-    ShadeableIntersection* intersections)
+    ShadeableIntersection* intersections,
+    Triangle* deviceTriangles)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (path_index >= num_paths) return;
 
-    if (path_index < num_paths)
+    PathSegment pathSegment = pathSegments[path_index];
+
+    float t_min = FLT_MAX;
+    int   hit_geom_index = -1;
+    glm::vec3 hit_normal;
+
+    for (int i = 0; i < geoms_size; i++)
     {
-        PathSegment pathSegment = pathSegments[path_index];
+        Geom& geom = geoms[i];
 
-        float t;
-        glm::vec3 intersect_point;
-        glm::vec3 normal;
-        float t_min = FLT_MAX;
-        int hit_geom_index = -1;
-        bool outside = true;
+        // // ---- Skip non-mesh geoms ----
+        // if (geom.type != MESH) continue;
 
-        glm::vec3 tmp_intersect;
-        glm::vec3 tmp_normal;
+        // ---- Transform ray to object space via inverseTransform ----
+        // Triangles are stored in object space; bring the ray into the
+        // mesh's local frame so that the intersection test is performed
+        // in the same coordinate system as the vertices.
+        Ray objRay;
+        objRay.origin    = multiplyMV(geom.inverseTransform,
+                            glm::vec4(pathSegment.ray.origin, 1.0f));//1.0f:point
+        objRay.direction = multiplyMV(geom.inverseTransform,
+                            glm::vec4(pathSegment.ray.direction, 0.0f));//0.0f:vector
 
-        for (int i = 0; i < geoms_size; i++)
+        // ---- Linear scan over this mesh's triangle slice ----
+        if (deviceTriangles == nullptr || geom.meshTriangleCount <= 0)
+            continue;
+
+        float closestT = 1e30f;
+        bool  hit = false;
+        glm::vec3 objNormal;
+
+        for (int j = 0; j < geom.meshTriangleCount; j++)
         {
-            Geom& geom = geoms[i];
+            float t;
+            glm::vec3 triNormal;
+            const Triangle& tri = deviceTriangles[geom.meshTriangleOffset + j];
 
-            t = intersectSingleGeom(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
-
-            if (t > 0.0f && t_min > t)
+            if (triangleIntersectionTest(objRay, tri, t, triNormal))
             {
-                t_min = t;
-                hit_geom_index = i;
-                intersect_point = tmp_intersect;
-                normal = tmp_normal;
+                if (t < closestT)
+                {
+                    closestT  = t;
+                    objNormal = triNormal;
+                    hit = true;
+                }
             }
         }
 
-        if (hit_geom_index == -1)
-        {
-            intersections[path_index].t = -1.0f;
-        }
-        else
-        {
-            intersections[path_index].t = t_min;
-            intersections[path_index].materialId = geoms[hit_geom_index].materialid;
-            intersections[path_index].surfaceNormal = normal;
-        }
+        if (!hit) continue;
+
+        // ---- Record closest hit (world space) ----
+        // Surface point:   transform object-space hit via geom.transform
+        // Surface normal:  transform via invTranspose (preserves
+        //                  orthogonality under non-uniform scaling).
+        t_min = closestT;
+        hit_geom_index = i;
+        hit_normal = glm::normalize(multiplyMV(
+            geom.invTranspose, glm::vec4(objNormal, 0.0f)));
+    }
+
+    if (hit_geom_index == -1)
+    {
+        intersections[path_index].t = -1.0f;
+    }
+    else
+    {
+        intersections[path_index].t           = t_min;
+        intersections[path_index].materialId  = geoms[hit_geom_index].materialid;
+        intersections[path_index].surfaceNormal = hit_normal;
     }
 }
