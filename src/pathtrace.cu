@@ -54,11 +54,9 @@ static bool s_initialized = false;
 // file-scope static is visible here.
 // ====================================================================
 
-void setCompactMethod(int method) {
-    g_opts.compactMethod = method;
-}
+void setCompactMethod(CompactMethod method) { g_opts.compactMethod = method; }
 void setSortByMaterial(bool enable) { g_opts.sortByMaterial = enable; }
-int  getCompactMethod()             { return g_opts.compactMethod; }
+CompactMethod getCompactMethod()    { return g_opts.compactMethod; }
 bool getSortByMaterial()            { return g_opts.sortByMaterial; }
 void  setBloomEnabled(bool v)       { g_opts.bloom.enabled = v; }
 bool  getBloomEnabled()             { return g_opts.bloom.enabled; }
@@ -68,8 +66,8 @@ void  setBloomIntensity(float v)    { g_opts.bloom.intensity = v; }
 float getBloomIntensity()           { return g_opts.bloom.intensity; }
 void  setBloomRadius(int v)         { if (v != g_opts.bloom.radius) { g_opts.bloom.radius = v; g_opts.bloom.sigma = v * 0.5f; } }
 int   getBloomRadius()              { return g_opts.bloom.radius; }
-void  setRngMode(int mode)          { g_opts.rngMode = mode; }
-int   getRngMode()                  { return g_opts.rngMode; }
+void  setRngMode(RngMode mode)      { g_opts.rngMode = mode; }
+RngMode getRngMode()                { return g_opts.rngMode; }
 void  setChromaticAberrationEnabled(bool v)  { g_opts.chromaticAberration.enabled = v; }
 bool  getChromaticAberrationEnabled()        { return g_opts.chromaticAberration.enabled; }
 void  setChromaticAberrationIntensity(float v) { g_opts.chromaticAberration.intensity = v; }

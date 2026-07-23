@@ -133,7 +133,6 @@ void InitImguiData(GuiDataContainer* guiData)
 }
 
 
-// LOOK: Un-Comment to check ImGui Usage
 void RenderImGui()
 {
     mouseOverImGuiWinow = io->WantCaptureMouse;
