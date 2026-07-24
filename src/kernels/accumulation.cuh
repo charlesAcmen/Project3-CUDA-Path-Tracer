@@ -5,9 +5,9 @@
 //
 // Contains the terminal stage of each iteration:
 //   sendImageToPBO       — write LDR tonemapped pixels to OpenGL PBO
-//   finalGather          — accumulate terminated path colors into HDR image
-//   gatherTerminatedPaths— bank terminated path colors BEFORE compaction
-//                          discards their PathSegment entries.
+//   gatherTerminatedPaths— accumulate terminated path colors into HDR image,
+//                          called before compaction OR as catch-all after
+//                          the bounce loop.
 // ====================================================================
 
 #include "sceneStructs.h"
