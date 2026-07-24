@@ -42,36 +42,19 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
 }
 
 /**
- * Accumulate each terminated path's colour into the HDR accumulation buffer.
+ * Accumulate terminated path colours into the HDR accumulation buffer.
  *
  * Only paths whose remainingBounces <= 0 are gathered — these represent
  * rays that either hit a light (carrying the final radiance for this sample)
  * or exhausted all bounces (colour already set to 0 by shadeMaterial).
  *
- * When compaction is enabled, every terminated path is gathered BEFORE
- * compaction by gatherTerminatedPaths; this kernel then acts as a
- * catch-all (or the sole gatherer when compaction is off).
+ * When compaction is enabled, this kernel is called BEFORE each compaction
+ * pass to bank terminated paths before their PathSegment entries are
+ * discarded.  When compaction is disabled, it is called once after the
+ * bounce loop as a catch-all.
  *
  * NOTE: The (1/eta^2) radiance scaling was removed because it caused energy
- * loss in the glass furnace test.  See gatherTerminatedPaths for details.
- */
-__global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths)
-{
-    int index = (blockIdx.x * blockDim.x) + threadIdx.x;
-
-    if (index < nPaths)
-    {
-        const PathSegment& iterationPath = iterationPaths[index];
-        if (iterationPath.remainingBounces <= 0)
-        {
-            image[iterationPath.pixelIndex] += iterationPath.color;
-        }
-    }
-}
-
-/**
- * Bank terminated-path colors into the accumulation buffer BEFORE stream
- * compaction discards their PathSegment entries.
+ * loss in the glass furnace test.  See the full explanation below.
  *
  * CORRECTNESS NOTE:
  *   After shadeMaterial, paths that hit a light carry their final radiance.
