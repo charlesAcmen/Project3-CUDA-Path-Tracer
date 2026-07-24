@@ -1,21 +1,18 @@
 #pragma once
 
 // ====================================================================
-// Triangle Intersection (Möller-Trumbore, double-sided)
+// Triangle Intersection — Möller-Trumbore (莫勒-特伦博尔算法)
 //
-// Double-sided ray–triangle intersection.  Removes the front-face-only
-// rejection (a < 0) from the standard Möller-Trumbore algorithm so
-// that back-face hits are also valid.  The face normal is flipped to
-// point toward the incident ray for back-face hits.
+// Double-sided ray–triangle intersection.  Standard Möller-Trumbore
+// rejects back-face hits (a < 0); this version accepts them and
+// flips the normal to point toward the incident ray instead.
 //
-// This is necessary for closed meshes: a ray that enters a refractive
-// object (e.g. a glass sphere) will hit the back face when exiting —
-// single-sided intersection would reject that hit, making the object
-// opaque from the inside.
+// Double-sided is required for closed meshes with refraction: a ray
+// inside a glass object hits the back face when exiting and must not
+// be rejected.
 //
-// OBJ files should still follow CCW winding (outward-facing normals)
-// as the primary convention.  Double-sided handling is a safety net
-// and a requirement for refractive closed meshes.
+// Reference: Möller & Trumbore, "Fast, Minimum Storage Ray-Triangle
+// Intersection", Journal of Graphics Tools, 1997.
 // ====================================================================
 
 #include "sceneStructs.h"
@@ -26,8 +23,8 @@
  *
  * @param ray       Ray in object space
  * @param tri       Triangle in object space
- * @param outT      [out] Parametric distance
- * @param outNormal [out] Face normal, oriented toward the ray
+ * @param outT      [out] Distance along ray to hit
+ * @param outNormal [out] Face normal oriented toward the ray
  * @return          true on hit (either side)
  */
 __device__ inline bool triangleIntersectionTest(
@@ -36,34 +33,69 @@ __device__ inline bool triangleIntersectionTest(
     float& outT,
     glm::vec3& outNormal)
 {
-    const glm::vec3& v0 = tri.v0;
-    const glm::vec3& v1 = tri.v1;
-    const glm::vec3& v2 = tri.v2;
+    // ---- Step 1: edge vectors ----
+    // Translate triangle so v0 is at origin, then compute the two
+    // edges from v0.  This is the reference frame for barycentric
+    // coordinates: any point on the triangle = v0 + u*e1 + v*e2.
+    glm::vec3 e1 = tri.v1 - tri.v0;     // edge v0→v1
+    glm::vec3 e2 = tri.v2 - tri.v0;     // edge v0→v2
 
-    glm::vec3 e1 = v1 - v0;
-    glm::vec3 e2 = v2 - v0;
-
+    // ---- Step 2: determinant a = |e1  dir  e2| (scalar triple product) ----
+    // p = dir × e2  — a vector perpendicular to both dir and e2.
     glm::vec3 p = glm::cross(ray.direction, e2);
+    // a = dot(e1, p) = dot(e1, cross(dir, e2)).
     float a = glm::dot(e1, p);
+    // Geometrically a is the signed volume of the parallelepiped
+    // spanned by e1, dir, e2.  Its sign tells us which side of the
+    // triangle the ray is hitting:
+    //   a > 0  → front face (ray and geometric normal point opposite)
+    //   a < 0  → back face  (ray and geometric normal point same way)
 
-    if (fabsf(a) < 1e-10f)
+    // When |a| is near zero the ray is nearly parallel to the
+    // triangle plane — no intersection.
+    if (fabsf(a) < RAY_EPSILON)
         return false;
 
-    float f = 1.0f / a;
-    glm::vec3 s = ray.origin - v0;
+    float f = 1.0f / a;     // sign-preserving reciprocal
+    // f > 0  → front-face hit,  f < 0 → back-face hit
 
+    // ---- Step 3: barycentric u ----
+    // s = ray.origin - v0  — vector from v0 to ray origin.
+    glm::vec3 s = ray.origin - tri.v0;
+
+    // u = f * dot(s, p)    — barycentric coordinate for edge e1.
     float u = f * glm::dot(s, p);
-    if (u < 0.0f || u > 1.0f) return false;
+    // In the front-face case (f > 0) both f and dot(s, p) are
+    // positive.  In the back-face case (f < 0) dot(s, p) flips sign
+    // too, so u remains positive for a valid hit.
+    if (u < 0.0f || u > 1.0f)
+        return false;
+    // u ∈ [0, 1] means the hit lies between v0 and v1 along e1.
 
+    // ---- Step 4: barycentric v ----
+    // q = s × e1  — perpendicular to both s and e1.
     glm::vec3 q = glm::cross(s, e1);
+    // v = f * dot(dir, q)  — barycentric coordinate for edge e2.
     float v = f * glm::dot(ray.direction, q);
-    if (v < 0.0f || u + v > 1.0f) return false;
+    // Same sign argument as u: f keeps the sign consistent.
+    if (v < 0.0f || u + v > 1.0f)
+        return false;
 
+    // ---- Step 5: distance t ----
+    // t = f * dot(e2, q)  — parametric distance along the ray.
+    // A hit must be far enough from the origin to avoid the same
+    // surface that was just scattered from (RAY_EPSILON guard).
     float t = f * glm::dot(e2, q);
-    if (t < EPSILON) return false;
+    if (t < RAY_EPSILON)
+        return false;
 
     outT = t;
 
+    // ---- Step 6: face normal, oriented toward the ray ----
+    // Geometric normal from the cross product of the two edges.
+    // For a back-face hit we flip it so the normal always points
+    // toward the incident ray — required for correct
+    // BSDF evaluation in the shading kernel.
     outNormal = glm::normalize(glm::cross(e1, e2));
     if (a < 0.0f)
         outNormal = -outNormal;
