@@ -334,7 +334,6 @@ __host__ __device__ void scatterRay(
             break;
         }
         case MaterialType::Diffuse:
-        case MaterialType::Emissive:
         default:
         {
             glm::vec3 newDirection = calculateRandomDirectionInHemisphere(normal, rng);
