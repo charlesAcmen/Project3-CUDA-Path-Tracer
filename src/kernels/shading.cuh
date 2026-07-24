@@ -102,7 +102,7 @@ __global__ void shadeMaterial(
             return;
         }
 
-        ShadeableIntersection intersection = shadeableIntersections[idx];
+        const ShadeableIntersection& intersection = shadeableIntersections[idx];
 
         if (intersection.t > 0.0f)
         {
@@ -110,7 +110,7 @@ __global__ void shadeMaterial(
             RngState rngScatter = makeRngState(iter, pathSegment.pixelIndex,
                 bounceNum * MAX_DRAWS_PER_BOUNCE, config.rngMode);
 
-            Material material = materials[intersection.materialId];
+            const Material& material = materials[intersection.materialId];
 
             glm::vec3 intersectionPoint = getExactPointOnRay(pathSegment.ray, intersection.t);
 

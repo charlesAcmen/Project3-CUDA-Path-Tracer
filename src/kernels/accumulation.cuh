@@ -61,7 +61,7 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
 
     if (index < nPaths)
     {
-        PathSegment iterationPath = iterationPaths[index];
+        const PathSegment& iterationPath = iterationPaths[index];
         if (iterationPath.remainingBounces <= 0)
         {
             image[iterationPath.pixelIndex] += iterationPath.color;
@@ -100,7 +100,7 @@ __global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment*
 
     if (index < nPaths)
     {
-        PathSegment path = paths[index];
+        const PathSegment& path = paths[index];
         if (path.remainingBounces <= 0)
         {
             image[path.pixelIndex] += path.color;

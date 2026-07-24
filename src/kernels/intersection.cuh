@@ -58,7 +58,7 @@ __global__ void computeIntersections(
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (path_index >= num_paths) return;
 
-    PathSegment pathSegment = pathSegments[path_index];
+    const PathSegment& pathSegment = pathSegments[path_index];
 
     float t_min = LARGE_T;
     int   hit_geom_index = -1;
