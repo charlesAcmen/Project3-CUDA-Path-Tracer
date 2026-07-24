@@ -10,7 +10,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <cstdio>
-#include <iostream>
+#include <sstream>
 
 #ifdef __CUDACC__
 #include <cuda.h>
