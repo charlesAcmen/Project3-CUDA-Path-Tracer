@@ -241,9 +241,8 @@ void RenderImGui()
         ImGui::Separator();
         {
             SceneStats stats = computeSceneStats(*scene);
-            ImGui::Text("Scene: %d objects", stats.numObjects);
-            ImGui::Text("  meshes: %d  spheres: %d  cubes: %d",
-                        stats.numMeshes, stats.numSpheres, stats.numCubes);
+            ImGui::Text("Scene: %d objects  (%d meshes)",
+                        stats.numObjects, stats.numMeshes);
             ImGui::Text("  %d triangles, %d materials",
                         stats.numTriangles, stats.numMaterials);
         }
@@ -563,11 +562,9 @@ int main(int argc, char** argv)
     // Scene complexity summary
     {
         SceneStats stats = computeSceneStats(*scene);
-        printf("  Scene objects: %d  (meshes: %d  spheres: %d  cubes: %d)\n",
+        printf("  Objects: %d  meshes: %d  triangles: %d  materials: %d\n",
                stats.numObjects, stats.numMeshes,
-               stats.numSpheres, stats.numCubes);
-        printf("  Mesh triangles: %d\n", stats.numTriangles);
-        printf("  Materials: %d\n", stats.numMaterials);
+               stats.numTriangles, stats.numMaterials);
         printf("======================================================================\n");
         printf("\n");
     }

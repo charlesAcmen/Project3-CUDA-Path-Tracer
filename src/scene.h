@@ -31,8 +31,6 @@ struct Scene {
 struct SceneStats {
     int numObjects    = 0;
     int numMeshes     = 0;
-    int numSpheres    = 0;
-    int numCubes      = 0;
     int numMaterials  = 0;
     int numTriangles  = 0;
 };
