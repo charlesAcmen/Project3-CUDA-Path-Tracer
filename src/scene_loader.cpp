@@ -148,7 +148,19 @@ Scene loadFromJSON(const std::string& jsonName)
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
-            newMaterial.specular.color = glm::vec3(col[0], col[1], col[2]);
+            // Specular tint: read SPECULAR_COLOR if present, fall back to RGB.
+            // RGB alone serves both diffuse albedo and specular tint, but the
+            // two can diverge for physically accurate metals (RGB ≈ black,
+            // SPECULAR_COLOR = reflectivity tint per wavelength).
+            if (p.contains("SPECULAR_COLOR"))
+            {
+                const auto& sc = p["SPECULAR_COLOR"];
+                newMaterial.specular.color = glm::vec3(sc[0], sc[1], sc[2]);
+            }
+            else
+            {
+                newMaterial.specular.color = glm::vec3(col[0], col[1], col[2]);
+            }
             newMaterial.type = MaterialType::Reflective;
             if (p.contains("ROUGHNESS"))
             {
