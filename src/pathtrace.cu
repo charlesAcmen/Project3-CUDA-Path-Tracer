@@ -305,7 +305,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     if (g_opts.compactMethod == CompactMethod::Off)
     {
         dim3 numBlocks((pixelcount + blockSize1d - 1) / blockSize1d);
-        LAUNCH_KERNEL_AUTO(finalGather, pixelcount,
+        LAUNCH_KERNEL_AUTO(gatherTerminatedPaths, pixelcount,
             pixelcount, g_dev.image, g_dev.paths);
     }
 
