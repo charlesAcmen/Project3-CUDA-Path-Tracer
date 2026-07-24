@@ -15,6 +15,17 @@
 
 namespace Log {
 
+// ---- Raw output (stdout, no tag or newline) ----
+// For structured display that shouldn't have a [tag] prefix
+// (startup summary, help text, etc.).
+inline void raw(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+}
+
+// ---- Info (stdout) ----
 inline void info(const char* tag, const char* fmt, ...) {
     printf("[%s] ", tag);
     va_list args;

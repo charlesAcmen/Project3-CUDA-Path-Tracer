@@ -70,6 +70,14 @@ enum class FresnelMode : int
     Accurate = 1
 };
 
+inline const char* toString(FresnelMode m) {
+    switch (m) {
+        case FresnelMode::Schlick:  return "Schlick";
+        case FresnelMode::Accurate: return "Accurate";
+    }
+    return "?";
+}
+
 // Whether a ray is entering or exiting a refractive medium.
 enum class HitSide : int
 {
@@ -116,10 +124,28 @@ enum class CompactMethod : int {
     SharedMem  = 3
 };
 
+inline const char* toString(CompactMethod m) {
+    switch (m) {
+        case CompactMethod::Off:        return "Off";
+        case CompactMethod::GlobalScan: return "GlobalScan";
+        case CompactMethod::Thrust:     return "Thrust";
+        case CompactMethod::SharedMem:  return "SharedMem";
+    }
+    return "?";
+}
+
 enum class RngMode : int {
     LCG    = 0,
     HALTON = 1
 };
+
+inline const char* toString(RngMode m) {
+    switch (m) {
+        case RngMode::LCG:    return "LCG";
+        case RngMode::HALTON: return "Halton";
+    }
+    return "?";
+}
 
 struct ShadingConfig
 {
