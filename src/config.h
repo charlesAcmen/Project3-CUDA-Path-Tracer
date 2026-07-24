@@ -1,15 +1,14 @@
 #pragma once
 
 // ====================================================================
-// Application Configuration
+// Application Configuration (singleton)
 //
-// Pure data — no side effects.  Three-layer priority:
-//   CLI flags  >  config.local.json  >  code defaults
+// Three-layer priority:  CLI flags  >  config.local.json  >  code defaults
 //
 // Usage in main.cpp:
-//   1. loadConfigFile() → parse JSON from disk
-//   2. mergeConfigJson() → apply JSON onto AppConfig (lowest priority)
-//   3. parseCliFlags()  → apply CLI overrides (highest priority)
+//   initAppConfig(argc, argv);           // JSON + CLI → appConfig()
+//   const auto& cfg = appConfig();       // read-only access
+//   g_profiler().init(cfg.profCfg);      // profiler from config
 //   4. Apply to runtime via setters
 // ====================================================================
 

@@ -1,4 +1,4 @@
-#include "config.h"        // AppConfig, loadAppConfig, printStartupSummary
+#include "config.h"        // appConfig, initAppConfig, printStartupSummary
 #include "logger.h"        // Log::error
 #include "image.h"
 #include "pathtrace.h"

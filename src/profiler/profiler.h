@@ -56,18 +56,10 @@ struct ProfilerConfig {
     int         warmupIters    = 3;
     std::string sceneName      = "unknown";
     
-    // IMPORTANT: These fields are for CSV metadata tagging ONLY, not for controlling runtime behavior.
-    // They are written to every CSV row so plotting scripts can generate correct labels.
-    // 
-    // Runtime behavior is controlled by g_compactMethod and g_sortByMaterial in pathtrace.cu.
-    // 
-    // Synchronization happens in main.cpp:
-    //   1. profCfg is initialized by calling getCompactMethod() and getSortByMaterial()
-    //   2. If command-line flags (--compact=N --sort=0/1) are provided, they override both
-    //      profCfg fields AND pathtrace.cu runtime variables (via setters)
-    // 
-    // This ensures CSV metadata always matches actual runtime configuration, and you only
-    // need to change defaults in ONE place (pathtrace.cu).
+    // CSV metadata tags only — runtime behavior is controlled by
+    // appConfig().compactMethod / sortByMaterial (singleton in config.cpp).
+    // parseCliFlags() seeds these fields from the active config after all
+    // overrides (config JSON + CLI) have been applied.
     CompactMethod compactMethod  = CompactMethod::SharedMem;
     bool          sortByMaterial = false;
 };

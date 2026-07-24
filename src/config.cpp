@@ -15,6 +15,7 @@ using json = nlohmann::json;
 
 // ---- Singleton: the one true runtime config --------------------------------
 // Function-local static = constructed on first call, no init-order fiasco.
+// All runtime code (setters, pipeline .cuh files) reads from this single instance.
 
 AppConfig& appConfig() {
     static AppConfig s_config;
