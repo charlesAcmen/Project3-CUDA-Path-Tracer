@@ -178,8 +178,8 @@ Scene loadFromJSON(const std::string& jsonName)
         }
         else
         {
-            Log::warn("Scene", "Unknown material TYPE '%s' for '%s' — "
-                      "defaulting to Diffuse",
+            Log::warn("Scene", 
+                "Unknown material TYPE '%s' for '%s' defaulting to Diffuse",
                       p["TYPE"].get<std::string>().c_str(), name.c_str());
         }
         MatNameToID[name] = scene.materials.size();
@@ -214,7 +214,7 @@ Scene loadFromJSON(const std::string& jsonName)
             }
 
             auto [offset, count] =
-                loadOBJ((jsonDir / objRel).string(),
+                loadOBJ((jsonDir / objRel).generic_string(),
                         scene.hostTriangles);
             newGeom.meshTriangleOffset = offset;
             newGeom.meshTriangleCount  = count;

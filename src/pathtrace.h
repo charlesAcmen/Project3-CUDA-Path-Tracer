@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.h"       // BloomConfig, ChromaticAberrationConfig, VignetteConfig
 #include "scene.h"
 
 // ====================================================================
