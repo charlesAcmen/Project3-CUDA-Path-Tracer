@@ -30,7 +30,7 @@
         },
         "refra_white":
         {
-            "TYPE":"Refraction",
+            "TYPE":"Refractive",
             "RGB":[0.98, 0.98, 0.98],
             "IOR":1.5
         }
