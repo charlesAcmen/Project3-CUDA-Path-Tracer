@@ -82,7 +82,7 @@ static bool compactActivePaths(int& num_paths)
         survivors = compactCoreGlobalMem(num_paths, g_dev.pathsCompacted, g_dev.paths);
     } else if (g_opts.compactMethod == CompactMethod::Thrust) {
         survivors = compactCoreThrust(num_paths, g_dev.pathsCompacted, g_dev.paths);
-    } else {
+    } else if (g_opts.compactMethod == CompactMethod::SharedMem) {
         survivors = compactCoreSharedMem(num_paths, g_dev.pathsCompacted, g_dev.paths);
     }
     prof.cpuStop(ProfilerOp::CompactPaths);
