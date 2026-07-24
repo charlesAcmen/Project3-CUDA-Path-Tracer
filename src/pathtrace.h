@@ -30,31 +30,7 @@ struct DeviceBuffers {
     Triangle*               deviceTriangles     = nullptr;
 };
 
-// Bloom post-processing configuration
-struct BloomConfig {
-    bool  enabled   = false;     // enable bloom effect (off by default — avoid firefly amplification)
-    float threshold = 1.0f;      // brightness cutoff in HDR
-    float intensity = 0.5f;      // bloom blend strength
-    int   radius    = 10;        // Gaussian blur radius (pixels)
-    float sigma     = 5.0f;      // Gaussian sigma (auto: radius/2)
-
-    // Returns the 1D kernel size: 2*radius + 1
-    int kernelSize() const { return 2 * radius + 1; }
-};
-
-// Chromatic Aberration post-processing configuration
-// 色差
-struct ChromaticAberrationConfig {
-    bool  enabled   = false;
-    float intensity = 0.003f;     // radial shift magnitude (UV fraction)
-};
-
-// Vignette (corner darkening) post-processing configuration
-struct VignetteConfig {
-    bool  enabled   = false;
-    float intensity = 0.5f;       // darkness at corners
-    float exponent  = 2.0f;       // radial falloff power
-};
+// (BloomConfig, ChromaticAberrationConfig, VignetteConfig live in config.h)
 
 // Runtime-configurable options for the path tracing pipeline.
 struct PathTracerOptions {

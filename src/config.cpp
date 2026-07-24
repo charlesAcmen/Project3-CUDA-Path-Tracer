@@ -1,82 +1,307 @@
 #include "config.h"
 
 #include "logger.h"
-#include "pathtrace.h"
 #include "json.hpp"
 
+#include <algorithm>         // std::sort
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
 
-void loadConfigFile(const std::string& explicitPath)
+using json = nlohmann::json;
+
+// ====================================================================
+// Internal: load JSON from file, return empty object on failure.
+// ====================================================================
+
+static json loadJsonFile(const std::string& path)
 {
-    // ---- Resolve path ----
-    std::string path = explicitPath;
-    if (path.empty())
-    {
-        if (std::filesystem::exists("config.local.json"))
-            path = "config.local.json";
-        else
-            return;    // no config file, use code defaults
-    }
+    if (path.empty()) return json::object();
 
-    // ---- Open ----
     std::ifstream f(path);
     if (!f.is_open())
     {
         Log::warn("Config", "Could not open '%s'", path.c_str());
-        return;
+        return json::object();
     }
 
     Log::info("Config", "Loading: %s", path.c_str());
-    auto data = nlohmann::json::parse(f);
+    return json::parse(f);
+}
 
-    // ---- Apply — each key is optional (missing == keep default) ----
+// ====================================================================
+// Internal: apply JSON values onto an AppConfig (lowest priority).
+// Missing keys leave the target unchanged.
+// ====================================================================
+
+static void mergeConfigJson(AppConfig& cfg, const json& data)
+{
+    if (data.is_null() || data.empty()) return;
 
     if (data.contains("compactMethod"))
-        setCompactMethod(
-            static_cast<CompactMethod>(data["compactMethod"].get<int>()));
+        cfg.compactMethod = static_cast<CompactMethod>(data["compactMethod"].get<int>());
 
     if (data.contains("sortByMaterial"))
-        setSortByMaterial(data["sortByMaterial"].get<bool>());
+        cfg.sortByMaterial = data["sortByMaterial"].get<bool>();
 
     if (data.contains("rngMode"))
-        setRngMode(static_cast<RngMode>(data["rngMode"].get<int>()));
+        cfg.rngMode = static_cast<RngMode>(data["rngMode"].get<int>());
 
     // Bloom
     if (data.contains("bloom"))
     {
         const auto& b = data["bloom"];
-        if (b.contains("enabled"))   setBloomEnabled(b["enabled"].get<bool>());
-        if (b.contains("threshold")) setBloomThreshold(b["threshold"].get<float>());
-        if (b.contains("intensity")) setBloomIntensity(b["intensity"].get<float>());
-        if (b.contains("radius"))    setBloomRadius(b["radius"].get<int>());
-        if (b.contains("sigma"))     setBloomSigma(b["sigma"].get<float>());
+        if (b.contains("enabled"))   cfg.bloom.enabled   = b["enabled"].get<bool>();
+        if (b.contains("threshold")) cfg.bloom.threshold = b["threshold"].get<float>();
+        if (b.contains("intensity")) cfg.bloom.intensity = b["intensity"].get<float>();
+        if (b.contains("radius"))    cfg.bloom.radius    = b["radius"].get<int>();
+        if (b.contains("sigma"))     cfg.bloom.sigma     = b["sigma"].get<float>();
     }
 
     // Chromatic aberration
     if (data.contains("chromaticAberration"))
     {
         const auto& ca = data["chromaticAberration"];
-        if (ca.contains("enabled"))
-            setChromaticAberrationEnabled(ca["enabled"].get<bool>());
-        if (ca.contains("intensity"))
-            setChromaticAberrationIntensity(ca["intensity"].get<float>());
+        if (ca.contains("enabled"))   cfg.chromaticAberration.enabled   = ca["enabled"].get<bool>();
+        if (ca.contains("intensity")) cfg.chromaticAberration.intensity = ca["intensity"].get<float>();
     }
 
     // Vignette
     if (data.contains("vignette"))
     {
         const auto& v = data["vignette"];
-        if (v.contains("enabled"))
-            setVignetteEnabled(v["enabled"].get<bool>());
-        if (v.contains("intensity"))
-            setVignetteIntensity(v["intensity"].get<float>());
-        if (v.contains("exponent"))
-            setVignetteExponent(v["exponent"].get<float>());
+        if (v.contains("enabled"))   cfg.vignette.enabled   = v["enabled"].get<bool>();
+        if (v.contains("intensity")) cfg.vignette.intensity = v["intensity"].get<float>();
+        if (v.contains("exponent"))  cfg.vignette.exponent  = v["exponent"].get<float>();
     }
 
-    Log::info("Config", "Applied: compact=%d  sort=%d  rng=%d",
-           static_cast<int>(getCompactMethod()),
-           getSortByMaterial() ? 1 : 0,
-           static_cast<int>(getRngMode()));
+    // Profiler
+    if (data.contains("profiler"))
+    {
+        const auto& p = data["profiler"];
+        if (p.contains("enabled"))  cfg.profCfg.enabled     = p["enabled"].get<bool>();
+        if (p.contains("verbose"))  cfg.profCfg.verbose     = p["verbose"].get<bool>();
+        if (p.contains("warmup"))   cfg.profCfg.warmupIters = p["warmup"].get<int>();
+    }
+}
+
+// ====================================================================
+// Extern: globals defined in main.cpp (needed by printStartupSummary)
+// ====================================================================
+
+extern std::string  startTimeString;
+extern int          width;
+extern int          height;
+extern RenderState* renderState;
+extern bool         g_autoSave;
+
+// ====================================================================
+// Display: startup help text
+// ====================================================================
+
+void printStartupHelp(const char* exeName)
+{
+    Log::raw("\n");
+    Log::raw("======================================================================\n");
+    Log::raw("  CIS 565 Path Tracer - Command Line Help\n");
+    Log::raw("======================================================================\n");
+    Log::raw("  Usage:\n");
+    Log::raw("    %s SCENEFILE.json [options]\n", exeName);
+    Log::raw("\n");
+    Log::raw("  Examples:\n");
+    Log::raw("    %s ../scenes/cornell.json\n", exeName);
+    Log::raw("    %s ../scenes/cornell.json --benchmark --compact=2 --warmup=1\n", exeName);
+    Log::raw("    %s ../scenes/cornell.json --benchmark --sort=0 --save\n", exeName);
+    Log::raw("\n");
+    Log::raw("  Options:\n");
+    Log::raw("    --benchmark    Enable profiler CSV output.\n");
+    Log::raw("    --verbose      Print per-bounce path counts to the console.\n");
+    Log::raw("    --compact=N    Compaction mode: 0=off, 1=global scan, 2=Thrust copy_if,\n");
+    Log::raw("                   3=shared-memory scan (default).\n");
+    Log::raw("    --sort=N       Material sorting: 0=off, nonzero=on (default on).\n");
+    Log::raw("    --fresnel=N    Fresnel mode: 0=Schlick (default), 1=Accurate.\n");
+    Log::raw("    --rng=N        RNG mode: 0=LCG (default), 1=scrambled Halton.\n");
+    Log::raw("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
+    Log::raw("    --save         Save the final rendered image on exit.\n");
+    Log::raw("                   (default: yes)\n");
+    Log::raw("    --save-at=N1,N2,...  Auto-save at specific iteration counts\n");
+    Log::raw("                   (e.g., --save-at=50,200,1000).  Implies --save.\n");
+    Log::raw("    --config=PATH  Load runtime config from a JSON file.\n");
+    Log::raw("                   Default: config.local.json in CWD.\n");
+    Log::raw("    -h, --help     Show this help text.\n");
+    Log::raw("\n");
+    Log::raw("  Notes:\n");
+    Log::raw("    - Flags and scene file are order-independent.\n");
+    Log::raw("    - Profiler CSVs are written to profiler_output/<scene>_<timestamp>/\n");
+    Log::raw("      when --benchmark is enabled.\n");
+    Log::raw("    - Nonzero values for --sort are treated as enabled.\n");
+    Log::raw("    - Only compact values 0..3 have defined behavior.\n");
+    Log::raw("======================================================================\n");
+    Log::raw("\n");
+}
+
+// ====================================================================
+// Display: startup summary
+// ====================================================================
+
+void printStartupSummary(const ProfilerConfig& profCfg, RngMode rngMode)
+{
+    Log::raw("\n");
+    Log::raw("======================================================================\n");
+    Log::raw("  Startup Summary\n");
+    Log::raw("======================================================================\n");
+    Log::raw("  Scene: %s\n", profCfg.sceneName.c_str());
+    Log::raw("  Timestamp: %s\n", startTimeString.c_str());
+    Log::raw("  Resolution: %d x %d\n", width, height);
+    if (renderState) {
+        Log::raw("  Trace iterations (depth): %d\n", renderState->iterations);
+    }
+    Log::raw("  Profiler: %s\n", profCfg.enabled ? "ENABLED" : "disabled");
+    if (profCfg.enabled) {
+        Log::raw("    Warmup iters: %d\n", profCfg.warmupIters);
+        Log::raw("    Verbose logging: %s\n", profCfg.verbose ? "yes" : "no");
+    }
+    const char* compactName = "Unknown";
+    switch (profCfg.compactMethod) {
+        case CompactMethod::Off:        compactName = "Disabled (no compaction)"; break;
+        case CompactMethod::GlobalScan: compactName = "Global-memory scan (custom)"; break;
+        case CompactMethod::Thrust:     compactName = "Thrust copy_if"; break;
+        case CompactMethod::SharedMem:  compactName = "Shared-memory multi-block scan"; break;
+    }
+    Log::raw("  Compact method: %s\n", compactName);
+    Log::raw("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
+    const char* fresnelName = (renderState->fresnelMode == FresnelMode::Accurate
+                               ? "Accurate" : "Schlick");
+    Log::raw("  Fresnel mode: %s\n", fresnelName);
+    const char* rngName = (rngMode == RngMode::HALTON ? "Scrambled Halton" : "LCG");
+    Log::raw("  RNG mode: %s\n", rngName);
+    Log::raw("  Auto-save final image: %s\n", g_autoSave ? "yes" : "no");
+    Log::raw("======================================================================\n");
+    Log::raw("\n");
+}
+
+// ====================================================================
+// Main init: config file + CLI flags → AppConfig
+// ====================================================================
+
+AppConfig loadAppConfig(int argc, char** argv)
+{
+    AppConfig cfg;   // all code-default values
+
+    // ---- Resolve config file path ----
+    std::string configPath;
+    if (std::filesystem::exists("config.local.json"))
+        configPath = "config.local.json";
+
+    // ---- Pre-scan: --config=PATH overrides the auto-detect path ----
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string a = argv[i];
+        if (a.rfind("--config=", 0) == 0)
+        {
+            configPath = a.substr(9);
+            break;
+        }
+    }
+
+    // ---- Load config file (lowest priority) ----
+    json configJson = loadJsonFile(configPath);
+    mergeConfigJson(cfg, configJson);
+
+    // ---- Parse CLI flags (override config) ----
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+
+        if (arg == "-h" || arg == "--help")
+        {
+            cfg.showHelp = true;
+        }
+        else if (arg == "--benchmark")
+        {
+            cfg.profCfg.enabled = true;
+        }
+        else if (arg == "--verbose")
+        {
+            cfg.profCfg.verbose = true;
+        }
+        else if (arg == "--save")
+        {
+            cfg.autoSave = true;
+        }
+        else if (arg.rfind("--save-at=", 0) == 0)
+        {
+            cfg.autoSave = true;
+            std::string list = arg.substr(10);
+            std::stringstream ss(list);
+            std::string token;
+            while (std::getline(ss, token, ','))
+            {
+                if (!token.empty())
+                    cfg.saveAtIterations.push_back(std::stoi(token));
+            }
+            std::sort(cfg.saveAtIterations.begin(),
+                      cfg.saveAtIterations.end());
+        }
+        else if (arg.rfind("--config=", 0) == 0)
+        {
+            continue;   // already handled
+        }
+        else if (arg.rfind("--compact=", 0) == 0)
+        {
+            int v = std::stoi(arg.substr(10));
+            cfg.compactMethod = static_cast<CompactMethod>(v);
+        }
+        else if (arg.rfind("--sort=", 0) == 0)
+        {
+            cfg.sortByMaterial = (std::stoi(arg.substr(7)) != 0);
+        }
+        else if (arg.rfind("--fresnel=", 0) == 0)
+        {
+            int v = std::stoi(arg.substr(10));
+            cfg.fresnelMode = (v == 1) ? FresnelMode::Accurate : FresnelMode::Schlick;
+            cfg.fresnelSet  = true;
+        }
+        else if (arg.rfind("--rng=", 0) == 0)
+        {
+            int v = std::stoi(arg.substr(6));
+            cfg.rngMode = static_cast<RngMode>(v);
+        }
+        else if (arg.rfind("--warmup=", 0) == 0)
+        {
+            cfg.profCfg.warmupIters = std::stoi(arg.substr(9));
+        }
+        else if (arg[0] != '-')
+        {
+            cfg.sceneFile = arg;
+        }
+    }
+
+    // ---- Seed profCfg metadata from active values ----
+    cfg.profCfg.compactMethod  = cfg.compactMethod;
+    cfg.profCfg.sortByMaterial = cfg.sortByMaterial;
+
+    // ---- Derive scene name for CSV output ----
+    if (!cfg.sceneFile.empty())
+    {
+        std::string s = cfg.sceneFile;
+        size_t slash = s.find_last_of("/\\");
+        if (slash != std::string::npos) s = s.substr(slash + 1);
+        size_t dot = s.find_last_of('.');
+        if (dot != std::string::npos) s = s.substr(0, dot);
+        cfg.profCfg.sceneName = s;
+    }
+
+    // ---- Config summary ----
+    Log::info("Config", "compactMethod=%s  sortByMaterial=%s  rngMode=%s  fresnelMode=%s",
+           toString(cfg.compactMethod),
+           cfg.sortByMaterial ? "yes" : "no",
+           toString(cfg.rngMode),
+           toString(cfg.fresnelMode));
+
+    return cfg;
 }
