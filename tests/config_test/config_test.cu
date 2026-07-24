@@ -116,14 +116,13 @@ static int testJsonMerge()
 static int testCliOverride()
 {
     TEST("CLI flags override defaults");
-    AppConfig base;
-    // --compact=1 --sort=1 --rng=1 --fresnel=1 --save --warmup=5 --benchmark
+    AppConfig cfg;
     const char* argv[] = {
         "prog", "--compact=1", "--sort=1", "--rng=1",
         "--fresnel=1", "--save", "--warmup=5", "--benchmark", "test.json"
     };
     int argc = sizeof(argv) / sizeof(argv[0]);
-    AppConfig cfg = parseCliFlags(base, argc, (char**)argv);
+    parseCliFlags(cfg, argc, (char**)argv);
 
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::GlobalScan)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
@@ -150,10 +149,10 @@ static int testPriority()
 
     const char* argv[] = { "prog", "--compact=2", "--sort=1" };
     int argc = 3;
-    AppConfig cfg = parseCliFlags(base, argc, (char**)argv);
+    parseCliFlags(base, argc, (char**)argv);
 
-    if (checkEq("final compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Thrust)) return 1;
-    if (checkBool("final sortByMaterial", cfg.sortByMaterial, true)) return 1;
+    if (checkEq("final compactMethod", (int)base.compactMethod, (int)CompactMethod::Thrust)) return 1;
+    if (checkBool("final sortByMaterial", base.sortByMaterial, true)) return 1;
     PASS();
     return 0;
 }
@@ -173,9 +172,9 @@ static int testFresnelSet()
     // CLI --fresnel= sets both
     const char* argv[] = { "prog", "--fresnel=0" };
     int argc = 2;
-    AppConfig cfg = parseCliFlags(base, argc, (char**)argv);
-    if (checkBool("after CLI fresnelSet", cfg.fresnelSet, true)) return 1;
-    if (checkEq("after CLI fresnelMode", (int)cfg.fresnelMode, (int)FresnelMode::Schlick)) return 1;
+    parseCliFlags(base, argc, (char**)argv);
+    if (checkBool("after CLI fresnelSet", base.fresnelSet, true)) return 1;
+    if (checkEq("after CLI fresnelMode", (int)base.fresnelMode, (int)FresnelMode::Schlick)) return 1;
     PASS();
     return 0;
 }
@@ -219,13 +218,41 @@ static int testMissingSceneFile()
     AppConfig base;
     const char* argv[] = { "prog", "--benchmark" };
     int argc = 2;
-    AppConfig cfg = parseCliFlags(base, argc, (char**)argv);
-    if (checkBool("sceneFile.empty", cfg.sceneFile.empty(), true)) return 1;
+    parseCliFlags(base, argc, (char**)argv);
+    if (checkBool("sceneFile.empty", base.sceneFile.empty(), true)) return 1;
     PASS();
     return 0;
 }
 
 // ---- main ---------------------------------------------------------------
+
+// ---- Test: JSON only, no CLI overrides ----------------------------------
+
+static int testJsonOnly()
+{
+    TEST("JSON values survive when no CLI flags given");
+    AppConfig cfg;
+    json j = json::parse(R"({
+        "compactMethod": 0,
+        "sortByMaterial": true,
+        "rngMode": 1,
+        "bloom": { "enabled": true, "threshold": 0.8 }
+    })");
+    mergeConfigJson(cfg, j);
+
+    // CLI with only a scene file — no override flags
+    const char* argv[] = { "prog", "scene.json" };
+    int argc = 2;
+    parseCliFlags(cfg, argc, (char**)argv);
+
+    if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Off)) return 1;
+    if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
+    if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
+    if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
+    if (checkStr("sceneFile", cfg.sceneFile, "scene.json")) return 1;
+    PASS();
+    return 0;
+}
 
 // Stub globals needed by config.cpp's printStartupSummary.
 // The test never calls printStartupSummary, but the linker needs them.
@@ -249,6 +276,7 @@ int main()
     failures += testPartialJson();
     failures += testEmptyJson();
     failures += testMissingSceneFile();
+    failures += testJsonOnly();
 
     printf("\n%d / %d tests passed", s_passed, s_tests);
     if (failures) printf("  (%d FAILED)", failures);
