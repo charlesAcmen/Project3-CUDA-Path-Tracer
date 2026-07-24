@@ -495,24 +495,12 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    AppConfig cfg = loadAppConfig(argc, argv);
-    g_autoSave = cfg.autoSave;
-    g_saveAtIterations = std::move(cfg.saveAtIterations);
+    // ---- Init singleton config (JSON → CLI → ready) ----
+    initAppConfig(argc, argv);
+    const auto& cfg = appConfig();
 
-    // ---- Apply config to runtime via setters ----
-    setCompactMethod(cfg.compactMethod);
-    setSortByMaterial(cfg.sortByMaterial);
-    setRngMode(cfg.rngMode);
-    setBloomEnabled(cfg.bloom.enabled);
-    setBloomThreshold(cfg.bloom.threshold);
-    setBloomIntensity(cfg.bloom.intensity);
-    setBloomRadius(cfg.bloom.radius);
-    setBloomSigma(cfg.bloom.sigma);
-    setChromaticAberrationEnabled(cfg.chromaticAberration.enabled);
-    setChromaticAberrationIntensity(cfg.chromaticAberration.intensity);
-    setVignetteEnabled(cfg.vignette.enabled);
-    setVignetteIntensity(cfg.vignette.intensity);
-    setVignetteExponent(cfg.vignette.exponent);
+    g_autoSave = cfg.autoSave;
+    g_saveAtIterations = cfg.saveAtIterations;  // copy (small vector)
 
     if (cfg.showHelp)
     {

@@ -31,18 +31,6 @@ struct DeviceBuffers {
     Triangle*               deviceTriangles     = nullptr;
 };
 
-// (BloomConfig, ChromaticAberrationConfig, VignetteConfig live in config.h)
-
-// Runtime-configurable options for the path tracing pipeline.
-struct PathTracerOptions {
-    CompactMethod     compactMethod    = CompactMethod::SharedMem;
-    bool              sortByMaterial   = false;
-    RngMode           rngMode          = RngMode::LCG;
-    BloomConfig       bloom;
-    ChromaticAberrationConfig chromaticAberration;
-    VignetteConfig    vignette;
-};
-
 void pathtraceInit(Scene* scene);
 void pathtraceFree();
 void pathtrace(uchar4* pbo, int frame, int iteration);

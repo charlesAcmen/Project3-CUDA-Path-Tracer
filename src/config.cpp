@@ -1,9 +1,8 @@
 #include "config.h"
 
 #include "logger.h"
-#include "json.hpp"
 
-#include <algorithm>         // std::sort
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -14,13 +13,30 @@
 
 using json = nlohmann::json;
 
+// ---- Singleton: the one true runtime config --------------------------------
+
+static AppConfig s_config;
+AppConfig& appConfig() { return s_config; }
+
+void initAppConfig(int argc, char** argv)
+{
+    AppConfig& cfg = appConfig();
+    mergeConfigJson(cfg, loadConfigFile(""));
+    parseCliFlags(cfg, argc, argv);
+}
+
 // ====================================================================
-// Internal: load JSON from file, return empty object on failure.
+// Config file loading
 // ====================================================================
 
-static json loadJsonFile(const std::string& path)
+json loadConfigFile(const std::string& path)
 {
-    if (path.empty()) return json::object();
+    if (path.empty())
+    {
+        if (std::filesystem::exists("config.local.json"))
+            return loadConfigFile("config.local.json");
+        return json::object();
+    }
 
     std::ifstream f(path);
     if (!f.is_open())
@@ -34,11 +50,10 @@ static json loadJsonFile(const std::string& path)
 }
 
 // ====================================================================
-// Internal: apply JSON values onto an AppConfig (lowest priority).
-// Missing keys leave the target unchanged.
+// JSON → AppConfig merge (lowest priority)
 // ====================================================================
 
-static void mergeConfigJson(AppConfig& cfg, const json& data)
+void mergeConfigJson(AppConfig& cfg, const json& data)
 {
     if (data.is_null() || data.empty()) return;
 
@@ -50,6 +65,9 @@ static void mergeConfigJson(AppConfig& cfg, const json& data)
 
     if (data.contains("rngMode"))
         cfg.rngMode = static_cast<RngMode>(data["rngMode"].get<int>());
+
+    if (data.contains("fresnelMode"))
+        cfg.fresnelMode = static_cast<FresnelMode>(data["fresnelMode"].get<int>());
 
     // Bloom
     if (data.contains("bloom"))
@@ -90,7 +108,116 @@ static void mergeConfigJson(AppConfig& cfg, const json& data)
 }
 
 // ====================================================================
-// Extern: globals defined in main.cpp (needed by printStartupSummary)
+// CLI flags → AppConfig (highest priority)
+// ====================================================================
+
+void parseCliFlags(AppConfig& cfg, int argc, char** argv)
+{
+    // ---- Handle --config=PATH: reload config with explicit path ----
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string a = argv[i];
+        if (a.rfind("--config=", 0) == 0)
+        {
+            json alt = loadConfigFile(a.substr(9));
+            mergeConfigJson(cfg, alt);
+            break;
+        }
+    }
+
+    // ---- Parse flags ----
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+
+        if (arg == "-h" || arg == "--help")
+        {
+            cfg.showHelp = true;
+        }
+        else if (arg == "--benchmark")
+        {
+            cfg.profCfg.enabled = true;
+        }
+        else if (arg == "--verbose")
+        {
+            cfg.profCfg.verbose = true;
+        }
+        else if (arg == "--save")
+        {
+            cfg.autoSave = true;
+        }
+        else if (arg.rfind("--save-at=", 0) == 0)
+        {
+            cfg.autoSave = true;
+            std::string list = arg.substr(10);
+            std::stringstream ss(list);
+            std::string token;
+            while (std::getline(ss, token, ','))
+            {
+                if (!token.empty())
+                    cfg.saveAtIterations.push_back(std::stoi(token));
+            }
+            std::sort(cfg.saveAtIterations.begin(),
+                      cfg.saveAtIterations.end());
+        }
+        else if (arg.rfind("--config=", 0) == 0)
+        {
+            continue;   // already handled above
+        }
+        else if (arg.rfind("--compact=", 0) == 0)
+        {
+            int v = std::stoi(arg.substr(10));
+            cfg.compactMethod = static_cast<CompactMethod>(v);
+        }
+        else if (arg.rfind("--sort=", 0) == 0)
+        {
+            cfg.sortByMaterial = (std::stoi(arg.substr(7)) != 0);
+        }
+        else if (arg.rfind("--fresnel=", 0) == 0)
+        {
+            int v = std::stoi(arg.substr(10));
+            cfg.fresnelMode = (v == 1) ? FresnelMode::Accurate : FresnelMode::Schlick;
+            cfg.fresnelSet  = true;
+        }
+        else if (arg.rfind("--rng=", 0) == 0)
+        {
+            int v = std::stoi(arg.substr(6));
+            cfg.rngMode = static_cast<RngMode>(v);
+        }
+        else if (arg.rfind("--warmup=", 0) == 0)
+        {
+            cfg.profCfg.warmupIters = std::stoi(arg.substr(9));
+        }
+        else if (arg[0] != '-')
+        {
+            cfg.sceneFile = arg;
+        }
+    }
+
+    // ---- Seed profCfg metadata ----
+    cfg.profCfg.compactMethod  = cfg.compactMethod;
+    cfg.profCfg.sortByMaterial = cfg.sortByMaterial;
+
+    // ---- Derive scene name for CSV ----
+    if (!cfg.sceneFile.empty())
+    {
+        std::string s = cfg.sceneFile;
+        size_t slash = s.find_last_of("/\\");
+        if (slash != std::string::npos) s = s.substr(slash + 1);
+        size_t dot = s.find_last_of('.');
+        if (dot != std::string::npos) s = s.substr(0, dot);
+        cfg.profCfg.sceneName = s;
+    }
+
+    Log::info("Config", "compactMethod=%s  sortByMaterial=%s  rngMode=%s  fresnelMode=%s",
+           toString(cfg.compactMethod),
+           cfg.sortByMaterial ? "yes" : "no",
+           toString(cfg.rngMode),
+           toString(cfg.fresnelMode));
+}
+
+// ====================================================================
+// Extern: globals defined in main.cpp (used by printStartupSummary)
 // ====================================================================
 
 extern std::string  startTimeString;
@@ -182,126 +309,4 @@ void printStartupSummary(const ProfilerConfig& profCfg, RngMode rngMode)
     Log::raw("  Auto-save final image: %s\n", g_autoSave ? "yes" : "no");
     Log::raw("======================================================================\n");
     Log::raw("\n");
-}
-
-// ====================================================================
-// Main init: config file + CLI flags → AppConfig
-// ====================================================================
-
-AppConfig loadAppConfig(int argc, char** argv)
-{
-    AppConfig cfg;   // all code-default values
-
-    // ---- Resolve config file path ----
-    std::string configPath;
-    if (std::filesystem::exists("config.local.json"))
-        configPath = "config.local.json";
-
-    // ---- Pre-scan: --config=PATH overrides the auto-detect path ----
-    for (int i = 1; i < argc; ++i)
-    {
-        std::string a = argv[i];
-        if (a.rfind("--config=", 0) == 0)
-        {
-            configPath = a.substr(9);
-            break;
-        }
-    }
-
-    // ---- Load config file (lowest priority) ----
-    json configJson = loadJsonFile(configPath);
-    mergeConfigJson(cfg, configJson);
-
-    // ---- Parse CLI flags (override config) ----
-    for (int i = 1; i < argc; ++i)
-    {
-        std::string arg = argv[i];
-
-        if (arg == "-h" || arg == "--help")
-        {
-            cfg.showHelp = true;
-        }
-        else if (arg == "--benchmark")
-        {
-            cfg.profCfg.enabled = true;
-        }
-        else if (arg == "--verbose")
-        {
-            cfg.profCfg.verbose = true;
-        }
-        else if (arg == "--save")
-        {
-            cfg.autoSave = true;
-        }
-        else if (arg.rfind("--save-at=", 0) == 0)
-        {
-            cfg.autoSave = true;
-            std::string list = arg.substr(10);
-            std::stringstream ss(list);
-            std::string token;
-            while (std::getline(ss, token, ','))
-            {
-                if (!token.empty())
-                    cfg.saveAtIterations.push_back(std::stoi(token));
-            }
-            std::sort(cfg.saveAtIterations.begin(),
-                      cfg.saveAtIterations.end());
-        }
-        else if (arg.rfind("--config=", 0) == 0)
-        {
-            continue;   // already handled
-        }
-        else if (arg.rfind("--compact=", 0) == 0)
-        {
-            int v = std::stoi(arg.substr(10));
-            cfg.compactMethod = static_cast<CompactMethod>(v);
-        }
-        else if (arg.rfind("--sort=", 0) == 0)
-        {
-            cfg.sortByMaterial = (std::stoi(arg.substr(7)) != 0);
-        }
-        else if (arg.rfind("--fresnel=", 0) == 0)
-        {
-            int v = std::stoi(arg.substr(10));
-            cfg.fresnelMode = (v == 1) ? FresnelMode::Accurate : FresnelMode::Schlick;
-            cfg.fresnelSet  = true;
-        }
-        else if (arg.rfind("--rng=", 0) == 0)
-        {
-            int v = std::stoi(arg.substr(6));
-            cfg.rngMode = static_cast<RngMode>(v);
-        }
-        else if (arg.rfind("--warmup=", 0) == 0)
-        {
-            cfg.profCfg.warmupIters = std::stoi(arg.substr(9));
-        }
-        else if (arg[0] != '-')
-        {
-            cfg.sceneFile = arg;
-        }
-    }
-
-    // ---- Seed profCfg metadata from active values ----
-    cfg.profCfg.compactMethod  = cfg.compactMethod;
-    cfg.profCfg.sortByMaterial = cfg.sortByMaterial;
-
-    // ---- Derive scene name for CSV output ----
-    if (!cfg.sceneFile.empty())
-    {
-        std::string s = cfg.sceneFile;
-        size_t slash = s.find_last_of("/\\");
-        if (slash != std::string::npos) s = s.substr(slash + 1);
-        size_t dot = s.find_last_of('.');
-        if (dot != std::string::npos) s = s.substr(0, dot);
-        cfg.profCfg.sceneName = s;
-    }
-
-    // ---- Config summary ----
-    Log::info("Config", "compactMethod=%s  sortByMaterial=%s  rngMode=%s  fresnelMode=%s",
-           toString(cfg.compactMethod),
-           cfg.sortByMaterial ? "yes" : "no",
-           toString(cfg.rngMode),
-           toString(cfg.fresnelMode));
-
-    return cfg;
 }

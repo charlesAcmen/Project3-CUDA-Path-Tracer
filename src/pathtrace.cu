@@ -42,7 +42,7 @@
 // included file sees them directly.
 // ====================================================================
 
-static PathTracerOptions g_opts;
+static AppConfig& g_opts = appConfig();
 static DeviceBuffers g_dev;
 static Scene* hst_scene = NULL;
 static bool s_initialized = false;

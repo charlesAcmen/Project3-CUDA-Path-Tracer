@@ -3,12 +3,14 @@
 // ====================================================================
 // Application Configuration
 //
-// Pure data — no setters, no side effects.  loadAppConfig() reads the
-// config file and CLI flags, merges them by priority, and returns a
-// final AppConfig.  The caller (main.cpp) applies values to the
-// runtime via setters in a single explicit sync point.
+// Pure data — no side effects.  Three-layer priority:
+//   CLI flags  >  config.local.json  >  code defaults
 //
-// Priority:  CLI flags  >  config.local.json  >  code defaults
+// Usage in main.cpp:
+//   1. loadConfigFile() → parse JSON from disk
+//   2. mergeConfigJson() → apply JSON onto AppConfig (lowest priority)
+//   3. parseCliFlags()  → apply CLI overrides (highest priority)
+//   4. Apply to runtime via setters
 // ====================================================================
 
 #include "profiler/profiler.h"    // ProfilerConfig
@@ -17,8 +19,10 @@
 #include <string>
 #include <vector>
 
-// Post-processing config sub-structs (mirrors pathtrace.h without
-// pulling in the whole header).
+#include "json.hpp"
+
+// ---- Post-processing sub-configs ---------------------------------------
+
 struct BloomConfig {
     bool  enabled   = false;
     float threshold = 1.0f;
@@ -40,7 +44,7 @@ struct VignetteConfig {
     float exponent  = 2.0f;
 };
 
-// ---- Unified startup configuration ------------------------------------
+// ---- Unified startup configuration --------------------------------------
 
 struct AppConfig {
     ProfilerConfig   profCfg;
@@ -60,13 +64,22 @@ struct AppConfig {
     bool             autoSave         = true;
     bool             showHelp         = false;
     FresnelMode      fresnelMode      = FresnelMode::Schlick;
-    bool             fresnelSet       = false;
+    bool             fresnelSet       = false;   // CLI --fresnel= was given
     std::vector<int> saveAtIterations;
 };
 
-AppConfig loadAppConfig(int argc, char** argv);
+// ---- Singleton + init ---------------------------------------------------
 
-// ---- Display helpers --------------------------------------------------
+AppConfig& appConfig();                        // global runtime config
+void       initAppConfig(int argc, char** argv); // load + merge + parse
+
+// ---- Low-level helpers (used by tests directly) -------------------------
+
+nlohmann::json loadConfigFile(const std::string& path);
+void           mergeConfigJson(AppConfig& cfg, const nlohmann::json& data);
+void           parseCliFlags(AppConfig& cfg, int argc, char** argv);
+
+// ---- Display helpers ----------------------------------------------------
 
 void printStartupHelp(const char* exeName);
 void printStartupSummary(const ProfilerConfig& profCfg, RngMode rngMode);
