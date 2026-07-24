@@ -38,7 +38,7 @@ void Image::savePNG(const std::string &baseFilename)
 
     std::string filename = baseFilename + ".png";
     stbi_write_png(filename.c_str(), xSize, ySize, 3, bytes, xSize * 3);
-    Log::info("Image", "Image", "Saved %s", filename.c_str());
+    Log::info("Image", "Saved %s", filename.c_str());
 
     delete[] bytes;
 }
@@ -47,5 +47,5 @@ void Image::saveHDR(const std::string &baseFilename)
 {
     std::string filename = baseFilename + ".hdr";
     stbi_write_hdr(filename.c_str(), xSize, ySize, 3, (const float *) pixels);
-    Log::info("Image", "Image", "Saved %s", filename.c_str());
+    Log::info("Image", "Saved %s", filename.c_str());
 }
