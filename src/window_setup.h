@@ -37,6 +37,10 @@ extern GLuint       displayImage;
 extern GLFWwindow*  window;
 extern ImGuiIO*     io;
 
+// Modern CUDA-GL interop resource handle for the PBO.
+// Registered once at init, mapped/unmapped per frame.
+extern cudaGraphicsResource_t cuda_pbo_resource;
+
 // ---- Forward declarations (callbacks defined in main.cpp) ----
 // These are passed as function pointers to GLFW inside init().
 // A declaration is sufficient — the full definition is linked from
@@ -111,8 +115,11 @@ void deletePBO(GLuint* pbo)
 {
     if (pbo)
     {
-        // unregister this buffer object with CUDA
-        cudaGLUnregisterBufferObject(*pbo);
+        // Unregister the CUDA graphics resource (modern API) before
+        // deleting the GL buffer.  The deprecated cudaGLUnregisterBufferObject
+        // is gone along with cudaGLMapBufferObject / cudaGLUnmapBufferObject.
+        cudaGraphicsUnregisterResource(cuda_pbo_resource);
+        cuda_pbo_resource = nullptr;
 
         glBindBuffer(GL_ARRAY_BUFFER, *pbo);
         glDeleteBuffers(1, pbo);
@@ -168,7 +175,8 @@ void initPBO()
 
     // Allocate data for the buffer. 4-channel 8-bit image
     glBufferData(GL_PIXEL_UNPACK_BUFFER, size_tex_data, NULL, GL_DYNAMIC_COPY);
-    cudaGLRegisterBufferObject(pbo);
+    cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, pbo,
+                                 cudaGraphicsMapFlagsWriteDiscard);
     cudaGetLastError(); // drain stale error, same reasoning as initCuda()
 }
 

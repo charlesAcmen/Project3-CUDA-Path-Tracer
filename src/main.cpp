@@ -73,6 +73,10 @@ GLuint texcoordsLocation = 1;
 GLuint pbo;
 GLuint displayImage;
 
+// Modern CUDA-GL interop resource handle for the PBO.
+// Registered in initPBO() (window_setup.h), mapped per frame in runCuda().
+cudaGraphicsResource_t cuda_pbo_resource;
+
 GLFWwindow* window;
 ImGuiIO* io = nullptr;
 bool mouseOverImGuiWinow = false;
@@ -401,7 +405,15 @@ void runCuda()
     {
         uchar4* pbo_dptr = NULL;
         iteration++;
-        cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
+
+        // ---- Map PBO for CUDA write access (modern stream-level interop) ----
+        // Modern API: cudaGraphicsMapResources avoids the full-context
+        // synchronisation that the deprecated cudaGLMapBufferObject performed,
+        // which on WDDM could accumulate the entire frame's GPU work into a
+        // single KMD submission window, intermittently triggering TDR.
+        cudaGraphicsMapResources(1, &cuda_pbo_resource, 0);
+        cudaGraphicsResourceGetMappedPointer((void**)&pbo_dptr,
+                                             NULL, cuda_pbo_resource);
 
         // execute the kernel
         int frame = 0;
@@ -409,8 +421,11 @@ void runCuda()
         pathtrace(pbo_dptr, frame, iteration);
         g_profiler().endFrame();
 
+        // Ensure CUDA work completes before GL touches the PBO.
+        cudaDeviceSynchronize();
+
         // unmap buffer object
-        cudaGLUnmapBufferObject(pbo);
+        cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0);
 
         // Checkpoint auto-save: save image at specific iteration counts.
         // --save-at=50,200,1000 triggers saves at iteration 50, 200, 1000.
