@@ -56,6 +56,9 @@ static pair<int, int> loadOBJ(const string& objPath,
     int offset = (int)triangles.size();
     int count  = 0;
 
+    // Determine if the OBJ provides vertex normals (vn entries).
+    const bool hasNormals = (!attrib.normals.empty());
+
     for (const auto& shape : shapes)
     {
         size_t index_offset = 0;
@@ -86,7 +89,39 @@ static pair<int, int> loadOBJ(const string& objPath,
                 attrib.vertices[3 * (size_t)idx2.vertex_index + 1],
                 attrib.vertices[3 * (size_t)idx2.vertex_index + 2]);
 
-            triangles.push_back({v0, v1, v2});
+            // ---- Vertex normals ----
+            glm::vec3 n0, n1, n2;
+            if (hasNormals &&
+                idx0.normal_index >= 0 &&
+                idx1.normal_index >= 0 &&
+                idx2.normal_index >= 0)
+            {
+                // Load vertex normals from OBJ vn entries.
+                n0 = glm::vec3(
+                    attrib.normals[3 * (size_t)idx0.normal_index + 0],
+                    attrib.normals[3 * (size_t)idx0.normal_index + 1],
+                    attrib.normals[3 * (size_t)idx0.normal_index + 2]);
+                n1 = glm::vec3(
+                    attrib.normals[3 * (size_t)idx1.normal_index + 0],
+                    attrib.normals[3 * (size_t)idx1.normal_index + 1],
+                    attrib.normals[3 * (size_t)idx1.normal_index + 2]);
+                n2 = glm::vec3(
+                    attrib.normals[3 * (size_t)idx2.normal_index + 0],
+                    attrib.normals[3 * (size_t)idx2.normal_index + 1],
+                    attrib.normals[3 * (size_t)idx2.normal_index + 2]);
+            }
+            else
+            {
+                // No vertex normals in OBJ → compute face normal and use it
+                // for all three vertices.  This gives flat shading, correct
+                // for faceted meshes (e.g. cube.obj).
+                glm::vec3 e1 = v1 - v0;
+                glm::vec3 e2 = v2 - v0;
+                glm::vec3 fn = glm::normalize(glm::cross(e1, e2));
+                n0 = n1 = n2 = fn;
+            }
+
+            triangles.push_back({v0, v1, v2, n0, n1, n2});
             count++;
             index_offset += fv;
         }
