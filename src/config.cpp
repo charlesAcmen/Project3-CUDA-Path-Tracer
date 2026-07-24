@@ -1,9 +1,9 @@
 #include "config.h"
 
+#include "logger.h"
 #include "pathtrace.h"
 #include "json.hpp"
 
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 
@@ -23,11 +23,11 @@ void loadConfigFile(const std::string& explicitPath)
     std::ifstream f(path);
     if (!f.is_open())
     {
-        printf("[Config] Warning: could not open '%s'\n", path.c_str());
+        Log::warn("Config", "Could not open '%s'", path.c_str());
         return;
     }
 
-    printf("[Config] Loading: %s\n", path.c_str());
+    Log::info("Config", "Loading: %s", path.c_str());
     auto data = nlohmann::json::parse(f);
 
     // ---- Apply — each key is optional (missing == keep default) ----
@@ -75,7 +75,7 @@ void loadConfigFile(const std::string& explicitPath)
             setVignetteExponent(v["exponent"].get<float>());
     }
 
-    printf("[Config] Applied: compact=%d  sort=%d  rng=%d\n",
+    Log::info("Config", "Applied: compact=%d  sort=%d  rng=%d",
            static_cast<int>(getCompactMethod()),
            getSortByMaterial() ? 1 : 0,
            static_cast<int>(getRngMode()));

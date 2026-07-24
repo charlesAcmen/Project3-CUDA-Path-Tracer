@@ -1,5 +1,7 @@
 #include "profiler/profiler.h"
 
+#include "logger.h"
+
 #include <cstdio>
 #include <ctime>
 #include <cmath>
@@ -102,7 +104,7 @@ void Profiler::init(const ProfilerConfig& cfg)
     m_frameTimes.reserve(256);
 
     std::string expDir = getExperimentDir(m_cfg.sceneName, m_timestamp);
-    printf("[Profiler] Enabled. Output directory: %s/\n", expDir.c_str());
+    Log::info("Profiler", "Enabled. Output directory: %s/", expDir.c_str());
 }
 
 void Profiler::shutdown()
@@ -115,19 +117,19 @@ void Profiler::shutdown()
     {
         writeTimingCSV(expDir + "/timing.csv");
         writeSummaryCSV(expDir + "/summary.csv");
-        printf("[Profiler] Wrote %zu timing records.\n", m_timingRecords.size());
+        Log::info("Profiler", "Wrote %zu timing records", m_timingRecords.size());
     }
 
     if (!m_pathCounts.empty())
     {
         writePathSurvivalCSV(expDir + "/path_survival.csv");
-        printf("[Profiler] Wrote %zu path survival records.\n", m_pathCounts.size());
+        Log::info("Profiler", "Wrote %zu path survival records", m_pathCounts.size());
     }
 
     if (!m_frameTimes.empty())
     {
         writeFrameTimesCSV(expDir + "/frame_times.csv");
-        printf("[Profiler] Wrote %zu frame time records.\n", m_frameTimes.size());
+        Log::info("Profiler", "Wrote %zu frame time records", m_frameTimes.size());
     }
 
     // Destroy CUDA events while the context is still alive.
@@ -316,7 +318,7 @@ void Profiler::writeTimingCSV(const std::string& filepath)
 {
     std::ofstream f(filepath);
     if (!f.is_open()) {
-        printf("[Profiler] ERROR: cannot write %s\n", filepath.c_str());
+        Log::error("Profiler", "Cannot write %s", filepath.c_str());
         return;
     }
 
@@ -338,7 +340,7 @@ void Profiler::writePathSurvivalCSV(const std::string& filepath)
 {
     std::ofstream f(filepath);
     if (!f.is_open()) {
-        printf("[Profiler] ERROR: cannot write %s\n", filepath.c_str());
+        Log::error("Profiler", "Cannot write %s", filepath.c_str());
         return;
     }
 
@@ -384,7 +386,7 @@ void Profiler::writeSummaryCSV(const std::string& filepath)
 
     std::ofstream f(filepath);
     if (!f.is_open()) {
-        printf("[Profiler] ERROR: cannot write %s\n", filepath.c_str());
+        Log::error("Profiler", "Cannot write %s", filepath.c_str());
         return;
     }
 
@@ -415,7 +417,7 @@ void Profiler::writeFrameTimesCSV(const std::string& filepath)
 
     std::ofstream f(filepath);
     if (!f.is_open()) {
-        printf("[Profiler] ERROR: cannot write %s\n", filepath.c_str());
+        Log::error("Profiler", "Cannot write %s", filepath.c_str());
         return;
     }
 

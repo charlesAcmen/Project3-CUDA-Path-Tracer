@@ -5,6 +5,7 @@
 
 #include "scene_loader.h"
 
+#include "logger.h"
 #include "utilities.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
@@ -44,12 +45,13 @@ static pair<int, int> loadOBJ(const string& objPath,
     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
                           objPath.c_str()))
     {
-        cerr << "[SceneLoader] Failed to load: " << objPath << endl;
-        cerr << "  " << warn << err << endl;
+        Log::error("Scene", "Failed to load: %s", objPath.c_str());
+        if (!warn.empty()) Log::warn("Scene", "%s", warn.c_str());
+        if (!err.empty())  Log::error("Scene", "%s", err.c_str());
         return {-1, 0};
     }
-    if (!warn.empty()) cout << "[SceneLoader] " << warn << endl;
-    if (!err.empty())  cout << "[SceneLoader] " << err  << endl;
+    if (!warn.empty()) Log::warn("Scene", "%s", warn.c_str());
+    if (!err.empty())  Log::warn("Scene", "%s", err.c_str());
 
     int offset = (int)triangles.size();
     int count  = 0;
@@ -90,9 +92,8 @@ static pair<int, int> loadOBJ(const string& objPath,
         }
     }
 
-    cout << "  Loaded mesh: " << objPath
-         << "  (" << count << " triangles, total "
-         << triangles.size() << ")" << endl;
+    Log::info("Scene", "Loaded mesh: %s  (%d triangles, total %zu)",
+              objPath.c_str(), count, triangles.size());
     return {offset, count};
 }
 
@@ -104,13 +105,12 @@ Scene loadFromJSON(const std::string& jsonName)
 {
     Scene scene;
 
-    cout << "Reading scene from " << jsonName << " ..." << endl;
-    cout << " " << endl;
+    Log::info("Scene", "Reading: %s", jsonName.c_str());
 
     auto ext = jsonName.substr(jsonName.find_last_of('.'));
     if (ext != ".json")
     {
-        cerr << "Unsupported scene format: " << ext << endl;
+        Log::error("Scene", "Unsupported scene format: %s", ext.c_str());
         exit(-1);
     }
 
@@ -176,6 +176,12 @@ Scene loadFromJSON(const std::string& jsonName)
             newMaterial.invIndexOfRefraction =
                 1.0f / newMaterial.indexOfRefraction;
         }
+        else
+        {
+            Log::warn("Scene", "Unknown material TYPE '%s' for '%s' — "
+                      "defaulting to Diffuse",
+                      p["TYPE"].get<std::string>().c_str(), name.c_str());
+        }
         MatNameToID[name] = scene.materials.size();
         scene.materials.emplace_back(newMaterial);
     }
@@ -212,8 +218,7 @@ Scene loadFromJSON(const std::string& jsonName)
             filesystem::path objRel = p.value("FILE", string(""));
             if (objRel.empty())
             {
-                cerr << "[SceneLoader] mesh object with no FILE field;"
-                     << " skipping." << endl;
+                Log::warn("Scene", "Mesh object with no FILE field; skipping");
                 continue;
             }
 
@@ -225,8 +230,8 @@ Scene loadFromJSON(const std::string& jsonName)
         }
         else
         {
-            cerr << "[SceneLoader] Unknown object type: "
-                 << type << "; defaulting to sphere." << endl;
+            Log::warn("Scene", "Unknown object TYPE '%s'; defaulting to sphere",
+                      p["TYPE"].get<std::string>().c_str());
             newGeom.type = SPHERE;
         }
 

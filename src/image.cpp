@@ -1,8 +1,9 @@
 #include "image.h"
 
+#include "logger.h"
+
 #include <stb_image_write.h>
 
-#include <iostream>
 #include <string>
 
 Image::Image(int x, int y)
@@ -37,7 +38,7 @@ void Image::savePNG(const std::string &baseFilename)
 
     std::string filename = baseFilename + ".png";
     stbi_write_png(filename.c_str(), xSize, ySize, 3, bytes, xSize * 3);
-    std::cout << "Saved " << filename << "." << std::endl;
+    Log::info("Image", "Image", "Saved %s", filename.c_str());
 
     delete[] bytes;
 }
@@ -46,5 +47,5 @@ void Image::saveHDR(const std::string &baseFilename)
 {
     std::string filename = baseFilename + ".hdr";
     stbi_write_hdr(filename.c_str(), xSize, ySize, 3, (const float *) pixels);
-    std::cout << "Saved " + filename + "." << std::endl;
+    Log::info("Image", "Image", "Saved %s", filename.c_str());
 }
