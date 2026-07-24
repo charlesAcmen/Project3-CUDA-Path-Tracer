@@ -7,7 +7,7 @@ struct PathSegment;
 
 namespace StreamCompaction {
     namespace Efficient {
-        StreamCompaction::Common::PerformanceTimer& timer();
+
 
         /**
          * Device-side workspace shared by all stream-compaction paths.
