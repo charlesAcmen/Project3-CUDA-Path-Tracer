@@ -1,11 +1,9 @@
-#include "cli.h"           // CliConfig, parseFlags, printStartupHelp, printStartupSummary
-#include "config.h"        // loadConfigFile
+#include "config.h"        // AppConfig, loadAppConfig, printStartupSummary
+#include "logger.h"        // Log::error
 #include "image.h"
 #include "pathtrace.h"
-#include "profiler/profiler.h"
 #include "scene.h"
 #include "scene_loader.h"
-#include "sceneStructs.h"
 #include "utilities.h"
 #include "window_setup.h"  // init, initTextures, initCuda, initPBO, etc.
 
@@ -477,19 +475,30 @@ int main(int argc, char** argv)
 {
     startTimeString = currentTimeString();
 
-    // Load config.local.json (lowest priority) — CLI flags below override.
-    // If config.local.json doesn't exist this is a no-op (code defaults).
-    loadConfigFile("");
-
     if (argc < 2)
     {
         printStartupHelp(argv[0]);
         return 1;
     }
 
-    CliConfig cfg = parseFlags(argc, argv);
+    AppConfig cfg = loadAppConfig(argc, argv);
     g_autoSave = cfg.autoSave;
     g_saveAtIterations = std::move(cfg.saveAtIterations);
+
+    // ---- Apply config to runtime via setters ----
+    setCompactMethod(cfg.compactMethod);
+    setSortByMaterial(cfg.sortByMaterial);
+    setRngMode(cfg.rngMode);
+    setBloomEnabled(cfg.bloom.enabled);
+    setBloomThreshold(cfg.bloom.threshold);
+    setBloomIntensity(cfg.bloom.intensity);
+    setBloomRadius(cfg.bloom.radius);
+    setBloomSigma(cfg.bloom.sigma);
+    setChromaticAberrationEnabled(cfg.chromaticAberration.enabled);
+    setChromaticAberrationIntensity(cfg.chromaticAberration.intensity);
+    setVignetteEnabled(cfg.vignette.enabled);
+    setVignetteIntensity(cfg.vignette.intensity);
+    setVignetteExponent(cfg.vignette.exponent);
 
     if (cfg.showHelp)
     {
@@ -497,14 +506,13 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    if (!cfg.hasScene)
+    if (cfg.sceneFile.empty())
     {
-        fprintf(stderr, "Error: No scene file specified.\n\n");
+        Log::error("App", "No scene file specified");
         printStartupHelp(argv[0]);
         return 1;
     }
 
-    ProfilerConfig profCfg = cfg.profCfg;
     const char* sceneFile  = cfg.sceneFile.c_str();
 
     // Load scene file
@@ -549,24 +557,24 @@ int main(int argc, char** argv)
 
     // Profiler init must come AFTER initCuda() so that CUDA-GL interop is
     // properly configured before cudaEventCreate touches the CUDA runtime.
-    g_profiler().init(profCfg);
+    g_profiler().init(cfg.profCfg);
 
     // Graceful CSV write on any exit path (Esc key, completion, etc.)
-    if (profCfg.enabled) {
+    if (cfg.profCfg.enabled) {
         atexit([]() { g_profiler().shutdown(); });
     }
 
     // Print concise runtime summary before rendering
-    printStartupSummary(profCfg);
+    printStartupSummary(cfg.profCfg, cfg.rngMode);
 
     // Scene complexity summary
     {
         SceneStats stats = computeSceneStats(*scene);
-        printf("  Objects: %d  meshes: %d  triangles: %d  materials: %d\n",
+        Log::raw("  Objects: %d  meshes: %d  triangles: %d  materials: %d\n",
                stats.numObjects, stats.numMeshes,
                stats.numTriangles, stats.numMaterials);
-        printf("======================================================================\n");
-        printf("\n");
+        Log::raw("======================================================================\n");
+        Log::raw("\n");
     }
 
     // GLFW main loop
