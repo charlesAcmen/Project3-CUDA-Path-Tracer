@@ -149,7 +149,10 @@ __global__ void shadeMaterial(
                     pathSegment.remainingBounces = 0;
                 }
 
-                // Terminated without hitting a light → zero contribution
+                // Path terminated — by Russian roulette kill or bounce budget
+                // exhaustion (remainingBounces <= 0 after scatterRay + RR).
+                // Zero out colour: only indirect illumination reaches here,
+                // where termination means no radiance to contribute.
                 if (pathSegment.remainingBounces <= 0)
                 {
                     pathSegment.color = glm::vec3(0.0f);
