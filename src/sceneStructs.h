@@ -9,13 +9,6 @@
 
 #define BACKGROUND_COLOR (glm::vec3(0.0f))
 
-enum GeomType
-{
-    SPHERE,
-    CUBE,
-    MESH
-};
-
 // Object-space triangle backed by an OBJ mesh.
 // The intersection test transforms rays to object space via
 // the geometry's inverseTransform, keeping triangles untransformed.
@@ -31,7 +24,6 @@ struct Ray
 
 struct Geom
 {
-    enum GeomType type;
     int materialid;
     glm::vec3 translation;
     glm::vec3 rotation;

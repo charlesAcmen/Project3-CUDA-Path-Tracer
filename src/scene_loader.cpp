@@ -204,17 +204,8 @@ Scene loadFromJSON(const std::string& jsonName)
         newGeom.meshTriangleOffset = -1;
         newGeom.meshTriangleCount  = 0;
 
-        if (type == "cube")
+        if (type == "mesh")
         {
-            newGeom.type = CUBE;
-        }
-        else if (type == "sphere")
-        {
-            newGeom.type = SPHERE;
-        }
-        else if (type == "mesh")
-        {
-            newGeom.type = MESH;
             filesystem::path objRel = p.value("FILE", string(""));
             if (objRel.empty())
             {
@@ -230,9 +221,9 @@ Scene loadFromJSON(const std::string& jsonName)
         }
         else
         {
-            Log::warn("Scene", "Unknown object TYPE '%s'; defaulting to sphere",
+            Log::warn("Scene", "Unknown object TYPE '%s'; skipping",
                       p["TYPE"].get<std::string>().c_str());
-            newGeom.type = SPHERE;
+            continue;
         }
 
         newGeom.transform = utilityCore::buildTransformationMatrix(
