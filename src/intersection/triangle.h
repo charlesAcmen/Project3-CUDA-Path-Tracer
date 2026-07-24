@@ -91,12 +91,16 @@ __device__ inline bool triangleIntersectionTest(
 
     outT = t;
 
-    // ---- Step 6: face normal, oriented toward the ray ----
-    // Geometric normal from the cross product of the two edges.
-    // For a back-face hit we flip it so the normal always points
-    // toward the incident ray — required for correct
-    // BSDF evaluation in the shading kernel.
-    outNormal = glm::normalize(glm::cross(e1, e2));
+    // ---- Step 6: interpolate vertex normal (smooth shading) ----
+    // Use barycentric coordinates (u, v) computed above to interpolate
+    // the three vertex normals.  This makes the sphere look smooth.
+    // For meshes without vertex normals (n0=n1=n2=face normal), the
+    // interpolation collapses to the face normal → flat shading.
+    glm::vec3 interp = (1.0f - u - v) * tri.n0 + u * tri.n1 + v * tri.n2;
+    outNormal = glm::normalize(interp);
+
+    // Flip the interpolated normal if this is a back-face hit,
+    // so the normal always faces the incident ray.
     if (a < 0.0f)
         outNormal = -outNormal;
 

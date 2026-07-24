@@ -14,6 +14,7 @@
 // the geometry's inverseTransform, keeping triangles untransformed.
 struct Triangle {
     glm::vec3 v0, v1, v2;  // three vertex positions in object space
+    glm::vec3 n0, n1, n2;  // vertex normals (smooth shading interpolation)
 };
 
 struct Ray
