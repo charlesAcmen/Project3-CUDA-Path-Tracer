@@ -83,7 +83,6 @@ set(sources
     src/glslUtility.cpp
     src/pathtrace.cu
     src/profiler/profiler.cu
-    src/intersection/intersections.cu
     src/interactions/interactions.cu
     src/scene.cpp
     src/scene_loader.cpp

@@ -1,13 +1,10 @@
 #pragma once
 
 // ====================================================================
-// Ray Utility Functions & Legacy Intersection Declarations
+// Ray Utility Functions
 //
 // Provides getPointOnRay, multiplyMV, and concentricSampleDisk used by
-// the kernel code.  Also declares boxIntersectionTest and
-// sphereIntersectionTest (implemented in intersections.cu) — these are
-// preserved for reference but are NOT called by the path tracer, which
-// uses only triangle-mesh intersection (intersection/triangle.h).
+// the kernel code.
 //
 // All geometries should be triangulated at load time.
 // ====================================================================
@@ -16,10 +13,6 @@
 #include "sceneStructs.h"
 
 #include <glm/glm.hpp>
-#include <glm/gtx/intersect.hpp>
-
-
-// CHECKITOUT
 /**
  * Compute a point at parameter value `t` on ray `r`.
  * Falls slightly short so that it doesn't intersect the object it's hitting.
@@ -77,36 +70,5 @@ __host__ __device__ inline void concentricSampleDisk(
     dy = r * sinf(theta);
 }
 
-// CHECKITOUT
-/**
- * Test intersection between a ray and a transformed cube. Untransformed,
- * the cube ranges from -0.5 to 0.5 in each axis and is centered at the origin.
- *
- * @param intersectionPoint  Output parameter for point of intersection.
- * @param normal             Output parameter for surface normal.
- * @param outside            Output param for whether the ray came from outside.
- * @return                   Ray parameter `t` value. -1 if no intersection.
- */
-__host__ __device__ float boxIntersectionTest(
-    Geom box,
-    Ray r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-    bool& outside);
-
-// CHECKITOUT
-/**
- * Test intersection between a ray and a transformed sphere. Untransformed,
- * the sphere always has radius 0.5 and is centered at the origin.
- *
- * @param intersectionPoint  Output parameter for point of intersection.
- * @param normal             Output parameter for surface normal.
- * @param outside            Output param for whether the ray came from outside.
- * @return                   Ray parameter `t` value. -1 if no intersection.
- */
-__host__ __device__ float sphereIntersectionTest(
-    Geom sphere,
-    Ray r,
-    glm::vec3& intersectionPoint,
-    glm::vec3& normal,
-    bool& outside);
+// (boxIntersectionTest / sphereIntersectionTest — removed, unused since
+//  the switch to triangle-mesh-only geometry.  See git history if needed.)
