@@ -192,6 +192,20 @@ void RenderImGui()
         if (ImGui::RadioButton("Halton", &currentRng, 1)) { setRngMode(RngMode::HALTON); camchanged = true; }
 
         ImGui::Separator();
+        ImGui::Text("Compaction:");
+        int curCompact = static_cast<int>(getCompactMethod());
+        if (ImGui::RadioButton("Off",        &curCompact, 0)) { setCompactMethod(CompactMethod::Off);        camchanged = true; }
+        if (ImGui::RadioButton("Global",     &curCompact, 1)) { setCompactMethod(CompactMethod::GlobalScan);  camchanged = true; }
+        if (ImGui::RadioButton("Thrust",     &curCompact, 2)) { setCompactMethod(CompactMethod::Thrust);      camchanged = true; }
+        if (ImGui::RadioButton("SharedMem",  &curCompact, 3)) { setCompactMethod(CompactMethod::SharedMem);   camchanged = true; }
+
+        bool sortEnabled = getSortByMaterial();
+        if (ImGui::Checkbox("Sort by material", &sortEnabled)) {
+            setSortByMaterial(sortEnabled);
+            camchanged = true;
+        }
+
+        ImGui::Separator();
         ImGui::Text("Bloom:");
         bool bloomEnabled = getBloomEnabled();
         if (ImGui::Checkbox("Enable Bloom", &bloomEnabled))
