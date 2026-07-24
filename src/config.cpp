@@ -14,9 +14,12 @@
 using json = nlohmann::json;
 
 // ---- Singleton: the one true runtime config --------------------------------
+// Function-local static = constructed on first call, no init-order fiasco.
 
-static AppConfig s_config;
-AppConfig& appConfig() { return s_config; }
+AppConfig& appConfig() {
+    static AppConfig s_config;
+    return s_config;
+}
 
 void initAppConfig(int argc, char** argv)
 {
