@@ -312,6 +312,7 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
 
 void scrollCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
+    if (io && io->WantCaptureMouse) return;
     zoom *= (yoffset > 0.0) ? 0.85f : 1.15f;
     zoom = std::fmax(0.1f, zoom);
     camchanged = true;
