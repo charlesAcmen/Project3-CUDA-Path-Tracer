@@ -115,8 +115,10 @@ __global__ void computeIntersections(
 
         t_min = closestT;
         hit_geom_index = i;
-        hit_normal = glm::normalize(multiplyMV(
-            geom.invTranspose, glm::vec4(objNormal, 0.0f)));
+        glm::vec3 worldNormal = multiplyMV(
+            geom.invTranspose, glm::vec4(objNormal, 0.0f));
+        float wLen2 = glm::dot(worldNormal, worldNormal);
+        hit_normal = (isnan(wLen2) || wLen2 < RAY_EPSILON) ? glm::vec3(0.0f, 1.0f, 0.0f) : worldNormal * glm::inversesqrt(wLen2);
     }
 
     if (hit_geom_index == -1)

@@ -92,15 +92,20 @@ __device__ inline bool triangleIntersectionTest(
     outT = t;
 
     // ---- Step 6: interpolate vertex normal (smooth shading) ----
-    // Use barycentric coordinates (u, v) computed above to interpolate
-    // the three vertex normals.  This makes the sphere look smooth.
-    // For meshes without vertex normals (n0=n1=n2=face normal), the
-    // interpolation collapses to the face normal → flat shading.
+    // Executed ONLY on hit (rare path), zero overhead during traversal!
     glm::vec3 interp = (1.0f - u - v) * tri.n0 + u * tri.n1 + v * tri.n2;
-    outNormal = glm::normalize(interp);
+    float len2 = glm::dot(interp, interp);
+    if (len2 > RAY_EPSILON)
+    {
+        outNormal = interp * glm::inversesqrt(len2);
+    }
+    else
+    {
+        glm::vec3 geoNormal = glm::cross(e1, e2);
+        float geoLen2 = glm::dot(geoNormal, geoNormal);
+        outNormal = (geoLen2 > RAY_EPSILON) ? geoNormal * glm::inversesqrt(geoLen2) : tri.n0;
+    }
 
-    // Flip the interpolated normal if this is a back-face hit,
-    // so the normal always faces the incident ray.
     if (a < 0.0f)
         outNormal = -outNormal;
 
