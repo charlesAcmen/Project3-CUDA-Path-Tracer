@@ -330,7 +330,7 @@ __host__ __device__ void scatterRay(
             float offsetSign = glm::dot(scatterDir, normal) > 0.0f ? 1.0f : -1.0f;
             pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
             pathSegment.ray.direction = scatterDir;
-            pathSegment.color *= m.color;
+            pathSegment.color *= m.specular.color;
             break;
         }
         case MaterialType::Diffuse:

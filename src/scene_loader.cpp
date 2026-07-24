@@ -148,6 +148,7 @@ Scene loadFromJSON(const std::string& jsonName)
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            newMaterial.specular.color = glm::vec3(col[0], col[1], col[2]);
             newMaterial.type = MaterialType::Reflective;
             if (p.contains("ROUGHNESS"))
             {
