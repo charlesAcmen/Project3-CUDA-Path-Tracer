@@ -316,7 +316,11 @@ void pathtrace(uchar4* pbo, int frame, int iter)
                    g_opts.vignette,
                    pbo);
 
-    cudaMemcpy(hst_scene->state.image.data(), g_dev.image,
+    // Copy the tonemapped display buffer (imageDisplay, LDR sRGB [0,1]) to
+    // host so saveImage() writes exactly what the user sees on screen.
+    // g_dev.image holds the raw HDR accumulation and is intentionally NOT
+    // copied here — a raw-linear PNG would look dark and clip highlights.
+    cudaMemcpy(hst_scene->state.image.data(), g_dev.imageDisplay,
                pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
     checkCUDAError("pathtrace");
