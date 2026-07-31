@@ -22,8 +22,11 @@
  *   structured aliasing from pixel×stride formulas.  Adding iter makes the
  *   walk CONSECUTIVE across frames, preserving low-discrepancy convergence.
  *
- *   Cranley-Patterson rotation (per-pixel, per-iter, per-bounce, per-dim
- *   offset) decorrelates adjacent pixels while keeping each pixel stratified.
+ *   Cranley-Patterson rotation (fixed per-pixel, per-bounce, per-dim offset)
+ *   decorrelates adjacent pixels while keeping each pixel stratified.
+ *   The offset is deliberately constant across iterations: a per-iteration
+ *   rotation would destroy the consecutive low-discrepancy walk
+ *   (haltonIndex = baseOffset + iter) and degrade to noise.
  *
  * Usage:
  *   RngState rng = makeRngState(iter, pixelIdx, depth, rngMode);
@@ -266,7 +269,6 @@ struct RngState {
     // -- Halton branch (16 bytes) --
     unsigned int haltonIndex;   // baseOffset(pixel, bounce) + iter — consecutive Halton index
     unsigned int pixelIndex;    // for CP offset decorrelation (per-pixel)
-    int iter;                   // for CP offset per-iteration variation
     unsigned int bounceIndex;   // for CP offset / index decorrelation (per bounce)
 
     /** Returns a uniform random float in [0, 1) for the given dimension. */
@@ -286,9 +288,15 @@ struct RngState {
 
             // Cranley-Patterson rotation decorrelates adjacent pixels' raw
             // Halton values.  The CP seed combines pixelIndex (per-pixel),
-            // iter (per-iteration), bounceIndex (per-bounce — prevents
-            // identical offsets across bounces), and dim (per-dimension),
-            // all with distinct prime multipliers.
+            // bounceIndex (per-bounce — prevents identical offsets across
+            // bounces), and dim (per-dimension), all with distinct prime
+            // multipliers.
+            //
+            // iter is deliberately NOT part of the seed: the offset stays
+            // FIXED across iterations so the per-pixel Halton walk remains
+            // consecutive (index = baseOffset + iter) and low-discrepancy.
+            // Varying the offset per iteration would re-scramble each pixel's
+            // sequence every frame, destroying the consecutive walk → noise.
             unsigned int h = utilhash(
                 (unsigned int)pixelIndex * 131u
                 + bounceIndex * 17u
@@ -323,9 +331,10 @@ struct RngState {
  *       preserving O(log^d N / N) low-discrepancy convergence.
  *     - Primary rays:  bounceIndex = 0
  *     - Bounce N:      bounceIndex = N * MAX_DRAWS_PER_BOUNCE
- *   pixelIndex, iter, and bounceIndex are stored separately for the
- *   CP offset seed in next(dim), providing per-pixel, per-iteration,
- *   per-bounce, and per-dimension decorrelation.
+ *   pixelIndex and bounceIndex are stored for the CP offset seed in
+ *   next(dim), providing per-pixel, per-bounce, and per-dimension
+ *   decorrelation.  iter is intentionally NOT stored — the CP offset must
+ *   stay fixed across iterations (see next(dim)).
  *
  * @param iter        Current iteration (frame) counter
  * @param pixelIndex  Linear pixel index
@@ -351,7 +360,6 @@ __host__ __device__ inline RngState makeRngState(
             (unsigned int)depth)
             + (unsigned int)iter;
         state.pixelIndex  = (unsigned int)pixelIndex;
-        state.iter        = iter;
         state.bounceIndex = (unsigned int)depth;
     }
     return state;
