@@ -200,6 +200,26 @@ void pathtraceFree()
 }
 
 // ====================================================================
+// Host Image Readback (on-demand)
+// ====================================================================
+
+void pathtraceCopyDisplayToHost()
+{
+    // Copy the tonemapped display buffer (imageDisplay, LDR sRGB [0,1]) to
+    // host so saveImage() writes exactly what the user sees on screen.
+    // g_dev.image holds the raw HDR accumulation and is intentionally NOT
+    // copied here — a raw-linear PNG would look dark and clip highlights.
+    //
+    // Called on demand (only when saving) rather than every frame: the D2H
+    // transfer is a synchronous stall in the render loop.
+    if (!hst_scene) return;
+    const int pixelcount = hst_scene->state.camera.resolution.x *
+                           hst_scene->state.camera.resolution.y;
+    cudaMemcpy(hst_scene->state.image.data(), g_dev.imageDisplay,
+               pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+}
+
+// ====================================================================
 // Debug Helpers (called from pathtrace)
 // ====================================================================
 
@@ -315,13 +335,6 @@ void pathtrace(uchar4* pbo, int frame, int iter)
                    g_opts.chromaticAberration,
                    g_opts.vignette,
                    pbo);
-
-    // Copy the tonemapped display buffer (imageDisplay, LDR sRGB [0,1]) to
-    // host so saveImage() writes exactly what the user sees on screen.
-    // g_dev.image holds the raw HDR accumulation and is intentionally NOT
-    // copied here — a raw-linear PNG would look dark and clip highlights.
-    cudaMemcpy(hst_scene->state.image.data(), g_dev.imageDisplay,
-               pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
     checkCUDAError("pathtrace");
 

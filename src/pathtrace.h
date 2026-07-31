@@ -35,6 +35,11 @@ void pathtraceInit(Scene* scene);
 void pathtraceFree();
 void pathtrace(uchar4* pbo, int frame, int iteration);
 
+// On-demand D2H readback of the final post-processed display buffer into state.image.
+// Called by saveImage() so the saved PNG matches the on-screen preview;
+// deliberately NOT copied every frame (the copy is a synchronous stall).
+void pathtraceCopyDisplayToHost();
+
 // Runtime configuration overrides — called before pathtraceInit or at runtime.
 void setCompactMethod(CompactMethod method);
 CompactMethod getCompactMethod();

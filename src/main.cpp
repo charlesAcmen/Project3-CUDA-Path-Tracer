@@ -100,9 +100,9 @@ std::string currentTimeString()
 
 void saveImage()
 {
-    // state.image holds the tonemapped display buffer (LDR sRGB [0,1]) —
-    // identical to what pathtrace() showed on screen this frame — so write
-    // it out directly.  No /samples (already averaged in prepareDisplayKernel)
+    // Fetch the latest tonemapped display buffer on demand. 
+    pathtraceCopyDisplayToHost();
+    // No /samples (already averaged in prepareDisplayKernel)
     // and no tonemapping here (already applied by tonemapKernel).
     Image img(width, height);
 
