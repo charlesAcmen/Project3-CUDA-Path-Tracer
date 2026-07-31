@@ -16,3 +16,9 @@
 #define RR_P_MIN          0.2f
 #define RR_P_MAX          1.0f
 #define LARGE_T           1e30f       // sentinel > any valid ray–scene intersection
+
+// Bloom post-processing limits — single source of truth shared by the device
+// kernels (postprocess/bloom.cuh) and the host config (src/config.h), so the
+// legal radius range can't drift between the two.
+#define MAX_BLOOM_RADIUS 32           // max bloom Gaussian radius (device weights buffer size)
+#define BLOOM_BLOCK_SIZE 256          // threads per 1D block for the bloom blur kernels

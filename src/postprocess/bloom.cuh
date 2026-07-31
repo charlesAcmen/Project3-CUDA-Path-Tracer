@@ -24,14 +24,9 @@
 #pragma once
 
 #include "glm/glm.hpp"
+#include "constants.h"   // MAX_BLOOM_RADIUS, BLOOM_BLOCK_SIZE (shared with src/config.h)
 #include <cuda_runtime.h>
 #include <vector>
-
-// ---------------------------------------------------------------------------
-// Tunable constants
-// ---------------------------------------------------------------------------
-#define MAX_BLOOM_RADIUS 32       // max Gaussian blur radius
-#define BLOOM_BLOCK_SIZE 256      // threads per 1D block for blur kernels
 
 // ---------------------------------------------------------------------------
 // computeGaussianWeights — host-side 1D Gaussian kernel generation
