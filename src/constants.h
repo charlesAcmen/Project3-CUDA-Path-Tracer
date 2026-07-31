@@ -12,6 +12,11 @@
 #define SQRT_OF_ONE_THIRD 0.5773502691896257645091487805019574556476f
 #define EPSILON           0.00001f    // ray origin offset for self-intersection prevention
 #define RAY_EPSILON       1e-10f      // minimum ray–scene distance; rejects near-parallel / self-hit
+// Minimum squared length a refract() result must exceed to be a valid
+// direction.  Unit |d|² = 1.0; a NaN (TIR: sqrt of negative) compares
+// false against ANY threshold; a zero vector is 0.0.  0.5 sits safely
+// between all three.
+#define REFRACT_VALID_SQ_LEN_MIN 0.5f
 #define ROUGHNESS_THRESHOLD 0.001f
 #define RR_P_MIN          0.2f
 #define RR_P_MAX          1.0f

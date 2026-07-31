@@ -307,7 +307,7 @@ __host__ __device__ void scatterRay(
             // (glm::isnan is deliberately avoided: its CUDA branch recurses
             // under the MSVC host pass — compiler warning C4717.)
             glm::vec3 refractedDir = glm::refract(pathSegment.ray.direction, refractNormal, etaRatio);
-            const bool tir = !(glm::dot(refractedDir, refractedDir) > 0.5f);
+            const bool tir = !(glm::dot(refractedDir, refractedDir) > REFRACT_VALID_SQ_LEN_MIN);
 
             if (tir || rng.next(HaltonDim::FresnelRR) < reflectance)  // dim 8 (prime 23): Fresnel roulette
             {
