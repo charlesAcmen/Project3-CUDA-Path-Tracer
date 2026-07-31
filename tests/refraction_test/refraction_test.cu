@@ -29,6 +29,8 @@
 
 #include "interactions/interactions.cu"
 
+#include "constants.h"
+
 #include <cstdio>
 #include <cmath>
 
@@ -80,7 +82,10 @@ static bool testPremiseRefractNaNOnTIR()
 }
 
 // ---------------------------------------------------------------------------
-// L2: invariant — guard (k < 0) == refract() output non-finite
+// L2: invariant — the scatterRay guard never misses / over-fires.
+//     Ground truth: "refract() output is non-finite".  The guard's exact
+//     expression (GLM-only: !(squared-length > REFRACT_VALID_SQ_LEN_MIN)) must match it, and both
+//     must match the physics (TIR ⟺ k < 0).
 // ---------------------------------------------------------------------------
 static bool testGuardInvariant()
 {
@@ -96,18 +101,25 @@ static bool testGuardInvariant()
             const float sinT = sqrtf(fmaxf(0.0f, 1.0f - cosT * cosT));
             const glm::vec3 I = glm::normalize(glm::vec3(sinT, 0.0f, cosT));
 
-            // Exact same expression as the guard in scatterRay.
-            const float dotValue = glm::dot(refractNormal, I);
-            const float k = 1.0f - ior * ior * (1.0f - dotValue * dotValue);
-            const bool tir = (k < 0.0f);
-
             const glm::vec3 R = glm::refract(I, refractNormal, ior);
             const bool nonFinite = !isFinite(R);
 
+            // Physics: TIR (k < 0) ⟺ refract() produced a non-finite vector.
+            const float dotValue = glm::dot(refractNormal, I);
+            const float k = 1.0f - ior * ior * (1.0f - dotValue * dotValue);
+            const bool tir = (k < 0.0f);
             CHECK(tir == nonFinite,
-                  "ior=%g cosT=%g: guard k<0=%d but refract nonFinite=%d "
-                  "(k=%g, R=(%g, %g, %g))",
-                  ior, cosT, (int)tir, (int)nonFinite, k, R.x, R.y, R.z);
+                  "ior=%g cosT=%g: TIR (k=%g<0=%d) but refract nonFinite=%d",
+                  ior, cosT, k, (int)tir, (int)nonFinite);
+
+            // The exact guard expression from scatterRay (GLM-only, no k
+            // recomputation) must match that ground truth.  Note it relies on
+            // NaN comparing false against ANY threshold: !(NaN > REFRACT_VALID_SQ_LEN_MIN) == true.
+            const bool guardDegenerate = !(glm::dot(R, R) > REFRACT_VALID_SQ_LEN_MIN);
+            CHECK(guardDegenerate == nonFinite,
+                  "ior=%g cosT=%g: guard degenerate=%d but refract nonFinite=%d "
+                  "(R=(%g, %g, %g))",
+                  ior, cosT, (int)guardDegenerate, (int)nonFinite, R.x, R.y, R.z);
         }
     }
     return true;
@@ -200,7 +212,7 @@ int main()
     allOk = allOk && r1;
 
     bool r2 = testGuardInvariant();
-    fprintf(stdout, "[%s] L2 invariant: guard (k<0) == refract() non-finite, all angles/IORs\n",
+    fprintf(stdout, "[%s] L2 invariant: guard (degenerate output) == refract() non-finite == TIR\n",
             r2 ? "PASS" : "FAIL");
     allOk = allOk && r2;
 
