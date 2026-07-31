@@ -30,6 +30,15 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     SET_PROPERTY(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
+# CUDA error-checking (checkCUDAError in src/utilities.h) is a debug-time
+# safety net: each call does a full cudaDeviceSynchronize(), serialising the
+# GPU pipeline.  Compile it in only for Debug / RelWithDebInfo; Release keeps
+# kernels fully asynchronous.  Global so it also covers src/stream_compaction.
+add_compile_definitions(
+    $<$<CONFIG:Debug>:CIS565_ENABLE_CUDA_ERRORCHECK>
+    $<$<CONFIG:RelWithDebInfo>:CIS565_ENABLE_CUDA_ERRORCHECK>
+)
+
 find_package(OpenGL REQUIRED)
 
 if(UNIX)
