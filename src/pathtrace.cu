@@ -64,7 +64,12 @@ void  setBloomThreshold(float v)    { g_opts.bloom.threshold = v; }
 float getBloomThreshold()           { return g_opts.bloom.threshold; }
 void  setBloomIntensity(float v)    { g_opts.bloom.intensity = v; }
 float getBloomIntensity()           { return g_opts.bloom.intensity; }
-void  setBloomRadius(int v)         { if (v != g_opts.bloom.radius) { g_opts.bloom.radius = v; g_opts.bloom.sigma = v * 0.5f; } }
+void  setBloomRadius(int v)         { 
+    v = std::min(BloomConfig::kRadiusMax, std::max(BloomConfig::kRadiusMin, v));
+    if (v != g_opts.bloom.radius) { 
+        g_opts.bloom.radius = v; g_opts.bloom.sigma = v * 0.5f; 
+    } 
+}
 int   getBloomRadius()              { return g_opts.bloom.radius; }
 void  setBloomSigma(float v)        { g_opts.bloom.sigma = v; }
 float getBloomSigma()               { return g_opts.bloom.sigma; }

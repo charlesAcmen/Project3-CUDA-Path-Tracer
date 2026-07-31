@@ -218,16 +218,21 @@ void RenderImGui()
             setBloomEnabled(bloomEnabled);
 
         if (bloomEnabled) {
+            // Slider bounds come from the same constexpr ranges that clamp
+            // config.json ingestion (config.h) — one source of truth.
             float threshold = getBloomThreshold();
-            if (ImGui::SliderFloat("Threshold", &threshold, 0.1f, 10.0f, "%.2f"))
+            if (ImGui::SliderFloat("Threshold", &threshold,
+                    BloomConfig::kThresholdMin, BloomConfig::kThresholdMax, "%.2f"))
                 setBloomThreshold(threshold);
 
             float intensity = getBloomIntensity();
-            if (ImGui::SliderFloat("Intensity", &intensity, 0.0f, 2.0f, "%.2f"))
+            if (ImGui::SliderFloat("Intensity", &intensity,
+                    BloomConfig::kIntensityMin, BloomConfig::kIntensityMax, "%.2f"))
                 setBloomIntensity(intensity);
 
             int radius = getBloomRadius();
-            if (ImGui::SliderInt("Radius", &radius, 1, 30))
+            if (ImGui::SliderInt("Radius", &radius,
+                    BloomConfig::kRadiusMin, BloomConfig::kRadiusMax))
                 setBloomRadius(radius);
         }
 
@@ -238,7 +243,9 @@ void RenderImGui()
             setChromaticAberrationEnabled(caEnabled);
         if (caEnabled) {
             float caIntensity = getChromaticAberrationIntensity();
-            if (ImGui::SliderFloat("CA Intensity", &caIntensity, 0.0f, 0.008f, "%.5f"))
+            if (ImGui::SliderFloat("CA Intensity", &caIntensity,
+                    ChromaticAberrationConfig::kIntensityMin,
+                    ChromaticAberrationConfig::kIntensityMax, "%.5f"))
                 setChromaticAberrationIntensity(caIntensity);
         }
 
@@ -249,10 +256,12 @@ void RenderImGui()
             setVignetteEnabled(vigEnabled);
         if (vigEnabled) {
             float vigIntensity = getVignetteIntensity();
-            if (ImGui::SliderFloat("Vignette Intensity", &vigIntensity, 0.0f, 1.0f, "%.2f"))
+            if (ImGui::SliderFloat("Vignette Intensity", &vigIntensity,
+                    VignetteConfig::kIntensityMin, VignetteConfig::kIntensityMax, "%.2f"))
                 setVignetteIntensity(vigIntensity);
             float vigExponent = getVignetteExponent();
-            if (ImGui::SliderFloat("Vignette Exponent", &vigExponent, 0.5f, 8.0f, "%.1f"))
+            if (ImGui::SliderFloat("Vignette Exponent", &vigExponent,
+                    VignetteConfig::kExponentMin, VignetteConfig::kExponentMax, "%.1f"))
                 setVignetteExponent(vigExponent);
         }
 
