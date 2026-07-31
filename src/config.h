@@ -14,7 +14,9 @@
 
 #include "profiler/profiler.h"    // ProfilerConfig
 #include "sceneStructs.h"         // CompactMethod, RngMode, FresnelMode
+#include "constants.h"            // MAX_BLOOM_RADIUS (BloomConfig::kRadiusMax)
 
+#include <algorithm>              // std::min / std::max (config clamping)
 #include <string>
 #include <vector>
 
@@ -30,17 +32,55 @@ struct BloomConfig {
     float sigma     = 5.0f;
 
     int kernelSize() const { return 2 * radius + 1; }
+
+    // ---- Legal ranges (single source of truth) ----
+    // Consumed by config.json ingestion (config.cpp clamps to these), the
+    // ImGui sliders (main.cpp), and the pathtrace.cu setters — so JSON,
+    // code defaults, and the UI can never drift apart.
+    // kRadiusMax must stay <= MAX_BLOOM_RADIUS (constants.h): the device
+    // bloomWeights buffer is sized from that constant.
+    static constexpr float kThresholdMin = 0.1f;
+    static constexpr float kThresholdMax = 10.0f;
+    static constexpr float kIntensityMin = 0.0f;
+    static constexpr float kIntensityMax = 2.0f;
+    static constexpr int   kRadiusMin    = 1;
+    static constexpr int   kRadiusMax    = MAX_BLOOM_RADIUS;
+
+    void clamp() {
+        threshold = std::min(kThresholdMax, std::max(kThresholdMin, threshold));
+        intensity = std::min(kIntensityMax, std::max(kIntensityMin, intensity));
+        radius    = std::min(kRadiusMax, std::max(kRadiusMin, radius));
+    }
 };
 
 struct ChromaticAberrationConfig {
     bool  enabled   = false;
     float intensity = 0.003f;
+
+    // ---- Legal range (single source of truth; see BloomConfig) ----
+    static constexpr float kIntensityMin = 0.0f;
+    static constexpr float kIntensityMax = 0.008f;
+
+    void clamp() {
+        intensity = std::min(kIntensityMax, std::max(kIntensityMin, intensity));
+    }
 };
 
 struct VignetteConfig {
     bool  enabled   = false;
     float intensity = 0.5f;
     float exponent  = 2.0f;
+
+    // ---- Legal ranges (single source of truth; see BloomConfig) ----
+    static constexpr float kIntensityMin = 0.0f;
+    static constexpr float kIntensityMax = 1.0f;
+    static constexpr float kExponentMin  = 0.5f;
+    static constexpr float kExponentMax  = 8.0f;
+
+    void clamp() {
+        intensity = std::min(kIntensityMax, std::max(kIntensityMin, intensity));
+        exponent  = std::min(kExponentMax, std::max(kExponentMin, exponent));
+    }
 };
 
 // ---- Unified startup configuration --------------------------------------

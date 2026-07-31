@@ -109,6 +109,14 @@ void mergeConfigJson(AppConfig& cfg, const json& data)
         if (p.contains("verbose"))  cfg.profCfg.verbose     = p["verbose"].get<bool>();
         if (p.contains("warmup"))   cfg.profCfg.warmupIters = p["warmup"].get<int>();
     }
+
+    // Clamp merged values to their legal ranges (the constexpr bounds on each
+    // config struct).  This choke point guarantees a config file can never
+    // overflow the device bloomWeights buffer (radius > MAX_BLOOM_RADIUS) or
+    // push a visual parameter outside the range the ImGui sliders expose.
+    cfg.bloom.clamp();
+    cfg.chromaticAberration.clamp();
+    cfg.vignette.clamp();
 }
 
 // ====================================================================
