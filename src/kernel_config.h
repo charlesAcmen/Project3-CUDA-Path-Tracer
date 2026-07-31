@@ -5,6 +5,62 @@
 #include <algorithm>
 
 /**
+ * DeviceInfo - Singleton for caching device properties
+ * Avoids repeated cudaGetDeviceProperties calls
+ */
+class DeviceInfo {
+public:
+    static DeviceInfo& getInstance(int deviceId = 0) {
+        static DeviceInfo instance(deviceId);
+        return instance;
+    }
+
+    const cudaDeviceProp& getProperties() const { return prop; }
+
+    int getMaxThreadsPerBlock() const { return prop.maxThreadsPerBlock; }
+    int getMultiProcessorCount() const { return prop.multiProcessorCount; }
+    int getWarpSize() const { return prop.warpSize; }
+    int getComputeCapability() const { return prop.major * 10 + prop.minor; }
+
+    /**
+     * Returns the recommended scan block size (threads per block) for the
+     * hierarchical shared-memory scan kernels.
+     *
+     * 512 is preferred on devices that support it (CC 3.0+ with >=512
+     * threads/block) because it halves the number of recursion levels
+     * compared to 256.  Shared memory pressure is minimal (4 KB vs 2 KB
+     * per block) and does not hurt occupancy on any GPU since Kepler.
+     */
+    int getOptimalScanBlockSize() const {
+        return (prop.maxThreadsPerBlock >= 512) ? 512 : 256;
+    }
+
+    void printDeviceInfo() const {
+        printf("=== CUDA Device Info ===\n");
+        printf("Device: %s\n", prop.name);
+        printf("Compute Capability: %d.%d\n", prop.major, prop.minor);
+        printf("Multiprocessors: %d\n", prop.multiProcessorCount);
+        printf("Max Threads per Block: %d\n", prop.maxThreadsPerBlock);
+        printf("Max Threads per Multiprocessor: %d\n", prop.maxThreadsPerMultiProcessor);
+        printf("Warp Size: %d\n", prop.warpSize);
+        printf("Max Grid Size: (%d, %d, %d)\n",
+               prop.maxGridSize[0], prop.maxGridSize[1], prop.maxGridSize[2]);
+        printf("========================\n");
+    }
+
+    // Delete copy/move constructors
+    DeviceInfo(const DeviceInfo&) = delete;
+    DeviceInfo& operator=(const DeviceInfo&) = delete;
+
+private:
+    cudaDeviceProp prop;
+
+    explicit DeviceInfo(int deviceId) {
+        cudaGetDeviceProperties(&prop, deviceId);
+    }
+};
+
+/**
  * KernelConfig - Dynamic kernel launch configuration management
  * 
  * This class provides automatic grid/block size configuration based on:
@@ -37,8 +93,10 @@ public:
     KernelConfig(int numElements, int deviceId = 0, int preferredBlockSize = 0)
         : effectiveThreads(numElements) {
         
-        cudaDeviceProp deviceProp;
-        cudaGetDeviceProperties(&deviceProp, deviceId);
+        // Device properties come from the DeviceInfo singleton (one driver
+        // query per device) instead of a cudaGetDeviceProperties call on
+        // every kernel launch.
+        const cudaDeviceProp& deviceProp = DeviceInfo::getInstance(deviceId).getProperties();
         
         // Determine optimal block size
         if (preferredBlockSize > 0) {
@@ -178,62 +236,6 @@ public:
     void print() const {
         printf("OccupancyConfig: grid(%d) block(%d) -> %d threads\n",
                gridSize, blockSize, effectiveThreads);
-    }
-};
-
-/**
- * DeviceInfo - Singleton for caching device properties
- * Avoids repeated cudaGetDeviceProperties calls
- */
-class DeviceInfo {
-public:
-    static DeviceInfo& getInstance(int deviceId = 0) {
-        static DeviceInfo instance(deviceId);
-        return instance;
-    }
-    
-    const cudaDeviceProp& getProperties() const { return prop; }
-    
-    int getMaxThreadsPerBlock() const { return prop.maxThreadsPerBlock; }
-    int getMultiProcessorCount() const { return prop.multiProcessorCount; }
-    int getWarpSize() const { return prop.warpSize; }
-    int getComputeCapability() const { return prop.major * 10 + prop.minor; }
-
-    /**
-     * Returns the recommended scan block size (threads per block) for the
-     * hierarchical shared-memory scan kernels.
-     *
-     * 512 is preferred on devices that support it (CC 3.0+ with >=512
-     * threads/block) because it halves the number of recursion levels
-     * compared to 256.  Shared memory pressure is minimal (4 KB vs 2 KB
-     * per block) and does not hurt occupancy on any GPU since Kepler.
-     */
-    int getOptimalScanBlockSize() const {
-        return (prop.maxThreadsPerBlock >= 512) ? 512 : 256;
-    }
-
-    void printDeviceInfo() const {
-        printf("=== CUDA Device Info ===\n");
-        printf("Device: %s\n", prop.name);
-        printf("Compute Capability: %d.%d\n", prop.major, prop.minor);
-        printf("Multiprocessors: %d\n", prop.multiProcessorCount);
-        printf("Max Threads per Block: %d\n", prop.maxThreadsPerBlock);
-        printf("Max Threads per Multiprocessor: %d\n", prop.maxThreadsPerMultiProcessor);
-        printf("Warp Size: %d\n", prop.warpSize);
-        printf("Max Grid Size: (%d, %d, %d)\n", 
-               prop.maxGridSize[0], prop.maxGridSize[1], prop.maxGridSize[2]);
-        printf("========================\n");
-    }
-    
-    // Delete copy/move constructors
-    DeviceInfo(const DeviceInfo&) = delete;
-    DeviceInfo& operator=(const DeviceInfo&) = delete;
-    
-private:
-    cudaDeviceProp prop;
-    
-    explicit DeviceInfo(int deviceId) {
-        cudaGetDeviceProperties(&prop, deviceId);
     }
 };
 
