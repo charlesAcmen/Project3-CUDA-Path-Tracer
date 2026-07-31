@@ -283,16 +283,33 @@ __host__ __device__ void scatterRay(
             const float etaRatio = entering ? m.invIndexOfRefraction : m.indexOfRefraction;
             const glm::vec3 refractNormal = entering ? normal : -normal;
 
-            // Both Fresnel functions return 1.0 on total internal reflection,
-            // so u01 < 1.0 is always true → the reflection branch is taken.
-            float reflectance = selectFresnelEvaluator(fresnelMode, cosThetaI, n1, n2);
+            // Both Fresnel functions return exactly 1.0 on total internal
+            // reflection (see fresnelSchlick / fresnelAccurate), so the roulette
+            // below normally takes the reflection branch whenever refraction is
+            // impossible.  The explicit `tir ||` below makes that unconditional.
+            const float reflectance = selectFresnelEvaluator(fresnelMode, cosThetaI, n1, n2);
 
             // Russian roulette: reflect with prob R, refract with prob 1-R.
             // Throughput multiplier = (energy fraction) / (probability):
             //   reflection:  R * color / R     = color
             //   refraction: (1-R) * color / (1-R) = color
             // → Fresnel factor cancels out in both branches.
-            if (rng.next(HaltonDim::FresnelRR) < reflectance)  // dim 8 (prime 23): Fresnel roulette
+            //
+            // TIR detection from refract()'s OUTPUT — not a recomputation of k.
+            // GLM computes k = 1 - eta²(1-dot²) internally and returns a NaN
+            // vector when k < 0 (sqrt of a negative); inspecting the result
+            // catches that.  A valid refracted direction is always unit length
+            // (squared length 1.0) and NaN compares false against ANY
+            // threshold, so one check catches every degenerate shape:
+            //   valid refraction:  dot = 1.0  → !(1.0 > 0.5) = false
+            //   TIR → NaN:         dot = NaN  → !(NaN > 0.5) = true
+            //   zero vector:       dot = 0.0  → !(0.0 > 0.5) = true
+            // (glm::isnan is deliberately avoided: its CUDA branch recurses
+            // under the MSVC host pass — compiler warning C4717.)
+            glm::vec3 refractedDir = glm::refract(pathSegment.ray.direction, refractNormal, etaRatio);
+            const bool tir = !(glm::dot(refractedDir, refractedDir) > 0.5f);
+
+            if (tir || rng.next(HaltonDim::FresnelRR) < reflectance)  // dim 8 (prime 23): Fresnel roulette
             {
                 glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
                 const float offsetSign = entering ? 1.0f : -1.0f;
@@ -301,7 +318,8 @@ __host__ __device__ void scatterRay(
             }
             else
             {
-                glm::vec3 refractedDir = glm::refract(pathSegment.ray.direction, refractNormal, etaRatio);
+                // !tir here ⇒ refractedDir is a finite unit vector; the offset
+                // pushes to the far side of the surface.
                 const float offsetSign = entering ? -1.0f : 1.0f;
                 pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
                 pathSegment.ray.direction = refractedDir;
