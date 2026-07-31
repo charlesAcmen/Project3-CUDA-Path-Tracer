@@ -100,8 +100,10 @@ std::string currentTimeString()
 
 void saveImage()
 {
-    float samples = iteration;
-    // output image file
+    // state.image holds the tonemapped display buffer (LDR sRGB [0,1]) —
+    // identical to what pathtrace() showed on screen this frame — so write
+    // it out directly.  No /samples (already averaged in prepareDisplayKernel)
+    // and no tonemapping here (already applied by tonemapKernel).
     Image img(width, height);
 
     for (int x = 0; x < width; x++)
@@ -110,13 +112,13 @@ void saveImage()
         {
             int index = x + (y * width);
             glm::vec3 pix = renderState->image[index];
-            img.setPixel(width - 1 - x, y, glm::vec3(pix) / samples);
+            img.setPixel(width - 1 - x, y, pix);
         }
     }
 
     std::string filename = renderState->imageName;
     std::ostringstream ss;
-    ss << filename << "." << startTimeString << "." << samples << "samp";
+    ss << filename << "." << startTimeString << "." << iteration << "samp";
     filename = ss.str();
 
     // CHECKITOUT
