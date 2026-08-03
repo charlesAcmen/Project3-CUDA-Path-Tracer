@@ -145,34 +145,6 @@ namespace HaltonDim {
 }
 
 /**
- * Returns the n-th prime number for use as a Halton sequence base.
- *
- * Accessible from both host and device code.
- *
- * Halton dimension → prime base mapping:
- *   dim 0 → 2,   1 → 3,   2 → 5,   3 → 7,
- *   dim 4 → 11,  5 → 13,  6 → 17,  7 → 19,
- *   dim 8 → 23,  9 → 29,  10 → 31, 11 → 37,
- *   dim 12 → 41, 13 → 43, 14 → 47, 15 → 53
- */
-__host__ __device__ inline int getHaltonPrime(int dim) {
-    // constexpr array lets the compiler emit a single indexed load
-    // from constant memory instead of a 16-branch if-else chain.
-    constexpr int primes[] = {
-        2, 3, 5, 7, 11, 13, 17, 19,
-        23, 29, 31, 37, 41, 43, 47, 53
-    };
-    // Clamp out-of-range dims into [0, HALTON_NUM_DIMS-1] (also covers
-    // negative dims) so the index can never go out of bounds.  A clamped
-    // value collides with an existing dimension, so callers MUST stay in
-    // range.
-    int idx = dim;
-    if (idx < 0)                     idx = 0;
-    else if (idx >= HALTON_NUM_DIMS) idx = HALTON_NUM_DIMS - 1;
-    return primes[idx];
-}
-
-/**
  * Encodes bounce number for the `depth` argument of makeRngState.
  * Pass depth = bounceNum * MAX_DRAWS_PER_BOUNCE so each bounce gets a
  * distinct bounceIndex value inside the hash.  The actual multiplier (8)
@@ -258,6 +230,40 @@ __host__ __device__ inline float owenRadicalInverse(
     return result;
 }
 
+/**
+ * Runtime-dim dispatch to the templated owenRadicalInverse<BASE>.
+ *
+ * Every case passes a literal prime (the same list as getHaltonPrime), so
+ * the compiler can constant-fold all the integer division/modulo in the
+ * digit loop.  At the renderer call sites `dim` is a compile-time HaltonDim
+ * constant, so the switch collapses to the single matching case and the
+ * fold is total.  A runtime `dim` (e.g. the rng_compare test) still works —
+ * the switch just isn't folded.  Out-of-range dims fall back to base 53,
+ * matching getHaltonPrime's clamp for dim >= 16.
+ */
+__host__ __device__ inline float owenRadicalInverse(
+    int dim, unsigned int n, unsigned int seed)
+{
+    switch (dim) {
+        case 0:  return owenRadicalInverse<2> (n, seed);
+        case 1:  return owenRadicalInverse<3> (n, seed);
+        case 2:  return owenRadicalInverse<5> (n, seed);
+        case 3:  return owenRadicalInverse<7> (n, seed);
+        case 4:  return owenRadicalInverse<11>(n, seed);
+        case 5:  return owenRadicalInverse<13>(n, seed);
+        case 6:  return owenRadicalInverse<17>(n, seed);
+        case 7:  return owenRadicalInverse<19>(n, seed);
+        case 8:  return owenRadicalInverse<23>(n, seed);
+        case 9:  return owenRadicalInverse<29>(n, seed);
+        case 10: return owenRadicalInverse<31>(n, seed);
+        case 11: return owenRadicalInverse<37>(n, seed);
+        case 12: return owenRadicalInverse<41>(n, seed);
+        case 13: return owenRadicalInverse<43>(n, seed);
+        case 14: return owenRadicalInverse<47>(n, seed);
+        default: return owenRadicalInverse<53>(n, seed);  // dim 15 and out-of-range
+    }
+}
+
 // ============================================================================
 // RngState — unified RNG interface
 // ============================================================================
@@ -334,7 +340,10 @@ struct RngState {
                 ^ ((unsigned int)bounceIndex       * 0x85ebca6bu)
                 ^ ((unsigned int)dim               * 0xc2b2ae35u));
 
-            float s = owenRadicalInverse(base, haltonIndex, seed);
+            // Dispatch on dim: at renderer call sites dim is a compile-time
+            // HaltonDim constant, so this resolves to a single templated
+            // owenRadicalInverse<BASE> with all div/mod constant-folded.
+            float s = owenRadicalInverse(dim, haltonIndex, seed);
             float rot = (float)(seed & 0xFFFFFFu) * (1.0f / 16777216.0f);  // per-(pixel,bounce,dim) decorrelator
             return cpRotate(s, rot);
         }
