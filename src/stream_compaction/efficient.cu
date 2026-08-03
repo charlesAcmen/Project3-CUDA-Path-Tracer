@@ -6,7 +6,7 @@
 #include "kernel_config.h"
 
 // Include PathSegment definition (need full definition, not just forward declaration)
-#include "../src/sceneStructs.h"
+#include "sceneStructs.h"
 
 namespace StreamCompaction {
     namespace Efficient {
