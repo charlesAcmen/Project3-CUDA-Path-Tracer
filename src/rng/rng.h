@@ -34,7 +34,7 @@
  *
  *   KNOWN LIMITATION: for Halton's mixed prime bases, no digit-structure-
  *     preserving scramble can fully decorrelate pixels (small bases have few
- *     digit permutations; a strong base-2 hash like owenScramble breaks the
+ *     digit permutations; a strong base-2 hash (Burley-style) breaks the
  *     cross-dimensional net, see BUG 4).  True per-pixel independence would
  *     require an all-base-2 sequence (Sobol + Burley hash).
  *
@@ -176,45 +176,6 @@ constexpr int MAX_DRAWS_PER_BOUNCE = 8;
 // ShadingConfig and PathTracerOptions)
 // ============================================================================
 
-// ============================================================================
-// Halton radical inverse
-// ============================================================================
-
-/**
- * Halton radical inverse: computes the n-th term of the Halton sequence
- * in the given prime base.
- *
- *   Phi_b(n) = sum_{k=0}^{m-1} d_k * b^{-(k+1)}
- *
- * where n = sum_{k=0}^{m-1} d_k * b^k is the base-b digit representation.
- *
- * Example (base 2):
- *   n=0 ->           -> 0.0_2     = 0.0
- *   n=1 -> "1"       -> 0.1_2     = 0.5
- *   n=2 -> "10"      -> 0.01_2    = 0.25
- *   n=3 -> "11"      -> 0.11_2    = 0.75
- *   n=4 -> "100"     -> 0.001_2   = 0.125
- *
- * @param base  Prime base (e.g. 2, 3, 5, 7, ...)
- * @param n     Sequence index (0-based)
- * @return      The n-th Halton sample in [0, 1)
- */
-__host__ __device__ inline float radicalInverse(int base, unsigned int n)
-{
-    float invBase = 1.0f / (float)base;
-    float invBaseN = invBase;
-    float result = 0.0f;
-
-    while (n > 0) {
-        unsigned int digit = n % (unsigned int)base;
-        result += (float)digit * invBaseN;
-        invBaseN *= invBase;
-        n /= (unsigned int)base;
-    }
-    return result;
-}
-
-
 /**
  * Cranley-Patterson rotation: shifts a Halton sample by a per-pixel,
  * per-dimension random offset, wrapped modulo 1.0.
@@ -228,85 +189,9 @@ __host__ __device__ inline float cpRotate(float x, float offset)
     return val;
 }
 
-/**
- * [LEGACY] Produces a hash-based starting offset for the Halton sequence.
- */
-__host__ __device__ inline unsigned int mixHaltonBaseOffset(
-    unsigned int pixelIndex,
-    unsigned int bounceIndex)
-{
-    unsigned int h = utilhash(pixelIndex + 0x9e3779b9u);
-    h = utilhash(h ^ (bounceIndex + 0x85ebca6bu));
-    return h;
-}
-
 // ============================================================================
-// Owen Scrambling — replaces Cranley-Patterson rotation
+// Owen Scrambling — nested digit permutations (Owen 1997)
 // ============================================================================
-
-/**
- * Portable bit-reverse for Owen scrambling.
- *
- * On CUDA device: delegates to the single-cycle __brev() PTX instruction.
- * On host (test programs, nvcc host-side compilation): software fallback
- * using standard bit-manipulation trick (5 ops, branch-free).
- */
-__host__ __device__ inline unsigned int bitReverse(unsigned int x)
-{
-#ifdef __CUDA_ARCH__
-    return __brev(x);
-#else
-    // Standard 5-step bit-reverse (Knuth TAOCP vol.4)
-    x = ((x >> 1) & 0x55555555u) | ((x & 0x55555555u) << 1);
-    x = ((x >> 2) & 0x33333333u) | ((x & 0x33333333u) << 2);
-    x = ((x >> 4) & 0x0f0f0f0fu) | ((x & 0x0f0f0f0fu) << 4);
-    x = ((x >> 8) & 0x00ff00ffu) | ((x & 0x00ff00ffu) << 8);
-    x = (x >> 16)                | (x                 << 16);
-    return x;
-#endif
-}
-
-/**
- * Owen Scrambling for Sobol / power-of-two bases (Burley 2020 /
- * Laine & Kerola 2009).
- *
- * WARNING — BASE-2 ONLY.  This hash scramble relies on the bit-reverse +
- * multiply-XOR construction that only respects the base-2 digit tree.
- * Applying it to radicalInverse(base, ·) for a non-power-of-two base
- * (3, 5, 7, 11, …) preserves the 1D marginal but destroys the
- * cross-dimensional net structure (see BUG 4 below).  For the multi-prime
- * Halton used in this codebase, use owenRadicalInverse() instead.
- * Kept here for reference and for potential Sobol support.
- *
- * It applies a hash-based nested bit permutation to a Halton index.  The
- * permutation is "uniform" in the sense that it maps every integer in
- * [0, 2^32) to a unique other integer — it is a bijection.  Because it
- * respects the base-2 tree structure of the radical inverse, it provably
- * preserves the (t, s)-net low-discrepancy property.
- *
- * Algorithm (Burley 2020 §4.2 — 4-round hash scramble):
- *   1. Bit-reverse n so the MSBs of the Halton index become LSBs.
- *   2. Apply 4 rounds of multiply-XOR mixing seeded by `seed`.
- *   3. Bit-reverse back so scrambled digits align with radical-inverse.
- *
- * GPU cost: 2 × __brev (1 cycle each) + 4 × {XOR, MUL} = ~6 ALU ops.
- * No LUT, no recursion, no branches.
- *
- * @param n     Halton index (integer, NOT the float radical-inverse value).
- *              Pass this to radicalInverse() after scrambling.
- * @param seed  Per-pixel per-dimension seed (chained hash — no collisions).
- * @return      Scrambled index; feed to radicalInverse(base, result).
- */
-__host__ __device__ inline unsigned int owenScramble(unsigned int n, unsigned int seed)
-{
-    n  = bitReverse(n);
-    n ^= n  * 0x3d20adeau;
-    n += seed;
-    n *= (seed >> 16) | 1u;
-    n ^= n  * 0x05526c56u;
-    n ^= n  * 0x53a22864u;
-    return bitReverse(n);
-}
 
 /**
  * TRUE (nested) Owen-scrambled radical inverse for arbitrary prime base b.
@@ -403,11 +288,11 @@ struct RngState {
             // at the same index N form a well-distributed d-dimensional point.
             int base = getHaltonPrime(dim);
 
-            // TRUE nested Owen scramble (NOT owenScramble: that is a BASE-2
-            // ONLY hash scramble — for bases 3,5,7,11,… it destroys the
-            // cross-dimensional net structure, see BUG 4).  Per-level digit
-            // permutation depends on the prefix (higher digits), per the Owen
-            // definition.  The index stays a clean consecutive walk
+            // TRUE nested Owen scramble (NOT a base-2-only Burley-style hash
+            // scramble — for bases 3,5,7,11,… that destroys the
+            // cross-dimensional net structure, see the file header).  Per-level
+            // digit permutation depends on the prefix (higher digits), per the
+            // Owen definition.  The index stays a clean consecutive walk
             // (haltonIndex = iter) — NO per-pixel index jump.
             //
             // Pixel/bounce/dim decorrelation comes from the chained-hash seed.
