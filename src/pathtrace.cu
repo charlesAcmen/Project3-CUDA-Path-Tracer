@@ -1,7 +1,7 @@
 #include "pathtrace.h"
 #include "sceneStructs.h"
 #include "scene/scene.h"
-#include "utilities.h"
+#include "utils/utilities.h"
 #include "constants.h"
 
 #include <cstdio>

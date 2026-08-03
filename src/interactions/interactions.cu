@@ -1,6 +1,6 @@
 #include "interactions/interactions.h"
 
-#include "utilities.h"
+#include "utils/utilities.h"
 
 #include "rng/rng.h"
 

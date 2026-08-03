@@ -4,7 +4,7 @@
 #include "pathtrace.h"
 #include "scene/scene.h"
 #include "scene/scene_loader.h"
-#include "utilities.h"
+#include "utils/utilities.h"
 #include "window_setup.h"  // init, initTextures, initCuda, initPBO, etc.
 
 #include <glm/glm.hpp>

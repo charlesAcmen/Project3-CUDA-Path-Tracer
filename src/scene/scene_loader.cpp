@@ -7,7 +7,7 @@
 
 #include "constants.h"
 #include "utils/logger.h"
-#include "utilities.h"
+#include "utils/utilities.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include "json.hpp"
