@@ -1,6 +1,6 @@
 #include "profiler/profiler.h"
 
-#include "logger.h"
+#include "utils/logger.h"
 
 #include <cstdio>
 #include <ctime>

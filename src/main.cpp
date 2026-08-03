@@ -1,9 +1,9 @@
-#include "config.h"        // appConfig, initAppConfig, printStartupSummary
-#include "logger.h"        // Log::error
+#include "config/config.h"        // appConfig, initAppConfig, printStartupSummary
+#include "utils/logger.h"        // Log::error
 #include "image.h"
 #include "pathtrace.h"
-#include "scene.h"
-#include "scene_loader.h"
+#include "scene/scene.h"
+#include "scene/scene_loader.h"
 #include "utilities.h"
 #include "window_setup.h"  // init, initTextures, initCuda, initPBO, etc.
 

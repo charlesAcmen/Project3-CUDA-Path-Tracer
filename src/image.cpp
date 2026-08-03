@@ -1,6 +1,6 @@
 #include "image.h"
 
-#include "logger.h"
+#include "utils/logger.h"
 
 #include <stb_image_write.h>
 

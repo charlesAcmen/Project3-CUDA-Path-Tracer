@@ -1,7 +1,7 @@
 #pragma once
 
-#include "config.h"       // BloomConfig, ChromaticAberrationConfig, VignetteConfig
-#include "scene.h"
+#include "config/config.h"       // BloomConfig, ChromaticAberrationConfig, VignetteConfig
+#include "scene/scene.h"
 
 // ====================================================================
 // Organizing structures for the path tracer's GPU resources and

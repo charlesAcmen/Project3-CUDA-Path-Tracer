@@ -1,6 +1,6 @@
 #include "pathtrace.h"
 #include "sceneStructs.h"
-#include "scene.h"
+#include "scene/scene.h"
 #include "utilities.h"
 #include "constants.h"
 
@@ -24,7 +24,7 @@
 #include "intersection/intersections.h"   // getPointOnRay, getExactPointOnRay, concentricSampleDisk
 #include "interactions/interactions.h"    // scatterRay, fresnel*, classifyRefraction
 #include "profiler/profiler.h"
-#include "kernel_config.h"
+#include "kernels/kernel_config.h"
 #include "rng/rng.h"
 #include "efficient.h"       // StreamCompaction::Efficient
 

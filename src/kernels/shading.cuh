@@ -9,7 +9,7 @@
 // ====================================================================
 
 #include "sceneStructs.h"
-#include "scene.h"          // ShadingConfig
+#include "scene/scene.h"          // ShadingConfig
 #include "interactions/interactions.h"   // scatterRay
 #include "rng/rng.h"
 #include "constants.h"

@@ -3,7 +3,7 @@
 #include <cuda_runtime.h>
 #include "common.h"
 #include "efficient.h"
-#include "kernel_config.h"
+#include "kernels/kernel_config.h"
 
 // Include PathSegment definition (need full definition, not just forward declaration)
 #include "sceneStructs.h"
