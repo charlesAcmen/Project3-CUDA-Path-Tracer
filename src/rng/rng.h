@@ -203,7 +203,7 @@ __host__ __device__ inline float cpRotate(float x, float offset)
 // ============================================================================
 
 /**
- * TRUE (nested) Owen-scrambled radical inverse for arbitrary prime base b.
+ * TRUE (nested) Owen-scrambled radical inverse for a prime base BASE.
  *
  * Owen scrambling (Owen 1997) permutes each digit of the radical inverse,
  * with the permutation at digit level k depending on the digits already
@@ -217,34 +217,42 @@ __host__ __device__ inline float cpRotate(float x, float offset)
  *
  * The per-level permutation here is the affine map d -> (a·d + c) mod b
  * (branch-free; bijective for prime b since a ∈ [1,b-1]), with (a, c)
- * derived from a hash of (prefix, level) — so it depends on the higher
- * digits, per the definition.  This is a restricted instantiation of the
- * full nested-Owen family; see the note in next() about decorrelation.
+ * derived from a hash of (prefix, level) — so it depends on the more
+ * significant digits already read, per the definition.  This is a
+ * restricted instantiation of the full nested-Owen family; see the note in
+ * next() about decorrelation.
+ *
+ * BASE is a template parameter so every `%` and `/` below is a compile-time
+ * constant — nvcc folds them into multiply-shift sequences instead of
+ * emitting slow integer division (~20+ instructions per op on the GPU).
+ * Dispatch from a runtime dim via the owenRadicalInverse(int, ...) overload
+ * below.
  */
+template <int BASE>
 __host__ __device__ inline float owenRadicalInverse(
-    int base, unsigned int n, unsigned int seed)
+    unsigned int n, unsigned int seed)
 {
-    float invBase  = 1.0f / (float)base;
+    constexpr float invBase = 1.0f / (float)BASE;
     float invBaseN = invBase;
     float result   = 0.0f;
     unsigned int prefix = seed;   // running hash of the more-significant fractional digits read so far
     unsigned int level  = 0;
     while (n > 0) {
-        unsigned int digit = n % (unsigned int)base;
+        unsigned int digit = n % BASE;
 
         // Prefix-dependent digit permutation (TRUE nested Owen).
         unsigned int h = utilhash(prefix + level * 0x9e3779b9u + 0x1f123bb5u);
-        unsigned int a = (h >> 8)  % (unsigned int)base;
-        unsigned int c = (h >> 16) % (unsigned int)base;
-        if (a == 0) a = (unsigned int)base - 1;
-        unsigned int permuted = (a * digit + c) % (unsigned int)base;
+        unsigned int a = (h >> 8)  % BASE;
+        unsigned int c = (h >> 16) % BASE;
+        if (a == 0) a = BASE - 1;
+        unsigned int permuted = (a * digit + c) % BASE;
 
         result += (float)permuted * invBaseN;
         invBaseN *= invBase;
 
         // Fold this digit into the prefix for the next (lower) level.
         prefix = utilhash(prefix ^ (digit * 0x85ebca6bu));
-        n /= (unsigned int)base;
+        n /= BASE;
         level++;
     }
     return result;
@@ -297,7 +305,6 @@ struct RngState {
             // All dimensions within a bounce share the SAME haltonIndex.
             // This is proper multi-dimensional Halton: different prime bases
             // at the same index N form a well-distributed d-dimensional point.
-            int base = getHaltonPrime(dim);
 
             // TRUE nested Owen scramble (NOT a base-2-only Burley-style hash
             // scramble — for bases 3,5,7,11,… that destroys the
