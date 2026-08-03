@@ -3,6 +3,11 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
+// Define the implementation of cgltf (glTF parser) in this TU.
+// Header vendored at external/include/cgltf.h (jkuhlmann/cgltf, MIT).
+#define CGLTF_IMPLEMENTATION
+#include "cgltf.h"
+
 #include "scene/scene_loader.h"
 
 #include "constants.h"
@@ -22,6 +27,42 @@ using namespace std;
 using json = nlohmann::json;
 
 namespace SceneLoader {
+
+// -----------------------------------------------------------------------
+// Shared triangle construction (OBJ + glTF)
+// -----------------------------------------------------------------------
+
+/**
+ * Build a Triangle from three vertices and three vertex normals.
+ *
+ * Shared by loadOBJ and loadGLTF.  Any vertex normal that is NaN or has
+ * (near-)zero length is replaced by the geometric face normal — the same
+ * safe fallback the old OBJ path applied inline.
+ *
+ * @param v0,v1,v2  Vertex positions (object space)
+ * @param n0,n1,n2  Vertex normals; NaN / zero-length entries fall back
+ *                  to the face normal
+ */
+static Triangle makeTri(
+    const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
+    const glm::vec3& n0, const glm::vec3& n1, const glm::vec3& n2)
+{
+    // ---- Face normal calculation (safe fallback) ----
+    glm::vec3 e1 = v1 - v0;
+    glm::vec3 e2 = v2 - v0;
+    glm::vec3 crossE = glm::cross(e1, e2);
+    float cLen2 = glm::dot(crossE, crossE);
+    glm::vec3 fn = (std::isnan(cLen2) || cLen2 < RAY_EPSILON)
+        ? glm::vec3(0.0f, 1.0f, 0.0f)
+        : crossE * (1.0f / std::sqrt(cLen2));
+
+    auto validOr = [&](const glm::vec3& n) {
+        float len2 = glm::dot(n, n);
+        return (std::isnan(len2) || len2 < RAY_EPSILON) ? fn : n;
+    };
+
+    return Triangle{ v0, v1, v2, validOr(n0), validOr(n1), validOr(n2) };
+}
 
 // -----------------------------------------------------------------------
 // OBJ Mesh Loading
