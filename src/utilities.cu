@@ -10,7 +10,6 @@
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <cstdio>
-#include <sstream>
 
 #ifdef __CUDACC__
 #include <cuda.h>
@@ -45,12 +44,7 @@ void checkCUDAErrorFn(const char* msg, const char* file, int line)
 }
 #endif // __CUDACC__
 
-std::string utilityCore::convertIntToString(int number)
-{
-    std::stringstream ss;
-    ss << number;
-    return ss.str();
-}
+
 
 glm::mat4 utilityCore::buildTransformationMatrix(glm::vec3 translation, glm::vec3 rotation, glm::vec3 scale)
 {

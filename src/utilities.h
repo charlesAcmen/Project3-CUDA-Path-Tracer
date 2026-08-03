@@ -7,7 +7,6 @@
 
 namespace utilityCore
 {
-    extern std::string convertIntToString(int number);
     extern glm::mat4 buildTransformationMatrix(glm::vec3 translation, glm::vec3 rotation, glm::vec3 scale);
 }
 

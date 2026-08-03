@@ -474,7 +474,7 @@ void mainLoop()
 
         runCuda();
 
-        std::string title = "CIS565 Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
+        std::string title = "CIS565 Path Tracer | " + std::to_string(iteration) + " Iterations";
         glfwSetWindowTitle(window, title.c_str());
         // Centre the rendered scene inside the larger window so ImGui has room.
         int fbW, fbH;
