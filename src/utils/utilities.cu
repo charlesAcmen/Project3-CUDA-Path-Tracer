@@ -4,7 +4,7 @@
 //  File: utilities.cu (renamed from utilities.cpp for CUDA support)
 //  A collection/kitchen sink of generally useful functions
 
-#include "utilities.h"
+#include "utils/utilities.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
