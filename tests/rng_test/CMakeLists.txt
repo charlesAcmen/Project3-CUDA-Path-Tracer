@@ -6,7 +6,11 @@ project(rng_compare LANGUAGES CUDA CXX)
 # from rng.h for host-side execution.
 add_executable(rng_compare rng_compare.cu)
 
-target_include_directories(rng_compare PRIVATE ${CMAKE_SOURCE_DIR}/../../src)
+target_include_directories(rng_compare PRIVATE
+    ${CMAKE_SOURCE_DIR}/../../src
+    ${CMAKE_SOURCE_DIR}/../../external/include
+    "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8/include"
+)
 set_target_properties(rng_compare PROPERTIES CUDA_ARCHITECTURES native)
 set_target_properties(rng_compare PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
 
