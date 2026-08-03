@@ -12,25 +12,30 @@
  *
  * Key design for Halton mode:
  *   rng.next(dim) uses HALTON_PRIMES[dim] as the prime base.  All calls
- *   within one bounce share the same haltonIndex
+ *   within one bounce share the same haltonIndex.
  *
  *   haltonIndex = iter
  *   The index walks CONSECUTIVELY across frames (0, 1, 2, …), which is
  *   exactly the ordering that gives Halton its O((log N)^d / N)
- *   low-discrepancy convergence guarantee.
+ *   low-discrepancy convergence guarantee.  iter is deliberately excluded
+ *   from the scramble seed (see next()): if the seed changed every frame,
+ *   each frame would be re-scrambled and the accumulated frames would no
+ *   longer be the prefix of a single low-discrepancy sequence — the
+ *   estimate would fall back to Monte-Carlo rate instead of QMC rate.
  *
  *   TRUE nested Owen scrambling (Owen 1997) replaces the old Cranley-
  *   Patterson rotation for per-pixel decorrelation.  The digit permutation
- *   at each base-b digit level depends on the higher digits already read
- *   (the prefix):
+ *   at each base-b digit level depends on the digits that are more
+ *   significant in the radical-inverse value, already read (the prefix):
  *       d'_k = pi_k(prefix_k)(d_k)
  *   This prefix-dependence is the definition of Owen scrambling — a weaker
  *   "linear" scramble (fixed permutation per level) was used first; it kept
  *   the net but left pixels nearly identical, see BUG 5.  Per-pixel
- *   decorrelation is completed by a fixed per-pixel float toroidal shift
- *   (standard randomized-QMC / CP style, net-preserving).  The per-pixel
- *   per-bounce per-dim seed is derived from a chained hash (no linear-sum
- *   collisions).
+ *   decorrelation is completed by a fixed per-(pixel, bounce, dim) float
+ *   toroidal shift (standard randomized-QMC / CP style, net-preserving in
+ *   expectation over the shift — a fixed shift breaks the exact net, which
+ *   is fine and standard).  The per-pixel per-bounce per-dim seed is
+ *   derived from a chained hash (no linear-sum collisions).
  *
  *   KNOWN LIMITATION: for Halton's mixed prime bases, no digit-structure-
  *     preserving scramble can fully decorrelate pixels (small bases have few
@@ -99,7 +104,7 @@ constexpr int HALTON_NUM_DIMS = 16;
 
 // --- Halton dimension assignment ---
 // Each independent sampling decision in the pipeline gets a unique
-// dimension index. .
+// dimension index.
 //
 // Larger primes (higher dims) suffer large-base clustering at low sample
 // counts — see "MEASURED LOW-SPP BEHAVIOR" in the file header.
@@ -157,10 +162,14 @@ __host__ __device__ inline int getHaltonPrime(int dim) {
         2, 3, 5, 7, 11, 13, 17, 19,
         23, 29, 31, 37, 41, 43, 47, 53
     };
-    // Returning the last prime for out-of-range dims avoids a crash, 
-    // but the Halton sequence would collide with dim 15, 
-    // so callers MUST stay in range.
-    return primes[(dim < HALTON_NUM_DIMS) ? dim : (HALTON_NUM_DIMS - 1)];
+    // Clamp out-of-range dims into [0, HALTON_NUM_DIMS-1] (also covers
+    // negative dims) so the index can never go out of bounds.  A clamped
+    // value collides with an existing dimension, so callers MUST stay in
+    // range.
+    int idx = dim;
+    if (idx < 0)                     idx = 0;
+    else if (idx >= HALTON_NUM_DIMS) idx = HALTON_NUM_DIMS - 1;
+    return primes[idx];
 }
 
 /**
@@ -197,8 +206,9 @@ __host__ __device__ inline float cpRotate(float x, float offset)
  * TRUE (nested) Owen-scrambled radical inverse for arbitrary prime base b.
  *
  * Owen scrambling (Owen 1997) permutes each digit of the radical inverse,
- * with the permutation at digit level k depending on the higher digits
- * already read — the "prefix":
+ * with the permutation at digit level k depending on the digits already
+ * read that are more significant in the radical-inverse value (these are
+ * the low-order digits of the integer n) — the "prefix":
  *     d'_k = pi_k(prefix_k)(d_k)
  * A prefix-dependent digit bijection is what distinguishes TRUE Owen
  * scrambling from linear/digit scrambling (fixed permutation per level).
@@ -217,7 +227,7 @@ __host__ __device__ inline float owenRadicalInverse(
     float invBase  = 1.0f / (float)base;
     float invBaseN = invBase;
     float result   = 0.0f;
-    unsigned int prefix = seed;   // running hash of the higher digits already read
+    unsigned int prefix = seed;   // running hash of the more-significant fractional digits read so far
     unsigned int level  = 0;
     while (n > 0) {
         unsigned int digit = n % (unsigned int)base;
@@ -258,8 +268,9 @@ __host__ __device__ inline float owenRadicalInverse(
  *   - next(dim) applies owenRadicalInverse(): TRUE nested Owen scrambling
  *     (per-level digit permutation depends on the prefix), with a per-pixel
  *     per-bounce per-dim seed (chained utilhash — no linear-sum collisions),
- *     plus a fixed per-pixel float toroidal shift for decorrelation.  The
- *     result is a stratified, pixel-decorrelated sample in [0, 1).
+ *     plus a fixed per-(pixel, bounce, dim) float toroidal shift for
+ *     decorrelation.  The result is a stratified, pixel-decorrelated sample
+ *     in [0, 1).
  *   - The index does NOT advance within a bounce — every draw is a
  *     different dimension of the SAME scrambled Halton point.
  *   - Each bounce gets a fresh RngState with the same iter-based index
@@ -291,16 +302,23 @@ struct RngState {
             // TRUE nested Owen scramble (NOT a base-2-only Burley-style hash
             // scramble — for bases 3,5,7,11,… that destroys the
             // cross-dimensional net structure, see the file header).  Per-level
-            // digit permutation depends on the prefix (higher digits), per the
-            // Owen definition.  The index stays a clean consecutive walk
-            // (haltonIndex = iter) — NO per-pixel index jump.
+            // digit permutation depends on the prefix (the more-significant
+            // fractional digits of the value), per the Owen definition.
+            //
+            // haltonIndex = iter stays a clean consecutive walk across frames
+            // (NO per-pixel index jump).  The scramble seed below deliberately
+            // EXCLUDES iter: the seed must be frame-independent so each frame
+            // is the next point of the SAME scrambled sequence — a per-frame
+            // seed would re-scramble every frame and the accumulated frames
+            // would lose the low-discrepancy prefix property (QMC rate).
             //
             // Pixel/bounce/dim decorrelation comes from the chained-hash seed.
             // NOTE on decorrelation: nested digit scrambling preserves the net
             // but, for Halton's mixed prime bases, cannot fully decorrelate
             // pixels (small bases have few digit permutations).  The fixed
-            // per-pixel float toroidal shift below (standard randomized-QMC /
-            // CP style, net-preserving) closes most of that gap: mean
+            // per-(pixel, bounce, dim) float toroidal shift below (standard
+            // randomized-QMC / CP style, net-preserving in expectation over
+            // the shift) closes most of that gap: mean
             // |cross-pixel corr| ~0.1-0.3 (adjacent pixels ~0.37; the worst
             // pairs of many still reach ~0.9) vs ~0.9+ without it.
             // See "MEASURED LOW-SPP BEHAVIOR" in the file header.
@@ -310,7 +328,7 @@ struct RngState {
                 ^ ((unsigned int)dim               * 0xc2b2ae35u));
 
             float s = owenRadicalInverse(base, haltonIndex, seed);
-            float rot = (float)(seed & 0xFFFFFFu) * (1.0f / 16777216.0f);  // per-pixel decorrelator
+            float rot = (float)(seed & 0xFFFFFFu) * (1.0f / 16777216.0f);  // per-(pixel,bounce,dim) decorrelator
             return cpRotate(s, rot);
         }
     }
@@ -352,7 +370,8 @@ __host__ __device__ inline RngState makeRngState(
     state.mode = mode;
 
     if (mode == RngMode::LCG) {
-        // Replicated from makeSeededRandomEngine (pathtrace.cu):
+        // Same seed formula as the original makeSeededRandomEngine (the
+        // function itself was removed from pathtrace.cu):
         //   hash(depth, iter) ^ hash(pixelIndex)
         int h = utilhash((1u << 31) | ((unsigned int)depth << 22) | (unsigned int)iter)
                 ^ utilhash((unsigned int)pixelIndex);
