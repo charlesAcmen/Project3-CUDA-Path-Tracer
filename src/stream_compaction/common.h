@@ -9,7 +9,7 @@
 #include <algorithm>
 
 // Use unified CUDA error checking from utilities module
-#include "utilities.h"
+#include "utils/utilities.h"
 
 inline int ilog2(int x) {
     int lg = 0;

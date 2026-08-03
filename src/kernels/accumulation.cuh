@@ -11,7 +11,7 @@
 // ====================================================================
 
 #include "sceneStructs.h"
-#include "utilities.h"
+#include "utils/utilities.h"
 
 /**
  * Writes the accumulated HDR image to the OpenGL pixel buffer for display.

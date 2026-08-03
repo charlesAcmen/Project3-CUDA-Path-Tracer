@@ -30,7 +30,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     SET_PROPERTY(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
-# CUDA error-checking (checkCUDAError in src/utilities.h) is a debug-time
+# CUDA error-checking (checkCUDAError in src/utils/utilities.h) is a debug-time
 # safety net: each call does a full cudaDeviceSynchronize(), serialising the
 # GPU pipeline.  Compile it in only for Debug / RelWithDebInfo; Release keeps
 # kernels fully asynchronous.  Global so it also covers src/stream_compaction.
@@ -82,7 +82,7 @@ set(headers
     src/scene/scene.h
     src/scene/scene_loader.h
     src/sceneStructs.h
-    src/utilities.h
+    src/utils/utilities.h
 )
 
 set(sources
@@ -96,7 +96,7 @@ set(sources
     src/interactions/interactions.cu
     src/scene/scene.cpp
     src/scene/scene_loader.cpp
-    src/utilities.cu
+    src/utils/utilities.cu
 )
 list(SORT headers)
 list(SORT sources)
