@@ -9,7 +9,7 @@
 // logic.
 //
 // Supported scene formats: .json (custom CIS 565 format)
-// Supported mesh formats: .obj (via tinyobjloader)
+// Supported mesh formats: .obj (via tinyobjloader), .gltf / .glb (via cgltf)
 // ====================================================================
 
 #include "scene/scene.h"
