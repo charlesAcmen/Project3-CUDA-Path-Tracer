@@ -12,16 +12,11 @@ Produces:
     5. 2D grid-stratification check (regression guard for BUG 4 in rng.h)
     6. Pixel-decorrelation check
 
-Expected results (after BUG 4 fix — proper base-b digit scramble):
-    - Owen Halton discrepancy: lowest of the three (best stratification)
-    - CP Halton:               a shifted plain Halton — retains the net in
-                               both 1D and 2D, so it is competitive, but it
-                               is a shared sequence with a random start and
-                               can show correlation between pixels.
+Expected results:
+    - Owen Halton discrepancy: lowest of the two (best stratification)
     - Pi MSE:                  Owen ~ 10-100x lower than LCG and net-like in
                                the 2D grid check (NOT random-rate).
-    - 2D scatter:              Owen fills unit square evenly; LCG has gaps;
-                               CP shows the shifted-Halton lattice.
+    - 2D scatter:              Owen fills unit square evenly; LCG has gaps.
 """
 
 import argparse
@@ -120,7 +115,6 @@ def main():
 
     METHODS = {
         "lcg":         ("LCG (baseline)",           "#4e79a7"),
-        "halton_cp":   ("Halton CP (legacy/buggy)",  "#e15759"),
         "halton_owen": ("Halton Owen (new)",          "#59a14f"),
     }
 
@@ -181,7 +175,7 @@ def main():
     N_scatter = min(len(x_data[col]) for col in METHODS)
     N_show = min(N_scatter, 1024)   # cap scatter at 1024 for clarity
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     fig.suptitle(
         f"2D Sample Distribution  (pixel={args.pixel}, bounce={args.bounce}, "
         f"dim0 vs dim1, first {N_show} samples)",
@@ -305,27 +299,22 @@ def main():
     # -----------------------------------------------------------------------
     print("\n── Summary ──")
     owen_mean = float(np.mean(disc_table["halton_owen"]))
-    cp_mean   = float(np.mean(disc_table["halton_cp"]))
     lcg_mean2 = float(np.mean(disc_table["lcg"]))
     owen_dev  = grid_devs["halton_owen"]
-    cp_dev    = grid_devs["halton_cp"]
     lcg_dev   = grid_devs["lcg"]
 
     best1d = min(METHODS.keys(), key=lambda c: float(np.mean(disc_table[c])))
     print(f"  1D best:            {METHODS[best1d][0]}")
     print(f"  1D Owen vs LCG:     {lcg_mean2/owen_mean:.2f}x lower (expected > 2x)")
-    print(f"  2D grid dev (g={g2d}):  Owen {owen_dev:.1f} | CP {cp_dev:.1f} | LCG {lcg_dev:.1f} "
+    print(f"  2D grid dev (g={g2d}):  Owen {owen_dev:.1f} | LCG {lcg_dev:.1f} "
           f"(net ~ few, random ~ {3*random_std:.0f}+)")
 
     pass_1d  = owen_mean < lcg_mean2                    # Owen beats LCG in 1D
     pass_2d  = owen_dev < lcg_dev                       # Owen 2D is net-like, not random
-    pass_2dv = owen_dev <= max(8.0, cp_dev * 2.0)       # competitive with CP net
-    if pass_1d and pass_2d and pass_2dv:
-        print("  [PASS] Owen beats LCG in 1D and is net-like in 2D -- BUG 4 fixed.")
-    elif pass_1d and pass_2d:
-        print("  [PARTIAL] Owen beats LCG in 1D + 2D but lags CP -- inspect grid dev.")
+    if pass_1d and pass_2d:
+        print("  [PASS] Owen beats LCG in 1D and is net-like in 2D.")
     elif pass_1d:
-        print("  [FAIL] Owen beats LCG in 1D but 2D is random -- BUG 4 may be back.")
+        print("  [FAIL] Owen beats LCG in 1D but 2D is random -- check the net.")
     else:
         print("  [FAIL] Unexpected result -- check CSV for data integrity issues.")
 
