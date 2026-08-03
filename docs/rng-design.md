@@ -1,525 +1,231 @@
-# RNG Upgrade Plan: From LCG to Low-Discrepancy Halton Sequences
+# RNG Design: LCG + Owen-Scrambled Halton
 
 > **Feature:** `:three:` from INSTRUCTION.md — 3-point optional feature.
 > **Reference:** `docs/CSE168_07_Random.pdf`
-> **Date:** 2026-07-16
+> **Last updated:** 2026-08-03 (rewritten to match the implemented design)
 
-## Context
+## Overview
 
-### Problem
+The path tracer exposes two RNG modes behind one uniform interface,
+`RngState::next(dim)` in `src/rng/rng.h`:
 
-The CUDA path tracer currently uses `thrust::default_random_engine` (a linear
-congruential generator, LCG) for all Monte Carlo sampling.  While LCGs are fast,
-they have known deficiencies for MC integration:
+| Mode | Implementation | Default |
+|------|----------------|---------|
+| `LCG` | `thrust::default_random_engine` seeded by `utilhash` (backward compatible) | **yes** |
+| `HALTON` | True nested Owen-scrambled Halton (Owen 1997) | `--rng=1` |
 
-- **Short period** — 32-bit LCGs repeat after ~2³¹ samples, risking structured
-  artifacts in high-sample-count progressive renders.
-- **Poor equidistribution** — Marsaglia's theorem: LCG points fall on
-  hyperplanes in high dimensions, introducing subtle correlation between
-  successive sampling decisions (AA jitter ↔ lens DOF ↔ hemisphere direction).
-- **No convergence acceleration** — LCG produces pseudo-random (white-noise)
-  point sets, which converge at O(1/√N).  Low-discrepancy sequences converge at
-  O(logᵈ N / N), meaning fewer samples for the same visual quality.
+The RNG state is stateless-per-iteration: every frame re-creates an
+`RngState` from `makeRngState(iter, pixelIndex, depth, mode)`, so the GPU
+bounce loop never carries mutable RNG state in `PathSegment`.  This matches
+the original `makeSeededRandomEngine` pattern.
 
-This is the `:three:` feature from INSTRUCTION.md (line 101, 3 points), with
-reference material in `docs/CSE168_07_Random.pdf`.
+## Why Low-Discrepancy
 
-### Current RNG Architecture (preserved — not to be deleted)
+LCG (and any PRNG) produces white-noise point sets converging at O(1/√N).
+Low-discrepancy sequences converge at O(logᵈ N / N) — the same noise level in
+far fewer samples.  For a Monte Carlo path tracer this directly reduces
+render time to a target quality.
 
-| Location | Item | Role |
-|----------|------|------|
-| `src/intersections.h:13-22` | `utilhash(unsigned int a)` | Jenkins-style bit-mixing hash, `__host__ __device__` |
-| `src/pathtrace.cu:88-98` | `makeSeededRandomEngine(iter, index, depth)` | Combines iteration, pixel index, bounce depth via `utilhash()` into a `thrust::default_random_engine` seed |
-| `src/pathtrace.cu:232` | Call site in `generateRayFromCamera` | 4 draws: AA jitter (x2) + lens DOF (x2, conditional), seeded `depth=0` |
-| `src/pathtrace.cu:444` | Call site in `shadeMaterial` | Up to 5 draws/bounce: diffuse hemisphere (2), specular lobe (2), Fresnel RR (1), path RR (1), seeded `depth=remainingBounces` |
-| `src/pathtrace.cu:538` | Call site in `shadeFakeMaterial` | 1 draw: debug noise, seeded `depth=0` |
+Measured on the actual implementation (`tests/rng_test`, 16 px × 16k iters,
+averaged over pixels):
 
-**Key design property:** The engine is recreated on-the-fly per kernel launch
-rather than stored in `PathSegment`.  This is a deliberate memory-bandwidth
-optimisation (comment at `pathtrace.cu:92-93`).  The deterministic seed formula
-`hash(depth, iter) ^ hash(pixelIndex)` guarantees:
-- **Spatial decorrelation** — different pixels get different sequences.
-- **Temporal decorrelation** — different iterations get different sequences.
-- **Bounce-depth decorrelation** — different bounces get different sequences.
+- 1D star discrepancy: **13.7× lower** than LCG (pooled per dimension).
+- 2D π-integral error at N=16384: equals **~55× more LCG samples**
+  (log-log slope −0.78 vs −0.59 for LCG; QMC ideal −1.0).
+- 2D stratification: 16×16 grid max cell deviation **5.0** (LCG 22.0,
+  random floor ~24–40) — Halton is net-level, not random-level.
 
-### Where Random Numbers Are Consumed
+## Option Matrix
 
-Per path per iteration (worst-case):
+| Method | Convergence | GPU Fit | Impl. Complexity | High-Dim Quality | Verdict |
+|--------|------------|---------|-----------------|------------------|---------|
+| **LCG** (baseline) | O(1/√N) | ★★★★★ | Trivial | Poor | default, backward compat |
+| **Standard Halton** | O(logᵈ N/N) | ★★★★☆ | Simple | Poor (bases >7 correlate) | insufficient alone |
+| **Owen-scrambled Halton** | O(logᵈ N/N) | ★★★★☆ | Moderate | Good | **implemented** |
+| **Sobol** | O(logᵈ N/N) | ★★★☆☆ | Complex | Excellent | future option |
+| **PCG / Xoshiro** | O(1/√N) | ★★★★★ | Moderate | N/A (PRNG) | side-grade only |
+| **CMJ** | O(1/N) for 2D | ★★★★★ | Simple | 2D only | AA-only alternative |
 
-| Stage | Sampling Decision | Draws | Frequency |
-|-------|------------------|-------|-----------|
-| Primary ray | AA sub-pixel jitter (x, y) | 2 | Once per iteration |
-| Primary ray | Lens aperture (u, v) for DoF | 2 | Once (conditional) |
-| Diffuse bounce | Cosine-weighted hemisphere (θ, φ) | 2 | Per bounce |
-| Glossy bounce | Phong lobe (cosⁿ, φ) | 2 | Per bounce |
-| Refractive bounce | Fresnel Russian roulette | 1 | Per bounce |
-| Termination | Path Russian roulette | 1 | Per bounce (after rrMinBounces) |
+Chosen: **true nested Owen-scrambled Halton** — the low-discrepancy property
+comes from Halton's radical inverse; per-pixel decorrelation comes from
+nested digit permutations plus a net-preserving toroidal shift.  See the
+design-history section for why Cranley-Patterson rotation was rejected.
 
-With `traceDepth=8`, a full path can consume up to ~44 random draws.
+## Implemented Design (`src/rng/rng.h`)
 
----
+### Halton dimension assignment
 
-## Analysis: Is Halton the Best Choice?
+Each independent sampling decision in the pipeline gets a dedicated
+dimension (prime base).  All draws within one bounce share the same
+`haltonIndex`; different dims use different bases, so a bounce's draws form
+a proper multi-dimensional Halton point.
 
-### Option Matrix
-
-| Method | Convergence | GPU Fit | Impl. Complexity | High-Dim Quality | Educational Value |
-|--------|------------|---------|-----------------|------------------|-------------------|
-| **LCG** (current) | O(1/√N) | ★★★★★ | Trivial | Poor | Baseline only |
-| **Standard Halton** | O(logᵈ N / N) | ★★★★☆ | Simple | Poor (bases >7 correlate) | ★★★★★ |
-| **Scrambled Halton** | O(logᵈ N / N) | ★★★★☆ | Moderate | Good | ★★★★☆ |
-| **Sobol** | O(logᵈ N / N) | ★★★☆☆ | Complex | Excellent | ★★★☆☆ |
-| **PCG / Xoshiro** | O(1/√N) | ★★★★★ | Moderate | N/A (PRNG) | ★★☆☆☆ |
-| **CMJ** | O(1/N) for 2D | ★★★★★ | Simple | 2D only | ★★★☆☆ |
-
-### Detailed Comparison
-
-#### LCG (thrust::default_random_engine) — current
-- **Pros:** Already implemented, zero change cost, adequate for interactive
-  preview.
-- **Cons:** White-noise convergence only; Marsaglia hyperplane correlations
-  between successive dimensions can produce subtle structured noise in
-  progressively-rendered images.
-
-#### Standard Halton Sequence
-- **How it works:** The radical inverse function reverses the digit
-  representation of integer `n` in a prime base `b`.  For base 2:
-  `H₂(0,1,2,3,4,5) = 0, 0.5, 0.25, 0.75, 0.125, 0.625`.  A d-dimensional
-  Halton sequence uses the first d primes as independent bases.
-- **Pros:** Low-discrepancy (every prefix of the sequence is well-distributed);
-  O(log n) per sample; no state required; fits the current stateless pattern
-  exactly; taught in the course reference PDF.
-- **Cons:** **High-dimensional correlation** — dimensions with large prime bases
-  (b ≥ 11) show visible stripe/streak patterns.  A path tracer with 8 bounces
-  needs ~10+ independent sampling dimensions, requiring bases up to 29, where
-  correlation is severe.
-- **Verdict:** Standard Halton alone is **not sufficient** for this application.
-
-#### Scrambled Halton (Recommended)
-- **How it works:** Apply a random digit permutation (Owen scrambling) or a
-  simple Cranley-Patterson rotation `(H_b(n) + offset) mod 1` to each Halton
-  point.  The scramble breaks inter-dimensional correlation while preserving
-  the low-discrepancy property.  Different pixels get different scrambles,
-  producing independent sequences.
-- **Pros:** Low-discrepancy + decorrelated; moderate implementation complexity;
-  fits the current stateless GPU pattern (scramble per pixel, compute Halton
-  point on-the-fly); well-studied in rendering literature (PBRT, Tungsten).
-- **Cons:** Cranley-Patterson rotation is not as rigorous as Owen scrambling
-  (stratification is only approximate).  Owen scrambling requires permutation
-  tables or hash-based permutations per digit — more complex but feasible.
-- **Verdict:** **This is the recommended approach.**  Cranley-Patterson
-  rotation for the initial implementation; Owen scrambling as a future upgrade.
-
-#### Sobol Sequence
-- **Pros:** Best high-dimensional low-discrepancy properties; industry standard
-  (RenderMan, Arnold, Cycles).
-- **Cons:** Requires precomputed direction numbers (a set of bit-matrices) for
-  each dimension; Gray-code iteration is needed for efficiency; significantly
-  more complex to implement correctly.  Overkill for a graduate course project.
-- **Verdict:** Not recommended for this project.  Halton is pedagogically
-  simpler and the course reference focuses on Halton.
-
-#### PCG / Xoshiro (Modern PRNGs)
-- **Pros:** Excellent statistical quality, small state (128 bits for Xoshiro),
-  fast, no inter-dimensional correlation issues.
-- **Cons:** Still pseudo-random — no low-discrepancy property.  Convergence
-  rate remains O(1/√N).  This is a *side-grade* (better randomness quality)
-  rather than an *upgrade* (faster convergence).
-- **Verdict:** Not recommended as the primary change.  Could be a useful
-  fallback/alternative option.
-
-### Decision: Scrambled Halton (Cranley-Patterson Rotation)
-
-**Rationale:**
-1. **Faster convergence** than LCG — low-discrepancy means fewer samples for
-   the same noise level.
-2. **Fits the existing architecture** — Halton's n-th-sample-is-just-a-function
-   matches the current "recompute on-the-fly" GPU pattern.  No state to store.
-3. **Simple to implement** — radical inverse is ~10 lines of CUDA C; CP
-   rotation is a single addition + modulo.
-4. **Educational** — Halton is the natural next step after LCG as taught in
-   CSE168_07_Random.pdf.
-5. **Extensible** — CP rotation can be upgraded to Owen scrambling later
-   without changing the calling code.
-
-**Future upgrade path:** If visual correlation artifacts appear at high sample
-counts, upgrade CP rotation → Owen scrambling by replacing the simple offset
-with a per-digit hash-based permutation, using `utilhash()` as the per-digit
-randomizer.
-
----
-
-## Software Engineering: Extract RNG to Its Own File
-
-### Current Problem
-
-RNG logic is scattered across files with poor semantic cohesion:
-
-| File | RNG Content | Semantic Issue |
-|------|------------|----------------|
-| `src/intersections.h` | `utilhash()` | Hashing is not intersection logic |
-| `src/pathtrace.cu` | `makeSeededRandomEngine()` | Mixed with path tracing pipeline |
-| `src/interactions.h` | `#include <thrust/random.h>` | RNG dependency |
-| `src/interactions.cu` | `samplePhongSpecularDir`, `calculateRandomDirectionInHemisphere` take `thrust::default_random_engine&` | Tight coupling to Thrust RNG type |
-
-### Recommendation: Create `src/rng.h`
-
-A single header that is the **single source of truth** for all random number
-generation.  This follows the project's existing pattern of purpose-specific
-headers (`constants.h`, `sceneStructs.h`, `intersections.h`).
-
-**What goes into `src/rng.h`:**
-
-```
-src/rng.h
-├── RngMode enum          { LCG, HALTON }
-├── radicalInverse()        Halton radical inverse (base, n) → float in [0,1)
-├── makeHaltonRng()         factory: creates a Halton state from (iter, index, dimension)
-├── haltonSample()          convenience: one-shot Halton sample
-├── (re-export)             #include guards to make existing utilhash + makeSeededRandomEngine
-│                           accessible through this header for discoverability
-└── RngState struct         wraps either mode behind a uniform interface
-```
-
-**What does NOT change (preserved exactly as-is):**
-- `src/intersections.h` — `utilhash()` stays; a comment is added pointing to `rng.h` for
-  new random-number functionality.
-- `src/pathtrace.cu:88-98` — `makeSeededRandomEngine()` stays; a comment is added noting
-  that `rng.h` provides Halton alternatives.
-- All existing comments in Chinese and English are preserved.
-- All existing call sites continue to work without modification.
-
-**Why a header-only design?**
-- CUDA device functions must be in headers or `.cuh` files for separable compilation.
-- The project already uses header-only utilities (`constants.h`, `sceneStructs.h`).
-- No `.cu` compilation unit needed — all functions are `__host__ __device__` and inline.
-- Keeps the build system unchanged (no new CMakeLists entries).
-
-### API Design: The `RngState` Wrapper
-
-To support both LCG and Halton through a single interface without templates
-polluting every function signature, we introduce a `RngState` struct that
-type-erases the RNG mode behind a uniform `.next()` → float API:
-
-```cuda
-enum class RngMode : int {
-    LCG    = 0,   // thrust::default_random_engine (backward compatible)
-    HALTON = 1    // scrambled Halton sequence
-};
-
-struct RngState {
-    RngMode mode;
-
-    // -- LCG branch (preserved from existing code) --
-    thrust::default_random_engine lcgEngine;
-
-    // -- Halton branch (2 ints + 1 float) --
-    unsigned int haltonIndex;     // current sample index in the Halton sequence
-    int haltonBase;               // prime base for this sampling dimension
-    float haltonOffset;           // Cranley-Patterson rotation offset, per-pixel per-dim in [0,1)
-
-    // Returns the next uniform random float in [0, 1).
-    // The if-else on `mode` is warp-uniform (all threads read the same
-    // global flag), so there is zero divergence cost.
-    __host__ __device__ float next() {
-        if (mode == RngMode::LCG) {
-            thrust::uniform_real_distribution<float> u01(0, 1);
-            return u01(lcgEngine);
-        } else {
-            // Cranley-Patterson rotation: (Halton sample + per-pixel offset) mod 1.0.
-            // The offset decorrelates different pixels while preserving
-            // the low-discrepancy property within each pixel's sequence.
-            float raw = radicalInverse(haltonBase, haltonIndex);
-            float val = raw + haltonOffset;
-            if (val >= 1.0f) val -= 1.0f;  // mod 1.0 (branch is uniform in warp)
-            haltonIndex++;
-            return val;
-        }
-    }
-};
-
-// Factory function — direct replacement for makeSeededRandomEngine.
-// When mode==LCG: seeds lcgEngine exactly as before (bit-identical).
-// When mode==HALTON: initialises haltonIndex, base, and per-pixel CP offset.
-// The CP offset is derived from utilhash(pixelIndex * MAX_DIMENSIONS + dim)
-// so each (pixel, dimension) pair gets its own fixed random offset in [0, 1).
-__host__ __device__ RngState makeRngState(
-    int iter, int pixelIndex, int depth, RngMode mode, int dim);
-```
-
-**Advantages of `RngState` over templates:**
-1. **Single type** — all functions take `RngState&`, no `template<typename Rng>`
-   proliferation in headers.
-2. **Backward compatible** — `RngState` in LCG mode delegates to the same
-   `thrust::default_random_engine` seeding logic (bit-identical output).
-3. **Register-light** — Halton branch adds only 3 ints vs. LCG's 4-int engine
-   state.  This is a small *improvement* for the register-pressure bottleneck
-   noted in `shadeMaterial` (comment at `pathtrace.cu:435-437`).
-4. **No pointer indirection** — both branches are inline in the struct, no
-   heap allocation or virtual dispatch.
-
----
-
-## Implementation Plan
-
-### Phase 1: Create `src/rng.h` — The RNG Header
-
-**New file:** `src/rng.h`
-
-Contents:
-
-1. **`radicalInverse(int base, unsigned int n)`**
-   - Computes the radical inverse of `n` in the given prime base.
-   - Returns a float in [0, 1).
-   - O(log_base(n)) iterations — typically ≤ 16 for 32-bit n and base 2,
-     ≤ 7 for base 7, etc.
-   - `__host__ __device__` for both CPU precomputation and GPU use.
-   - English comment explaining the Halton sequence and radical inverse.
-
-2. **`cpRotate(float haltonSample, float offset)`**
-   - Inline helper: returns `(haltonSample + offset) mod 1.0`.
-   - Cranley-Patterson rotation breaks inter-dimensional correlation while
-     preserving the low-discrepancy property of the base Halton sequence.
-   - `__host__ __device__`, trivial — a single addition + conditional subtract.
-
-3. **`HaltonRng` struct** (lightweight, GPU-friendly)
-   ```cuda
-   struct HaltonRng {
-       unsigned int index;     // current position in the Halton sequence
-       int base;               // prime base for this dimension (2, 3, 5, 7, ...)
-       float offset;           // Cranley-Patterson offset in [0, 1), per-pixel per-dim
-
-       __host__ __device__ float next() {
-           float raw = radicalInverse(base, index);
-           float val = raw + offset;
-           if (val >= 1.0f) val -= 1.0f;  // mod 1.0
-           index++;
-           return val;
-       }
-   };
-   ```
-   - `next()` computes `radicalInverse(base, index)`, applies CP rotation with
-     `offset`, then increments `index`.  Each call produces the next Halton
-     point in this dimension's sequence, decorrelated per-pixel.
-
-4. **`makeHaltonRng(int iter, int pixelIndex, int bounce, int dimension)`**
-   - Factory function analogous to `makeSeededRandomEngine`.
-   - `dimension` selects which prime base to use (0→2, 1→3, 2→5, ...).
-   - `offset = float(utilhash(pixelIndex * 16 + dimension) & 0xFFFFFF) / float(0x1000000)`
-     maps a hash to a uniform float in [0, 1) for Cranley-Patterson rotation.
-     Each (pixel, dimension) pair gets its own fixed offset.
-   - `index = iter * traceDepth + bounce` for per-bounce per-iteration
-     progression along the sequence.
-   - English comment explaining the CP offset seeding strategy.
-
-5. **Prime base table** — a `__device__ constexpr int HALTON_PRIMES[]` with
-   the first 16 primes: `{2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41,
-   43, 47, 53}`.  16 dimensions is enough for the current pipeline (max ~10
-   needed).
-
-6. **`RngMode` enum** — `{ LCG, HALTON }` for runtime or compile-time toggling.
-
-### Phase 2: Assign Halton Dimensions
-
-Map each sampling decision in the pipeline to a dedicated Halton dimension
-(prime base):
-
-| Dimension Index | Prime | Sampling Decision | Location |
+| Dim | Prime | Usage | Location |
 |:---:|:---:|---|---|
-| 0 | 2 | AA jitter x | `generateRayFromCamera` |
-| 1 | 3 | AA jitter y | `generateRayFromCamera` |
-| 2 | 5 | Lens aperture u | `generateRayFromCamera` (DoF only) |
-| 3 | 7 | Lens aperture v | `generateRayFromCamera` (DoF only) |
-| 4 | 11 | Diffuse hemisphere θ (up) | `calculateRandomDirectionInHemisphere` |
-| 5 | 13 | Diffuse hemisphere φ (around) | `calculateRandomDirectionInHemisphere` |
-| 6 | 17 | Specular lobe θ | `samplePhongSpecularDir` |
-| 7 | 19 | Specular lobe φ | `samplePhongSpecularDir` |
-| 8 | 23 | Fresnel roulette (refractive) | `scatterRay` |
-| 9 | 29 | Path roulette (termination) | `russianRouletteTerminate` |
+| 0 | 2 | AA jitter x | `ray_generation.cuh` |
+| 1 | 3 | AA jitter y | `ray_generation.cuh` |
+| 2 | 5 | Lens aperture u | `ray_generation.cuh` (DoF) |
+| 3 | 7 | Lens aperture v | `ray_generation.cuh` (DoF) |
+| 4 | 11 | Diffuse hemisphere θ | `interactions` |
+| 5 | 13 | Diffuse hemisphere φ | `interactions` |
+| 6 | 17 | Specular lobe θ | `interactions` |
+| 7 | 19 | Specular lobe φ | `interactions` |
+| 8 | 23 | Fresnel roulette | `scatterRay` (refractive) |
+| 9 | 29 | Path Russian roulette | `shading.cuh` |
 
-**Important design note:** Dimensions 4–9 are reused across bounces.  The
-`bounce` parameter in `makeHaltonRng` ensures that different bounces get
-different *sequence indices* within the same dimension's Halton sequence:
-`index = iter * traceDepth + bounce`.  This means bounce 3 of iteration 50 in
-dimension 4 (prime 11) is a different Halton point than bounce 2 of iteration
-50 in dimension 4 — the indices differ (50*8+3=403 vs 50*8+2=402).
+`getHaltonPrime(dim)` indexes the first 16 primes (dims 0–9 allocated,
+10–15 reserved).  Dimensions 4–9 are reused across bounces; per-bounce
+independence comes from the scramble seed, not the index.
 
-### Phase 3: Modify Call Sites
+### The index walk
 
-All call sites switch from `thrust::default_random_engine` to `RngState`,
-using the factory `makeRngState()`.  The `RngState` struct handles mode
-dispatch internally — call sites don't branch on RNG mode.
+`haltonIndex = iter` — every pixel walks the SAME consecutive index
+(0, 1, 2, …) across frames.  Consecutive indices are exactly the ordering
+that gives Halton its O((log N)ᵈ / N) guarantee.  Per-pixel decorrelation is
+handled entirely by the scramble seed + toroidal shift, NOT by jumping each
+pixel to a random index (an unmasked hash offset destroys the low-
+discrepancy property — see design history, BUG 1).
 
-#### 3a. `generateRayFromCamera` (pathtrace.cu:232)
+### True nested Owen scrambling — `owenRadicalInverse(base, n, seed)`
 
-**Before (preserved as-is alongside new code):**
-```cuda
-thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
-thrust::uniform_real_distribution<float> u01(0, 1);
-float jitterX = u01(rng) - 0.5f;   // AA jitter x
-float jitterY = u01(rng) - 0.5f;   // AA jitter y
-float lensU   = u01(rng);           // DoF lens u
-float lensV   = u01(rng);           // DoF lens v
-```
+For a prime base `b`, the radical inverse digit expansion of `n` is
+`Phi_b(n) = Σ d_k b^-(k+1)`.  Owen scrambling permutes each digit with a
+permutation that depends on the **prefix** (the higher digits already read):
 
-**After (new Halton-capable code added, old code also retained for fallback):**
-```cuda
-RngState rngAAx = makeRngState(iter, index, 0, g_opts.rngMode, 0);  // dim 0, prime 2
-RngState rngAAy = makeRngState(iter, index, 0, g_opts.rngMode, 1);  // dim 1, prime 3
-float jitterX = rngAAx.next() - 0.5f;
-float jitterY = rngAAy.next() - 0.5f;
+    d'_k = pi_k(prefix_k)(d_k)
 
-RngState rngLensU = makeRngState(iter, index, 0, g_opts.rngMode, 2);  // dim 2, prime 5
-RngState rngLensV = makeRngState(iter, index, 0, g_opts.rngMode, 3);  // dim 3, prime 7
-float lensU = rngLensU.next();
-float lensV = rngLensV.next();
-```
+This prefix-dependence is the definition of *true* (nested) Owen scrambling,
+as opposed to linear/digit scrambling (fixed permutation per level), which
+keeps the net but leaves different pixels near-identical.
 
-Each sampling decision gets its own `RngState` with a dedicated dimension
-index.  This ensures different sampling decisions use different Halton prime
-bases, avoiding intra-pixel correlation.
+Here each per-level permutation is the affine map `d → (a·d + c) mod b`
+(branch-free, bijective for prime `b`), with `(a, c)` derived from
+`utilhash(prefix + level·0x9e3779b9 + 0x1f123bb5)`.  This is a restricted
+instantiation of the full nested-Owen family, but it preserves the net in
+every dimension AND jointly.
 
-#### 3b. `shadeMaterial` (pathtrace.cu:444) and callees
+### Per-pixel / per-bounce / per-dim seed
 
-The `shadeMaterial` kernel creates `RngState` instances per sampling
-dimension, then passes them to `scatterRay()`.  The function signatures
-in `interactions.h` change from `thrust::default_random_engine&` to
-`RngState&`:
+The scramble seed is a chained hash of `(pixelIndex, bounceIndex, dim)`:
 
-```cuda
-// interactions.h — updated signatures
-__host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
-    glm::vec3 normal, RngState& rng);
-__host__ __device__ void scatterRay(
-    PathSegment& pathSegment, glm::vec3 intersect, glm::vec3 normal,
-    const Material& m, RngState& rng, int fresnelMode);
-__host__ __device__ void samplePhongSpecularDir(
-    glm::vec3 reflectedDir, float exponent, RngState& rng);
-```
+    seed = utilhash( utilhash(pixel + 0x9e3779b9)
+                     ^ (bounce * 0x85ebca6b)
+                     ^ (dim    * 0xc2b2ae35) )
 
-Inside these functions, `thrust::uniform_real_distribution<float> u01(0,1)`
-+ `u01(rng)` is replaced with `rng.next()`.
+Chained hashing (no linear-sum collisions) keeps different pixels / bounces /
+dims decorrelated while leaving the index a clean consecutive walk.  Each
+bounce gets a fresh scramble (bounce mixed into the seed), so the joint of a
+path's bounces is a product of independent nets — standard per-bounce
+randomized QMC, not a single high-dimensional net.
 
-The callee doesn't know or care which RNG mode is active — it just calls
-`next()`.  The dispatch happens inside `RngState`.
+### Net-preserving toroidal shift — `cpRotate(s, rot)`
 
-#### 3c. `russianRouletteTerminate` (pathtrace.cu:362)
+After Owen scrambling, `next()` applies a fixed per-(pixel, bounce, dim)
+toroidal shift `rot = (seed & 0xFFFFFF) / 2^24`:
 
-Same pattern: change parameter from `thrust::default_random_engine&` to
-`RngState&`, replace `u01(rng)` with `rng.next()`.
+    return (s + rot) mod 1.0
 
-#### 3d. `shadeFakeMaterial` (pathtrace.cu:538)
+This is **not** the legacy Cranley-Patterson rotation (which shifted the
+raw Halton value with a linear-sum seed).  It is a randomized-QMC / CP-style
+shift applied to the already-Owen-scrambled value, and it is net-preserving
+(it cannot break the stratification).  It exists because the affine nested
+permutations alone cannot fully decorrelate small bases (base 2 has only 2
+affine permutations per level) — the shift closes most of that gap.
 
-Same pattern as `shadeMaterial` but only 1 dimension needed (debug noise).
+## Measured Behavior (2026-08, `tests/rng_test`)
 
-### Phase 4: Add Toggle Mechanism
+### Convergence (2D π-integral, averaged over 16 pixels)
 
-Add `rngMode` to `PathTracerOptions` in `src/pathtrace.h`, following the
-existing pattern of `compactMethod`, `sortByMaterial`, and `debugMode`:
+| N | LCG err | Owen err | effective LCG multiplier |
+|:---:|:---:|:---:|:---:|
+| 64 | 1.57e-1 | 8.62e-2 | 3× |
+| 256 | 9.60e-2 | 2.15e-2 | 20× |
+| 1024 | 4.20e-2 | 9.52e-3 | 19× |
+| 4096 | 2.31e-2 | 4.09e-3 | 32× |
+| 16384 | 8.21e-3 | 1.10e-3 | **55×** |
 
-```cuda
-struct PathTracerOptions {
-    int  compactMethod  = 3;     // 0=off, 1=global scan, 2=Thrust, 3=shared-mem
-    bool sortByMaterial = true;  // group paths by materialId before shading
-    int  debugMode      = 0;     // 0=Hill ACES, 1=linear bypass, 2=Narkowicz ACES
-    int  rngMode        = 0;     // 0=LCG (default, backward compat), 1=Halton
-};
-```
+### Low-SPP behavior
 
-Add CLI flag `--rng=N` in `src/main.cpp`, following the `--fresnel=N` pattern:
-```cpp
-} else if (arg.rfind("--rng=", 0) == 0) {
-    int v = std::stoi(arg.substr(6));
-    setRngMode(v);
-}
-```
+At N ≲ a few hundred, Halton renders **noisier** than LCG.  Expected, not a
+bug — two causes:
 
-With setter/getter in `pathtrace.cu` (like `setCompactMethod`/`getCompactMethod`).
+1. **Large-prime-base clustering.**  Dims 4–9 use bases 11..29; a base-`b`
+   pair is only well-distributed once N ≫ b².  The diffuse pair (11, 13) is
+   *worse* than LCG at N=16 (0.9×); the AA pair (2, 3) crosses over near
+   N≈64, the diffuse pair near N≈256.  Specular/RR dims (17..29) are the
+   worst low-SPP offenders (variance spikes / fireflies).
+2. **Structured (non-white) error.**  Cross-pixel correlation makes the
+   residual noise spatially correlated, which reads as "dirtier" than LCG's
+   independent grain at the same RMS.
 
-The RNG mode is **warp-uniform** (all threads in a kernel launch read the same
-global flag), so the `if (mode == ...)` branch in `RngState::next()` has zero
-divergence cost.
+Practical crossover where Halton becomes visibly cleaner: simple scenes (low
+effective dimension) ~ a few hundred iters; complex scenes (specular /
+refractive / small lights) ~ a few thousand.
 
-### Phase 5: Update `src/interactions.h` and `src/interactions.cu`
+### Cross-pixel correlation (known limitation)
 
-- Replace `#include <thrust/random.h>` with `#include "rng.h"`.
-- Change function parameter types from `thrust::default_random_engine&` to
-  `RngState&` in:
-  - `calculateRandomDirectionInHemisphere()`
-  - `scatterRay()`
-  - `samplePhongSpecularDir()` (add declaration to `.h` if not already)
-- Replace `thrust::uniform_real_distribution<float> u01(0,1)` + `u01(rng)`
-  with `rng.next()` in all function bodies.
+True per-pixel independence is impossible for mixed-prime Halton while
+preserving the cross-dimensional net — small bases have too few digit
+permutations, and a strong base-2 hash (Burley-style) destroys the joint net
+(see design history, BUG 4).  Measured over 16 pixels:
 
----
+| dim (base) | mean \|corr\| | worst pair |
+|:---:|:---:|:---:|
+| dim0 (2) | 0.278 | 0.876 |
+| dim1 (3) | 0.286 | 0.832 |
+| dim4 (11) | 0.221 | 0.867 |
+| dim9 (29) | 0.127 | 0.920 |
+| LCG reference | 0.028 | 0.338 |
 
-## Files to Modify (Summary)
+Adjacent-pixel correlation (dim0): ~0.37 vs LCG ~0.01.  Consequence: at low
+SPP the noise is "clumpier" than LCG's white grain.  Not a correctness bug,
+and it does not break the within-pixel net.
 
-| File | Action | Risk |
-|------|--------|------|
-| `src/rng.h` | **Create** — `RngState`, `RngMode`, Halton functions, prime table | None (new file) |
-| `src/pathtrace.cu` | Replace RNG creation in 3 kernels + `russianRouletteTerminate`; add setter/getter; keep `makeSeededRandomEngine` as-is | Low — old code preserved |
-| `src/pathtrace.h` | Add `rngMode` to `PathTracerOptions`; declare setter/getter | Low |
-| `src/interactions.h` | Change `thrust::default_random_engine&` → `RngState&` in 3 signatures; swap include | Low — mechanical change |
-| `src/interactions.cu` | Replace `u01(rng)` → `rng.next()` in 3 functions; swap include | Low — mechanical change |
-| `src/main.cpp` | Parse `--rng=N` CLI flag | Low |
-| `src/intersections.h` | Add comment pointing to `rng.h` (no code change) | None |
-| `CMakeLists.txt` | Add `src/rng.h` to headers list | None |
+## Future Path
 
----
+- **Sobol + per-pixel Burley hash** is the only way to get *both* full
+  per-pixel independence (corr ≈ 0.004) *and* a preserved net: all dims base
+  2, so the hash scramble decorrelates without breaking the joint structure.
+  This would eliminate the toroidal shift entirely (`next()` becomes a pure
+  hash-scrambled Sobol sample).  Requires direction vectors + a rewrite of
+  the dimension infrastructure; not needed for the current scene complexity.
+- **Direct lighting / MIS** would add new Halton dimensions (10–15 are free).
 
-## What Is NOT Changed (Preserved)
+## Testing (`tests/rng_test`)
 
-- `src/intersections.h:13-22` — `utilhash()` stays exactly as-is.
-- `src/pathtrace.cu:88-98` — `makeSeededRandomEngine()` stays exactly as-is.
-- All existing Chinese and English comments throughout the codebase are untouched.
-- The default RNG mode is LCG — existing renders are bit-identical.
-- No existing struct fields, kernel signatures, or memory layouts change.
+Standalone, not wired into the root build.  Build with CMake + VS (see
+`CLAUDE.md`):
 
----
+- `rng_compare.cu` — host-only program including the real `rng.h`; writes
+  `pixel,iter,bounce,dim,lcg,halton_owen` rows.  Deterministic.
+- `rng_analyze.py` — star discrepancy, 2D scatter, π-convergence, grid
+  stratification, pixel decorrelation, plots.
+- `probe_owen.py` — independent net-structure probe (ports the algorithm in
+  numpy; used to prove BUG 4 / BUG 5 during development).
+- `verify_rng.py`, `verify_xpix.py`, `converge.py`, `low_spp.py`,
+  `shift_test.py` — analysis helpers used for the measurements above.
 
-## Verification
+## Design History
 
-### Correctness
-1. **Regression test:** Render `scenes/cornell.json` with `--rng=0` (LCG).
-   The output must be pixel-identical to the pre-change render.
-2. **Determinism test:** Render the same scene twice with `--rng=1`.  The
-   outputs must be pixel-identical (no floating-point non-determinism from the
-   Halton sequence).
-3. **Progressive convergence:** Render with `--rng=1` at 100, 500, 2500,
-   and 5000 iterations.  Verify that noise decreases monotonically and there
-   are no grid-like/structured artifacts (a sign of Halton dimensional
-   correlation).
-4. **A/B comparison:** Render the same scene at the same iteration count with
-   `--rng=0` (LCG) and `--rng=1` (Halton).  The Halton render should show
-   comparable or lower perceived noise, especially in smooth diffuse regions.
+The implementation went through five documented design iterations (kept as
+history in earlier `rng.h` headers):
 
-### Performance
-1. **Benchmark:** Profile `pathtrace` with `--benchmark` at 100 iterations
-   for both LCG and Halton modes.  Compare iteration time, kernel time
-   (`shadeMaterial`, `generateRayFromCamera`), and overall samples/second.
-   Halton's `radicalInverse` has ~2–3× more arithmetic per sample than LCG's
-   linear-congruential step, but this should be negligible compared to
-   intersection testing and memory latency in the bounce loop.
-
-### Visual Quality
-1. **Noise floor:** At 100 iterations, compare RMSE of LCG vs Halton against
-   a 5000-iteration reference (or analytic solution for Cornell box).
-2. **Structured artifact check:** Render a scene with a large diffuse plane
-   and inspect for streaks, grids, or moiré patterns — telltale signs of
-   Halton dimensional correlation.  If present, the scrambling is insufficient
-   and Owen scrambling should be implemented.
-
----
-
-## Future Extensions (Out of Scope for This Plan)
-
-1. **Owen scrambling** — Replace CP rotation with per-digit hash-based
-   permutation for proper stratified sampling in all dimensions.
-2. **Sobol sequence** — If dimensional correlation proves problematic at high
-   sample counts, implement Sobol with Joe & Kuo direction numbers.
-3. **Multiple Importance Sampling (MIS)** — Combine BSDF sampling with light
-   sampling; requires additional random dimensions.
-4. **Blue-noise / correlated multi-jitter** — For the 2D AA + lens sampling
-   dimensions, use precomputed CMJ or blue-noise textures for even faster
-   convergence.
+- **BUG 1 — unmasked hash index offset.**  Adding a full-uint32 hash to `iter`
+  pushed each pixel's walk into a random window (~2.7 B) where Halton is
+  indistinguishable from noise.  Fix: `haltonIndex = iter`, decorrelation in
+  the seed.
+- **BUG 2 — linear-sum CP seed.**  `pixel·131 + bounce·17 + dim·11` is
+  collision-prone.  Fix: chained `utilhash`.
+- **BUG 3 — CP rotation alone.**  A pure float-domain toroidal shift
+  introduced visible low-frequency patterns between nearby pixels.  Fix:
+  Owen scrambling on the integer index before the radical-inverse map; the
+  float shift kept only as a net-preserving decorrelation aid.
+- **BUG 4 — base-2-only hash scramble.**  Applying a Burley-style hash
+  scramble (`owenScramble`) to mixed bases kept each 1D marginal stratified
+  but destroyed the cross-dimensional net (random-rate 2D convergence).
+  Fix: `owenRadicalInverse` — prefix-dependent affine digit permutations in
+  every base.
+- **BUG 5 — linear digit scrambling.**  Fixed per-level permutations kept
+  different pixels near-identical (corr ~1).  Fix: nested (prefix-dependent)
+  permutations + fixed per-pixel toroidal shift.  Mean cross-pixel |corr|
+  drops to ~0.1–0.3 (adjacent ~0.37, worst pairs ~0.9).
