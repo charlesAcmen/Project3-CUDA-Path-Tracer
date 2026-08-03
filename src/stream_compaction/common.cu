@@ -1,7 +1,5 @@
 #include "common.h"
 
-// Note: checkCUDAErrorFn is now defined in ../src/utilities.h/cu
-
 namespace StreamCompaction {
     namespace Common {
 

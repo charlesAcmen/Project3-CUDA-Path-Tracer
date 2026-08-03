@@ -5,7 +5,7 @@
         {
             "TYPE":"Emitting",
             "RGB":[1.0, 1.0, 1.0],
-            "EMITTANCE":20.0
+            "EMITTANCE":5.0
         },
         "diffuse_white":
         {
