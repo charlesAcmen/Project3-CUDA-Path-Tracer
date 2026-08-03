@@ -7,8 +7,8 @@
  * @brief Unified random number generation for GPU Monte Carlo path tracing.
  *
  * Provides two RNG modes with a uniform interface:
- *   LCG    — thrust::default_random_engine (backward compatible, default)
- *   HALTON — multi-dimensional Cranley-Patterson scrambled Halton
+ *   LCG    — thrust::default_random_engine
+ *   HALTON — multi-dimensional Owen-scrambled Halton
  *
  * Key design for Halton mode:
  *   rng.next(dim) uses HALTON_PRIMES[dim] as the prime base.  All calls
@@ -43,8 +43,6 @@
 
 /**
  * Jenkins-style bit-mixing hash used to seed random number generators.
- * Provides spatial, temporal, and bounce-depth decorrelation when
- * combined with pixel index, iteration, and bounce depth.
  */
 __host__ __device__ inline unsigned int utilhash(unsigned int a)
 {
@@ -65,8 +63,10 @@ constexpr int HALTON_NUM_DIMS = 16;
 
 // --- Halton dimension assignment ---
 // Each independent sampling decision in the pipeline gets a unique
-// dimension index.  Currently 10 dimensions allocated (0–9); 6 remain
-// available for future features (e.g., direct lighting).
+// dimension index. .
+//
+// Larger primes (higher dims) suffer large-base clustering at low sample
+// counts — see "MEASURED LOW-SPP BEHAVIOR" in the file header.
 //
 //   Dim  Prime  Usage                          Location
 //   ---  -----  -----------------------------  ----------------------------
@@ -106,8 +106,7 @@ namespace HaltonDim {
 /**
  * Returns the n-th prime number for use as a Halton sequence base.
  *
- * Accessible from both host and device code (avoids CUDA's host/device
- * symbol visibility issues with constexpr arrays).
+ * Accessible from both host and device code.
  *
  * Halton dimension → prime base mapping:
  *   dim 0 → 2,   1 → 3,   2 → 5,   3 → 7,
@@ -122,10 +121,9 @@ __host__ __device__ inline int getHaltonPrime(int dim) {
         2, 3, 5, 7, 11, 13, 17, 19,
         23, 29, 31, 37, 41, 43, 47, 53
     };
-    // Clamp to [0, 15] -- dim >= 16 is out of range for the current
-    // dimension allocation (max used is 9).  Returning prime 2 for
-    // out-of-range dims at least avoids a crash, but the Halton
-    // sequence would collide with dim 0, so callers MUST stay in range.
+    // Returning the last prime for out-of-range dims avoids a crash, 
+    // but the Halton sequence would collide with dim 15, 
+    // so callers MUST stay in range.
     return primes[(dim < HALTON_NUM_DIMS) ? dim : (HALTON_NUM_DIMS - 1)];
 }
 
