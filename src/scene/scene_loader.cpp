@@ -3,10 +3,10 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
-#include "scene_loader.h"
+#include "scene/scene_loader.h"
 
 #include "constants.h"
-#include "logger.h"
+#include "utils/logger.h"
 #include "utilities.h"
 
 #include <glm/gtc/matrix_inverse.hpp>

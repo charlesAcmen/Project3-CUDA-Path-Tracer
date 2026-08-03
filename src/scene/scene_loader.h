@@ -12,7 +12,7 @@
 // Supported mesh formats: .obj (via tinyobjloader)
 // ====================================================================
 
-#include "scene.h"
+#include "scene/scene.h"
 
 #include <string>
 
