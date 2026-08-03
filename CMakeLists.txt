@@ -70,7 +70,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 include_directories(${CMAKE_SOURCE_DIR}/src/stream_compaction)
 
 set(headers
-    src/config.h
+    src/config/config.h
     src/image.h
     src/interactions/interactions.h
     src/intersection/intersections.h
@@ -78,8 +78,8 @@ set(headers
     src/pathtrace.h
     src/profiler/profiler.h
     src/rng/rng.h
-    src/scene.h
-    src/scene_loader.h
+    src/scene/scene.h
+    src/scene/scene_loader.h
     src/sceneStructs.h
     src/utilities.h
 )
@@ -87,14 +87,14 @@ set(headers
 set(sources
     src/main.cpp
     src/stb.cpp
-    src/config.cpp
+    src/config/config.cpp
     src/image.cpp
     src/glslUtility.cpp
     src/pathtrace.cu
     src/profiler/profiler.cu
     src/interactions/interactions.cu
-    src/scene.cpp
-    src/scene_loader.cpp
+    src/scene/scene.cpp
+    src/scene/scene_loader.cpp
     src/utilities.cu
 )
 list(SORT headers)
