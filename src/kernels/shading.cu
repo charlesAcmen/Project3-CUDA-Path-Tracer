@@ -1,0 +1,121 @@
+#include "shading.cuh"
+
+// ====================================================================
+// Shading Kernel Implementation
+// ====================================================================
+
+__device__ bool russianRouletteTerminate(
+    glm::vec3& color,
+    int remainingBounces,
+    int traceDepth,
+    int rrMinBounces,
+    RngState& rng)
+{
+    // Only applies after rrMinBounces guaranteed bounces.
+    // scatterRay already decremented remainingBounces, so the check
+    // "remainingBounces >= traceDepth - rrMinBounces" correctly
+    // protects the first rrMinBounces iterations.
+    if (remainingBounces <= 0 ||
+        remainingBounces >= traceDepth - rrMinBounces)
+    {
+        return false;
+    }
+
+    float p = fmaxf(fmaxf(color.r, color.g), color.b);
+    p = fminf(fmaxf(p, RR_P_MIN), RR_P_MAX);
+
+    if (rng.next(HaltonDim::PathRR) < p)  // dim 9 (prime 29): RR
+    {
+        color /= p;
+        return false;  // survived
+    }
+    return true; // terminated
+}
+
+__global__ void shadeMaterial(
+    int iter,
+    int num_paths,
+    ShadeableIntersection* shadeableIntersections,
+    PathSegment* pathSegments,
+    Material* materials,
+    ShadingConfig config)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < num_paths)
+    {
+        PathSegment& pathSegment = pathSegments[idx];
+
+        // Guard: skip paths already terminated in a prior bounce.
+        // Without this guard, a path that hit an emissive surface would
+        // re-intersect the same geometry on every remaining bounce and
+        // accumulate emission repeatedly, blowing out the image.
+        if (pathSegment.remainingBounces <= 0)
+        {
+            return;
+        }
+
+        const ShadeableIntersection& intersection = shadeableIntersections[idx];
+
+        if (intersection.t > 0.0f)
+        {
+            int bounceNum = config.traceDepth - pathSegment.remainingBounces;
+            RngState rngScatter = makeRngState(iter, pathSegment.pixelIndex,
+                bounceNum * MAX_DRAWS_PER_BOUNCE, config.rngMode);
+
+            const Material& material = materials[intersection.materialId];
+
+            glm::vec3 intersectionPoint = getExactPointOnRay(pathSegment.ray, intersection.t);
+
+            // Debug overlay: first-bounce hits on the focal plane in green.
+            if (config.debug.showDOFOverlay && pathSegment.remainingBounces == config.traceDepth) {
+                float hitDist = glm::dot(intersectionPoint - config.cam.position, config.cam.view);
+                float focalErr = fabsf(hitDist - config.cam.focalDistance);
+                if (focalErr < config.debug.focalTolerance) {
+                    pathSegment.color = glm::vec3(0.0f, 1.0f, 0.0f);
+                    pathSegment.remainingBounces = 0;
+                    return;
+                }
+            }
+
+            if (material.emittance > 0.0f)
+            {
+                // Light source hit: accumulate contribution and terminate
+                pathSegment.color *= (material.color * material.emittance);
+                pathSegment.remainingBounces = 0;
+            }
+            else
+            {
+                // ---- Indirect illumination (BSDF continuation ray) ----
+                // Surface hit: scatter the ray according to the material BSDF.
+                scatterRay(pathSegment, intersectionPoint,
+                    intersection.surfaceNormal, material,
+                    rngScatter, config.fresnelMode);
+
+                // ---- Russian roulette ----
+                // Probabilistically terminate low-throughput paths after
+                // the guaranteed minimum bounce count.
+                if (russianRouletteTerminate(pathSegment.color,
+                    pathSegment.remainingBounces, config.traceDepth,
+                    config.rrMinBounces, rngScatter))
+                {
+                    pathSegment.remainingBounces = 0;
+                }
+
+                // Path terminated — by Russian roulette kill or bounce budget
+                // exhaustion (remainingBounces <= 0 after scatterRay + RR).
+                // Zero out colour: only indirect illumination reaches here,
+                // where termination means no radiance to contribute.
+                if (pathSegment.remainingBounces <= 0)
+                {
+                    pathSegment.color = glm::vec3(0.0f);
+                }
+            }
+        }
+        else
+        {
+            // No intersection: background (black)
+            pathSegment.color = glm::vec3(0.0f);
+            pathSegment.remainingBounces = 0;
+        }
+    }
+}
