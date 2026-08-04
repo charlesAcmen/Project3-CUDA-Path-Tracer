@@ -52,9 +52,15 @@ static bool camchanged = true;
 static float dtheta = 0, dphi = 0;
 static glm::vec3 cammove;
 
+// Free-fly camera state:
+//   cam.position  — authoritative; translated by WASD / middle-pan / scroll-dolly.
+//   (theta, phi)  — view orientation; changed only by left-drag, so rotating
+//                   turns the camera in place without moving cam.position.
+//   zoom          — reference distance; scales fly speed and places the derived
+//                   cam.lookAt point (zoom units ahead along the view axis).
 float zoom, theta, phi;
-glm::vec3 cameraPosition;
-glm::vec3 ogLookAt; // for recentering the camera
+glm::vec3 ogCameraPosition; // original position, restored by R (recenter)
+float ogTheta, ogPhi, ogZoom; // original orientation / reference distance
 
 // Camera control feel parameters (orbit + WASD fly).
 static constexpr float CAMERA_MIN_THETA      = 0.001f; // orbit latitude pole guard
@@ -312,11 +318,14 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods
             case GLFW_KEY_P: // save image (S is now walk-backward)
                 saveImage();
                 break;
-            case GLFW_KEY_R: // recenter camera to original lookAt (was SPACE)
+            case GLFW_KEY_R: // recenter to original position + orientation (was SPACE)
                 camchanged = true;
                 renderState = &scene->state;
                 Camera& cam = renderState->camera;
-                cam.lookAt = ogLookAt;
+                cam.position = ogCameraPosition;
+                zoom = ogZoom;
+                theta = ogTheta;
+                phi = ogPhi;
                 break;
         }
     }
@@ -324,13 +333,9 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods
 
 // WASD / Space / Shift fly-translation.
 //
-// The orbit camera derives its position every frame from spherical coords
-// (zoom, theta, phi) around the pivot cam.lookAt:
-//     cam.position = cam.lookAt + offset(zoom, theta, phi)
-// so a camera can't be moved independently of the pivot without breaking
-// that model. Instead, translating cam.lookAt along the camera's own axes
-// moves the whole rig (camera + target) together with orientation intact —
-// the keyboard counterpart of the middle-mouse pan, extended to 3D.
+// In the free-fly model cam.position is independent state, so translating it
+// along the camera's own axes moves the camera through the scene while the
+// orientation (theta, phi) — and thus where it points — stays fixed.
 //   W/S forward/backward (cam.view), A/D left/right (cam.right),
 //   Space/Shift up/down (cam.up).
 void updateCameraMovement(float dt)
@@ -358,8 +363,8 @@ void updateCameraMovement(float dt)
     // Speed scales with the camera-target distance so the same key feel
     // works at both macro and micro scale (roughly zoom distance per 0.66s).
     float speed = zoom * CAMERA_MOVE_SPEED * dt;
-    cam.lookAt += glm::normalize(translate) * speed;
-    camchanged = true; // resets accumulation & recomputes cam.position
+    cam.position += glm::normalize(translate) * speed;
+    camchanged = true; // resets accumulation & recomputes view/right/up/lookAt
 }
 
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
@@ -377,8 +382,14 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
 void scrollCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
     if (io && io->WantCaptureMouse) return;
+    // Dolly along the view axis: scrolling changes the reference distance
+    // (zoom) and moves the camera to match, so the focused point stays put —
+    // "zoom in" physically flies the camera toward what it is looking at.
+    Camera& cam = renderState->camera;
+    const float oldZoom = zoom;
     zoom *= (yoffset > 0.0) ? CAMERA_SCROLL_ZOOM_IN : CAMERA_SCROLL_ZOOM_OUT;
     zoom = std::fmax(CAMERA_MIN_ZOOM, zoom);
+    cam.position += cam.view * (oldZoom - zoom);
     camchanged = true;
 }
 
@@ -399,8 +410,12 @@ void mousePositionCallback(GLFWwindow* window, double xpos, double ypos)
     }
     else if (rightMousePressed)
     {
+        // Dolly along the view axis (same as scroll), driven by drag delta.
+        Camera& cam = renderState->camera;
+        const float oldZoom = zoom;
         zoom += (ypos - lastY) / height;
         zoom = std::fmax(CAMERA_MIN_ZOOM, zoom);
+        cam.position += cam.view * (oldZoom - zoom);
         camchanged = true;
     }
     else if (middleMousePressed)
@@ -408,11 +423,11 @@ void mousePositionCallback(GLFWwindow* window, double xpos, double ypos)
         renderState = &scene->state;
         Camera& cam = renderState->camera;
 
-        // Pan lookAt in the camera's image plane (screen space).
+        // Pan the camera in its image plane (screen space).
         //   Horizontal: along the camera's right vector
         //   Vertical:   along the camera's up vector (Y unlocked)
-        cam.lookAt -= (float)(xpos - lastX) * cam.right * CAMERA_PAN_SPEED;
-        cam.lookAt += (float)(ypos - lastY) * cam.up    * CAMERA_PAN_SPEED;
+        cam.position -= (float)(xpos - lastX) * cam.right * CAMERA_PAN_SPEED;
+        cam.position += (float)(ypos - lastY) * cam.up    * CAMERA_PAN_SPEED;
         camchanged = true;
     }
 
@@ -430,20 +445,29 @@ void runCuda()
     {
         iteration = 0;
         Camera& cam = renderState->camera;
-        cameraPosition.x = zoom * sin(phi) * sin(theta);
-        cameraPosition.y = zoom * cos(theta);
-        cameraPosition.z = zoom * cos(phi) * sin(theta);
 
-        cam.view = -glm::normalize(cameraPosition);
-        glm::vec3 v = cam.view;
-        glm::vec3 u = glm::vec3(0, 1, 0);//glm::normalize(cam.up);
-        glm::vec3 r = glm::cross(v, u);
-        cam.up = glm::cross(r, v);
+        // Free-fly camera: cam.position is independent state (translated by
+        // WASD / middle-pan / scroll-dolly) and is NOT touched here.  (theta,
+        // phi) describe the view direction, changed only by left-drag, so
+        // rotating turns the camera in place.
+        //   D        = (sin(phi)sin(theta), cos(theta), cos(phi)sin(theta))
+        //   cam.view = -D  →  the direction the camera faces (camera → lookAt)
+        glm::vec3 D(sin(phi) * sin(theta), cos(theta), cos(phi) * sin(theta));
+        cam.view = -glm::normalize(D);
+
+        // right/up MUST stay unit length: ray_generation.cu builds the pixel
+        // grid as view − right·pixelLength·offset, and pixelLength is calibrated
+        // for unit vectors — a short right/up would silently narrow the FOV
+        // whenever the camera is pitched.  (cross(view, (0,1,0)) is unit only
+        // when looking horizontally.)
+        glm::vec3 u = glm::vec3(0, 1, 0);
+        glm::vec3 r = glm::normalize(glm::cross(cam.view, u));
+        cam.up = glm::cross(r, cam.view); // r ⟂ view, both unit → up is unit too
         cam.right = r;
 
-        cam.position = cameraPosition;
-        cameraPosition += cam.lookAt;
-        cam.position = cameraPosition;
+        // lookAt is a derived reference point zoom units ahead along the view
+        // axis (purely bookkeeping — rendering uses position/view/up/right).
+        cam.lookAt = cam.position + cam.view * zoom;
         camchanged = false;
     }
 
@@ -625,15 +649,18 @@ int main(int argc, char** argv)
     glm::vec3 right = glm::cross(view, up);
     up = glm::cross(right, view);
 
-    cameraPosition = cam.position;
-
     // compute phi (horizontal) and theta (vertical) relative 3D axis
     // so, (0 0 1) is forward, (0 1 0) is up
-    ogLookAt = cam.lookAt;
-    glm::vec3 v = cam.position - ogLookAt;
+    glm::vec3 v = cam.position - cam.lookAt;
     zoom = glm::length(v);
     theta = (zoom > 0.0f) ? glm::acos(v.y / zoom) : 0.0f;
     phi = atan2(v.x, v.z);
+
+    // Remember the loaded view so R (recenter) can restore it exactly.
+    ogCameraPosition = cam.position;
+    ogZoom = zoom;
+    ogTheta = theta;
+    ogPhi = phi;
 
     // Initialize CUDA and GL components
     // IMPORTANT: initCuda() → cudaGLSetGLDevice(0) must be called BEFORE
