@@ -70,7 +70,7 @@ __global__ void thresholdExtract(
     const glm::vec3* __restrict__ inputImage,
     glm::vec3*       __restrict__ outputImage,
     glm::ivec2 resolution,
-    int    iter,
+    float  invIter,
     float  threshold)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -81,7 +81,7 @@ __global__ void thresholdExtract(
         int idx = y * resolution.x + x;
 
         // Average HDR samples
-        glm::vec3 pix = inputImage[idx] / static_cast<float>(iter);
+        glm::vec3 pix = inputImage[idx] * invIter;
 
         // Per-channel threshold: keep only above-threshold radiance
         pix = glm::max(pix - glm::vec3(threshold), glm::vec3(0.0f));

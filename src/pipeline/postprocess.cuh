@@ -48,6 +48,9 @@ static void runPostProcess(
         (resolution.x + blockSize2d.x - 1) / blockSize2d.x,
         (resolution.y + blockSize2d.y - 1) / blockSize2d.y);
 
+    // Precomputed per-sample average:one host-side division instead of one per pixel).
+    const float invIter = 1.0f / (float)iter;
+
     // ---- Bloom (linear HDR space) — timed as BloomPass ----
     bool bloomHasRun = (bloomCfg.enabled && bloomCfg.intensity > 0.0f);
     if (bloomHasRun)
@@ -61,7 +64,7 @@ static void runPostProcess(
 
         // Threshold: keep only pixels brighter than the cutoff
         thresholdExtract<<<blocksPerGrid2d, blockSize2d>>>(
-            dev.image, dev.bloomBufA, resolution, iter, bloomCfg.threshold);
+            dev.image, dev.bloomBufA, resolution, invIter, bloomCfg.threshold);
 
         // Horizontal separable blur (shared-memory tiled)
         {
@@ -98,7 +101,7 @@ static void runPostProcess(
 
     // ---- Prepare display buffer: average HDR, composite bloom ----
     prepareDisplayKernel<<<blocksPerGrid2d, blockSize2d>>>(
-        dev.image, dev.imageDisplay, resolution, iter,
+        dev.image, dev.imageDisplay, resolution, invIter,
         bloomHasRun ? dev.bloomBufA : nullptr,
         bloomCfg.intensity);
     checkCUDAError("prepareDisplayKernel");

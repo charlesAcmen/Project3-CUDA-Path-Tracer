@@ -234,7 +234,7 @@ __global__ void prepareDisplayKernel(
     const glm::vec3* __restrict__ inputImage,
     glm::vec3*       __restrict__ outputImage,
     glm::ivec2 resolution,
-    int iter,
+    float invIter,
     const glm::vec3* __restrict__ bloomImage,
     float bloomIntensity)
 {
@@ -246,7 +246,7 @@ __global__ void prepareDisplayKernel(
         int idx = x + y * resolution.x;
 
         // Average accumulated HDR samples
-        glm::vec3 pix = inputImage[idx] / (float)iter;
+        glm::vec3 pix = inputImage[idx] * invIter;
 
         // Composite bloom (in linear HDR space, before tone mapping)
         if (bloomImage != nullptr && bloomIntensity > 0.0f)
