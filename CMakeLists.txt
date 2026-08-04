@@ -163,5 +163,14 @@ target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Release>,
 # Note: results differ from a precise-math build in the last few bits.
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-use_fast_math>")
 
+# Suppress common Thrust/CUDA warnings that clutter build output
+# --diag-suppress: suppress specific warning numbers
+# --display-error-number: show warning numbers (useful for finding IDs to suppress)
+target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:
+    -Xcudafe=--diag_suppress=20011
+    -Xcudafe=--diag_suppress=20014
+    -Xcudafe=--diag_suppress=implicit_return_from_non_void_function
+>")
+
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
 
