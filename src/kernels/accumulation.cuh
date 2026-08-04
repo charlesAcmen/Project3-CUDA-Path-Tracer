@@ -14,12 +14,12 @@
 #include "utils/utilities.h"
 
 /**
- * Writes the accumulated HDR image to the OpenGL pixel buffer for display.
- * Tone-mapping (ACES + sRGB) is applied in a separate pass before this;
- * this kernel treats `image` as already-LDR [0,1] data, dividing by `iter`
- * to compute the per-sample average.
+ * Writes the display buffer to the OpenGL pixel buffer for rendering.
+ * `image` is already averaged (prepareDisplayKernel ÷iter) and tone-mapped
+ * (ACES + sRGB) by the preceding passes, so this kernel only scales to
+ * [0,255] — no division here.
  */
-__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image)
+__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, glm::vec3* image)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -30,9 +30,9 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
         glm::vec3 pix = image[index];
 
         glm::ivec3 color;
-        color.x = glm::clamp((int)(pix.x / iter * 255.0), 0, 255);
-        color.y = glm::clamp((int)(pix.y / iter * 255.0), 0, 255);
-        color.z = glm::clamp((int)(pix.z / iter * 255.0), 0, 255);
+        color.x = glm::clamp((int)(pix.x * 255.0), 0, 255);
+        color.y = glm::clamp((int)(pix.y * 255.0), 0, 255);
+        color.z = glm::clamp((int)(pix.z * 255.0), 0, 255);
 
         pbo[index].w = 0;
         pbo[index].x = color.x;

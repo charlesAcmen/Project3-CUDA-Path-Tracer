@@ -138,7 +138,7 @@ static void runPostProcess(
 
     // ---- Display: write LDR sRGB data to OpenGL pixel buffer ----
     sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(
-        pbo, resolution, 1, dev.imageDisplay);
+        pbo, resolution, dev.imageDisplay);
 
     g_profiler().gpuStop(ProfilerOp::PostProcessTail);
 }
