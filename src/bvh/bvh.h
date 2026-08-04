@@ -55,6 +55,7 @@ struct BvhMeta
 // flatten) — uploaded to the renderer as deviceTriangles in M4.
 struct BvhBuffers
 {
+    // Device-side buffers (allocated in uploadToDevice, freed in freeDevice)
     BvhNode* deviceNodes = nullptr;  int numNodes = 0;
     BvhMeta* deviceBvhMeta = nullptr; int numGeoms = 0;
     std::vector<BvhNode>  hostNodes;      // construction output
