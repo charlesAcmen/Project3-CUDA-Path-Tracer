@@ -94,6 +94,10 @@ set(sources
     src/pathtrace.cu
     src/profiler/profiler.cu
     src/interactions/interactions.cu
+    src/kernels/ray_generation.cu
+    src/kernels/intersection.cu
+    src/kernels/shading.cu
+    src/kernels/accumulation.cu
     src/scene/scene.cpp
     src/scene/scene_loader.cpp
     src/utils/utilities.cu
