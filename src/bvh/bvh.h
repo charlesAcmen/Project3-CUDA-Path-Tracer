@@ -47,7 +47,6 @@ struct BvhNode
 struct BvhMeta
 {
     int rootNodeIndex = -1;
-    int nodeCount     = 0;
 };
 
 // BVH buffers: host build output + device upload.

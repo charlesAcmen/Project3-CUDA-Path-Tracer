@@ -53,10 +53,6 @@ struct AABB
         return (area != area || area <= RAY_EPSILON) ? 1.0f : area;
     }
 
-    __host__ __device__ inline glm::vec3 centroid() const
-    {
-        return 0.5f * (min + max);
-    }
 };
 
 /**

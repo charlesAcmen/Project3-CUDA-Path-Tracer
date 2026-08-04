@@ -253,7 +253,6 @@ void buildSceneBvh(BvhBuffers& out,
                                       triOffset, triCount, maxDepth, leafSize);
 
         out.hostBvhMeta[i].rootNodeIndex = root;
-        out.hostBvhMeta[i].nodeCount     = (int)out.hostNodes.size() - nodeStart;
     }
 }
 
