@@ -32,7 +32,7 @@
  *                        (winding preserved, not oriented toward the ray)
  * @return          true on hit (either side)
  */
-__device__ inline bool triangleIntersectionTest(
+__host__ __device__ inline bool triangleIntersectionTest(
     const Ray& ray,
     const Triangle& tri,
     float& outT,
