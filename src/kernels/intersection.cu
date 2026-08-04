@@ -33,11 +33,7 @@ __global__ void computeIntersections(
         // Triangles are stored in object space; bring the ray into the
         // mesh's local frame so that the intersection test is performed
         // in the same coordinate system as the vertices.
-        Ray objRay;
-        objRay.origin    = multiplyMV(geom.inverseTransform,
-                            glm::vec4(pathSegment.ray.origin, 1.0f));//1.0f:point
-        objRay.direction = multiplyMV(geom.inverseTransform,
-                            glm::vec4(pathSegment.ray.direction, 0.0f));//0.0f:vector
+        const Ray objRay = transformRayToObjectSpace(geom, pathSegment.ray);
 
         // ---- Linear scan over this mesh's triangle slice ----
         if (deviceTriangles == nullptr || geom.meshTriangleCount <= 0)
@@ -73,10 +69,7 @@ __global__ void computeIntersections(
 
         t_min = closestT;
         hit_geom_index = i;
-        glm::vec3 worldNormal = multiplyMV(
-            geom.invTranspose, glm::vec4(objNormal, 0.0f));
-        float wLen2 = glm::dot(worldNormal, worldNormal);
-        hit_normal = (isnan(wLen2) || wLen2 < RAY_EPSILON) ? glm::vec3(0.0f, 1.0f, 0.0f) : worldNormal * glm::inversesqrt(wLen2);
+        hit_normal = recordWorldNormal(geom, objNormal);
     }
 
     if (hit_geom_index == -1)
