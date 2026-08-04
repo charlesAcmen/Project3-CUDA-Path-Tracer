@@ -10,6 +10,7 @@
 
 #include "sceneStructs.h"
 #include "scene/scene.h"          // ShadingConfig
+#include "intersection/intersections.h"   // getExactPointOnRay
 #include "interactions/interactions.h"   // scatterRay
 #include "rng/rng.h"
 #include "constants.h"
