@@ -131,13 +131,6 @@ static pair<int, int> loadOBJ(const string& objPath,
                 attrib.vertices[3 * (size_t)idx2.vertex_index + 1],
                 attrib.vertices[3 * (size_t)idx2.vertex_index + 2]);
 
-            // ---- Face normal calculation (safe fallback) ----
-            glm::vec3 e1 = v1 - v0;
-            glm::vec3 e2 = v2 - v0;
-            glm::vec3 crossE = glm::cross(e1, e2);
-            float cLen2 = glm::dot(crossE, crossE);
-            glm::vec3 fn = (std::isnan(cLen2) || cLen2 < RAY_EPSILON) ? glm::vec3(0.0f, 1.0f, 0.0f) : crossE * (1.0f / std::sqrt(cLen2));
-
             // ---- Vertex normals ----
             glm::vec3 n0, n1, n2;
             if (hasNormals &&
@@ -158,18 +151,14 @@ static pair<int, int> loadOBJ(const string& objPath,
                     attrib.normals[3 * (size_t)idx2.normal_index + 0],
                     attrib.normals[3 * (size_t)idx2.normal_index + 1],
                     attrib.normals[3 * (size_t)idx2.normal_index + 2]);
-
-                if (std::isnan(glm::dot(n0, n0)) || glm::dot(n0, n0) < RAY_EPSILON) n0 = fn;
-                if (std::isnan(glm::dot(n1, n1)) || glm::dot(n1, n1) < RAY_EPSILON) n1 = fn;
-                if (std::isnan(glm::dot(n2, n2)) || glm::dot(n2, n2) < RAY_EPSILON) n2 = fn;
             }
             else
             {
-                // No vertex normals in OBJ → use face normal for all three vertices.
-                n0 = n1 = n2 = fn;
+                // No vertex normals in OBJ → makeTri falls back to the face normal.
+                n0 = n1 = n2 = glm::vec3(0.0f);
             }
 
-            triangles.push_back({v0, v1, v2, n0, n1, n2});
+            triangles.push_back(makeTri(v0, v1, v2, n0, n1, n2));
             count++;
             index_offset += fv;
         }
