@@ -1,0 +1,89 @@
+{
+  "asset": {
+    "version": "2.0"
+  },
+  "buffers": [
+    {
+      "byteLength": 624,
+      "uri": "data:application/octet-stream;base64,AAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAACAPwAAgL8AAAAALvlkPy755D4AAAAA6kZ3PwAAgL/ug4Q+2StdPy755D74DG0+17NdPwAAgL8AAAA/+EtGPy755D4u+eQ+8wQ1PwAAgL/zBDU/m+ghPy755D6b6CE/AAAAPwAAgL/Xs10/LvnkPi755D74S0Y/7oOEPgAAgL/qRnc/+AxtPi755D7ZK10/MjGNJAAAgL8AAIA/fZJ8JC755D4u+WQ/7oOEvgAAgL/qRnc/+Axtvi755D7ZK10/AAAAvwAAgL/Xs10/Lvnkvi755D74S0Y/8wQ1vwAAgL/zBDU/m+ghvy755D6b6CE/17NdvwAAgL8AAAA/+EtGvy755D4u+eQ+6kZ3vwAAgL/ug4Q+2Stdvy755D74DG0+AACAvwAAgL8yMQ0lLvlkvy755D59kvwk6kZ3vwAAgL/ug4S+2Stdvy755D74DG2+17NdvwAAgL8AAAC/+EtGvy755D4u+eS+8wQ1vwAAgL/zBDW/m+ghvy755D6b6CG/AAAAvwAAgL/Xs12/Lvnkvi755D74S0a/7oOEvgAAgL/qRne/+Axtvi755D7ZK12/yslTpQAAgL8AAIC/3m09pS755D4u+WS/7oOEPgAAgL/qRne/+AxtPi755D7ZK12/AAAAPwAAgL/Xs12/LvnkPi755D74S0a/8wQ1PwAAgL/zBDW/m+ghPy755D6b6CG/17NdPwAAgL8AAAC/+EtGPy755D4u+eS+6kZ3PwAAgL/ug4S+2StdPy755D74DG2+"
+    },
+    {
+      "byteLength": 288,
+      "uri": "data:application/octet-stream;base64,AAADAAIAAQACAAMAAAAEAAMAAQADAAQAAAAFAAQAAQAEAAUAAAAGAAUAAQAFAAYAAAAHAAYAAQAGAAcAAAAIAAcAAQAHAAgAAAAJAAgAAQAIAAkAAAAKAAkAAQAJAAoAAAALAAoAAQAKAAsAAAAMAAsAAQALAAwAAAANAAwAAQAMAA0AAAAOAA0AAQANAA4AAAAPAA4AAQAOAA8AAAAQAA8AAQAPABAAAAARABAAAQAQABEAAAASABEAAQARABIAAAATABIAAQASABMAAAAUABMAAQATABQAAAAVABQAAQAUABUAAAAWABUAAQAVABYAAAAXABYAAQAWABcAAAAYABcAAQAXABgAAAAZABgAAQAYABkAAAACABkAAQAZAAIA"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 624,
+      "byteStride": 24,
+      "target": 34962
+    },
+    {
+      "buffer": 1,
+      "byteOffset": 0,
+      "byteLength": 288,
+      "target": 34963
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "byteOffset": 0,
+      "componentType": 5126,
+      "count": 26,
+      "type": "VEC3",
+      "min": [
+        -1.0,
+        -1.0,
+        -1.0
+      ],
+      "max": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 12,
+      "componentType": 5126,
+      "count": 26,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5123,
+      "count": 144,
+      "type": "SCALAR"
+    }
+  ],
+  "meshes": [
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1
+          },
+          "indices": 2,
+          "mode": 4
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0
+    }
+  ],
+  "scenes": [
+    {
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "scene": 0
+}

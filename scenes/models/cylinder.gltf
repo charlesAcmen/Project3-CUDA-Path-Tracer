@@ -1,0 +1,89 @@
+{
+  "asset": {
+    "version": "2.0"
+  },
+  "buffers": [
+    {
+      "byteLength": 1200,
+      "uri": "data:application/octet-stream;base64,AAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAACAPwAAgL8AAAAAAACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAACAPwAAAAAAAAAA6kZ3PwAAgL/ug4Q+6kZ3PwAAAADug4Q+6kZ3PwAAgD/ug4Q+6kZ3PwAAAADug4Q+17NdPwAAgL8AAAA/17NdPwAAAAAAAAA/17NdPwAAgD8AAAA/17NdPwAAAAAAAAA/8wQ1PwAAgL/zBDU/8wQ1PwAAAADzBDU/8wQ1PwAAgD/zBDU/8wQ1PwAAAADzBDU/AAAAPwAAgL/Xs10/AAAAPwAAAADXs10/AAAAPwAAgD/Xs10/AAAAPwAAAADXs10/7oOEPgAAgL/qRnc/7oOEPgAAAADqRnc/7oOEPgAAgD/qRnc/7oOEPgAAAADqRnc/MjGNJAAAgL8AAIA/MjGNJAAAAAAAAIA/MjGNJAAAgD8AAIA/MjGNJAAAAAAAAIA/7oOEvgAAgL/qRnc/7oOEvgAAAADqRnc/7oOEvgAAgD/qRnc/7oOEvgAAAADqRnc/AAAAvwAAgL/Xs10/AAAAvwAAAADXs10/AAAAvwAAgD/Xs10/AAAAvwAAAADXs10/8wQ1vwAAgL/zBDU/8wQ1vwAAAADzBDU/8wQ1vwAAgD/zBDU/8wQ1vwAAAADzBDU/17NdvwAAgL8AAAA/17NdvwAAAAAAAAA/17NdvwAAgD8AAAA/17NdvwAAAAAAAAA/6kZ3vwAAgL/ug4Q+6kZ3vwAAAADug4Q+6kZ3vwAAgD/ug4Q+6kZ3vwAAAADug4Q+AACAvwAAgL8yMQ0lAACAvwAAAAAyMQ0lAACAvwAAgD8yMQ0lAACAvwAAAAAyMQ0l6kZ3vwAAgL/ug4S+6kZ3vwAAAADug4S+6kZ3vwAAgD/ug4S+6kZ3vwAAAADug4S+17NdvwAAgL8AAAC/17NdvwAAAAAAAAC/17NdvwAAgD8AAAC/17NdvwAAAAAAAAC/8wQ1vwAAgL/zBDW/8wQ1vwAAAADzBDW/8wQ1vwAAgD/zBDW/8wQ1vwAAAADzBDW/AAAAvwAAgL/Xs12/AAAAvwAAAADXs12/AAAAvwAAgD/Xs12/AAAAvwAAAADXs12/7oOEvgAAgL/qRne/7oOEvgAAAADqRne/7oOEvgAAgD/qRne/7oOEvgAAAADqRne/yslTpQAAgL8AAIC/yslTpQAAAAAAAIC/yslTpQAAgD8AAIC/yslTpQAAAAAAAIC/7oOEPgAAgL/qRne/7oOEPgAAAADqRne/7oOEPgAAgD/qRne/7oOEPgAAAADqRne/AAAAPwAAgL/Xs12/AAAAPwAAAADXs12/AAAAPwAAgD/Xs12/AAAAPwAAAADXs12/8wQ1PwAAgL/zBDW/8wQ1PwAAAADzBDW/8wQ1PwAAgD/zBDW/8wQ1PwAAAADzBDW/17NdPwAAgL8AAAC/17NdPwAAAAAAAAC/17NdPwAAgD8AAAC/17NdPwAAAAAAAAC/6kZ3PwAAgL/ug4S+6kZ3PwAAAADug4S+6kZ3PwAAgD/ug4S+6kZ3PwAAAADug4S+"
+    },
+    {
+      "byteLength": 576,
+      "uri": "data:application/octet-stream;base64,AwAFAAQAAwAEAAIAAQAFAAMAAAACAAQABQAHAAYABQAGAAQAAQAHAAUAAAAEAAYABwAJAAgABwAIAAYAAQAJAAcAAAAGAAgACQALAAoACQAKAAgAAQALAAkAAAAIAAoACwANAAwACwAMAAoAAQANAAsAAAAKAAwADQAPAA4ADQAOAAwAAQAPAA0AAAAMAA4ADwARABAADwAQAA4AAQARAA8AAAAOABAAEQATABIAEQASABAAAQATABEAAAAQABIAEwAVABQAEwAUABIAAQAVABMAAAASABQAFQAXABYAFQAWABQAAQAXABUAAAAUABYAFwAZABgAFwAYABYAAQAZABcAAAAWABgAGQAbABoAGQAaABgAAQAbABkAAAAYABoAGwAdABwAGwAcABoAAQAdABsAAAAaABwAHQAfAB4AHQAeABwAAQAfAB0AAAAcAB4AHwAhACAAHwAgAB4AAQAhAB8AAAAeACAAIQAjACIAIQAiACAAAQAjACEAAAAgACIAIwAlACQAIwAkACIAAQAlACMAAAAiACQAJQAnACYAJQAmACQAAQAnACUAAAAkACYAJwApACgAJwAoACYAAQApACcAAAAmACgAKQArACoAKQAqACgAAQArACkAAAAoACoAKwAtACwAKwAsACoAAQAtACsAAAAqACwALQAvAC4ALQAuACwAAQAvAC0AAAAsAC4ALwAxADAALwAwAC4AAQAxAC8AAAAuADAAMQADAAIAMQACADAAAQADADEAAAAwAAIA"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 1200,
+      "byteStride": 24,
+      "target": 34962
+    },
+    {
+      "buffer": 1,
+      "byteOffset": 0,
+      "byteLength": 576,
+      "target": 34963
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "byteOffset": 0,
+      "componentType": 5126,
+      "count": 50,
+      "type": "VEC3",
+      "min": [
+        -1.0,
+        -1.0,
+        -1.0
+      ],
+      "max": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 12,
+      "componentType": 5126,
+      "count": 50,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5123,
+      "count": 288,
+      "type": "SCALAR"
+    }
+  ],
+  "meshes": [
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1
+          },
+          "indices": 2,
+          "mode": 4
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0
+    }
+  ],
+  "scenes": [
+    {
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "scene": 0
+}
