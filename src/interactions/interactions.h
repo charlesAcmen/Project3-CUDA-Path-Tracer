@@ -15,9 +15,10 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     glm::vec3 normal, 
     RngState& rng);
 
-__host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2);
-__host__ __device__ float fresnelAccurate(float cosThetaI, float n1, float n2);
-__host__ __device__ float selectFresnelEvaluator(FresnelMode fresnelMode, float cosThetaI, float n1, float n2);
+// eta = n1/n2, precomputed by the caller (invIOR on entry, IOR on exit).
+__host__ __device__ float fresnelSchlick(float cosThetaI, float eta);
+__host__ __device__ float fresnelAccurate(float cosThetaI, float eta);
+__host__ __device__ float selectFresnelEvaluator(FresnelMode fresnelMode, float cosThetaI, float eta);
 __host__ __device__ HitSide classifyRefraction(
     glm::vec3 rayDir,
     glm::vec3 surfaceNormal,
