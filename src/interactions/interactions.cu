@@ -143,25 +143,27 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
         + sin(around) * over * perpendicularDirection2;
 }
 
-__host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2)
+__host__ __device__ float fresnelSchlick(float cosThetaI, float eta)
 {
     cosThetaI = fminf(fmaxf(cosThetaI, 0.0f), 1.0f);
     // Schlick's approximation for Fresnel reflectance.
     // R(θ) = R₀ + (1 - R₀) · (1 - cosθ)⁵
-    float r0 = (n1 - n2) / (n1 + n2);
+    // eta = n1/n2 is precomputed by the caller (invIOR on entry, IOR on exit),
+    // so the n1/n2 ratio never divides on the GPU.
+    float r0 = (eta - 1.0f) / (eta + 1.0f);
     r0 = r0 * r0;
 
-    // When light travels from a denser medium into a rarer one (n₁ > n₂),
+    // When light travels from a denser medium into a rarer one (eta > 1),
     // the physically correct argument to Schlick is cos(θₜ) — the cosine
     // of the *transmitted* angle — rather than cos(θᵢ).  Otherwise
     // reflectance is severely underestimated near the critical angle.
     //   Ref: "Reflections and Refractions in Ray Tracing" — Bram de Greve
     //   Ref: PBRT 4th ed. §9.2.1 — FresnelDielectric
     float cosTheta = cosThetaI;
-    if (n1 > n2)
+    if (eta > 1.0f)
     {
         float sinThetaI = sqrtf(fmaxf(0.0f, 1.0f - cosThetaI * cosThetaI));
-        float sinThetaT = (n1 / n2) * sinThetaI;
+        float sinThetaT = eta * sinThetaI;
         if (sinThetaT >= 1.0f) return 1.0f;           // total internal reflection
         cosTheta = sqrtf(fmaxf(0.0f, 1.0f - sinThetaT * sinThetaT)); // cos(θₜ)
     }
@@ -172,21 +174,21 @@ __host__ __device__ float fresnelSchlick(float cosThetaI, float n1, float n2)
     return r0 + (1.0f - r0) * oneMinusCos5;
 }
 
-__host__ __device__ float selectFresnelEvaluator(FresnelMode fresnelMode, float cosThetaI, float n1, float n2)
+__host__ __device__ float selectFresnelEvaluator(FresnelMode fresnelMode, float cosThetaI, float eta)
 {
     return (fresnelMode == FresnelMode::Accurate)
-        ? fresnelAccurate(cosThetaI, n1, n2)
-        : fresnelSchlick(cosThetaI, n1, n2);
+        ? fresnelAccurate(cosThetaI, eta)
+        : fresnelSchlick(cosThetaI, eta);
 }
 
 //returns the fraction of non-polarized light reflected at the interface between two materials with indices of refraction n1 and n2, 
-//given the cosine of the incident angle cosThetaI.
-__host__ __device__ float fresnelAccurate(float cosThetaI, float n1, float n2)
+//given the cosine of the incident angle cosThetaI.  eta = n1/n2 (precomputed).
+__host__ __device__ float fresnelAccurate(float cosThetaI, float eta)
 {
     cosThetaI = fminf(fmaxf(cosThetaI, 0.0f), 1.0f);
     float sinThetaI = sqrtf(fmaxf(0.0f, 1.0f - cosThetaI * cosThetaI));
-    //SNELL'S LAW: n1 * sin(thetaI) = n2 * sin(thetaT)
-    float sinThetaT = (n1 / n2) * sinThetaI;
+    //SNELL'S LAW: n1 * sin(thetaI) = n2 * sin(thetaT)  →  sin(thetaT) = eta * sin(thetaI)
+    float sinThetaT = eta * sinThetaI;
     if (sinThetaT >= 1.0f)
     {// Total internal reflection occurs when the angle of incidence exceeds the critical angle, 
         //resulting in no refraction.
@@ -194,12 +196,12 @@ __host__ __device__ float fresnelAccurate(float cosThetaI, float n1, float n2)
     }
 
     float cosThetaT = sqrtf(fmaxf(0.0f, 1.0f - sinThetaT * sinThetaT));
-    float rParallel = (n2 * cosThetaI - n1 * cosThetaT) /
-                      (n2 * cosThetaI + n1 * cosThetaT);
-    // Correct perpendicular (s-polarized) Fresnel term:
-    // r_perp = (n1 * cosThetaI - n2 * cosThetaT) / (n1 * cosThetaI + n2 * cosThetaT)
-    float rPerpendicular = (n1 * cosThetaI - n2 * cosThetaT) /
-                           (n1 * cosThetaI + n2 * cosThetaT);
+    // Divide both numerator and denominator by n2 → eta = n1/n2 form.
+    float rParallel = (cosThetaI - eta * cosThetaT) /
+                      (cosThetaI + eta * cosThetaT);
+    // Correct perpendicular (s-polarized) Fresnel term.
+    float rPerpendicular = (eta * cosThetaI - cosThetaT) /
+                           (eta * cosThetaI + cosThetaT);
     return (rParallel * rParallel + rPerpendicular * rPerpendicular) * 0.5f;
 }
 
@@ -276,11 +278,14 @@ __host__ __device__ void scatterRay(
             const float etaRatio = entering ? m.invIndexOfRefraction : m.indexOfRefraction;
             const glm::vec3 refractNormal = entering ? normal : -normal;
 
+            // etaRatio = n1/n2, already precomputed (invIOR on entry, IOR on
+            // exit) — the Fresnel functions take it directly instead of
+            // dividing by n1/n2 on the GPU.
             // Both Fresnel functions return exactly 1.0 on total internal
             // reflection (see fresnelSchlick / fresnelAccurate), so the roulette
             // below normally takes the reflection branch whenever refraction is
             // impossible.  The explicit `tir ||` below makes that unconditional.
-            const float reflectance = selectFresnelEvaluator(fresnelMode, cosThetaI, n1, n2);
+            const float reflectance = selectFresnelEvaluator(fresnelMode, cosThetaI, etaRatio);
 
             // Russian roulette: reflect with prob R, refract with prob 1-R.
             // Throughput multiplier = (energy fraction) / (probability):
