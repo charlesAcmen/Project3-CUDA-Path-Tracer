@@ -9,7 +9,8 @@ ctrl shift p select variant
 .\build\bin\Release\cis565_path_tracer.exe scenes/cornellRefra.json
 .\build\bin\Release\cis565_path_tracer.exe scenes/cornell_gltf.json
 .\build\bin\Release\cis565_path_tracer.exe scenes/cornell_glb.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/light_test.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_shapes.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_inv.json
 
 .\build\bin\Debug\cis565_path_tracer.exe scenes/cornell.json
 .\build\bin\RelWithDebInfo\cis565_path_tracer.exe scenes/cornellGlossy.json
