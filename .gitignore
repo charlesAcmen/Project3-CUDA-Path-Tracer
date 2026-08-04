@@ -12,8 +12,6 @@
 *.launch
 GNUmakefile
 # *.md
-CLAUDE.md
-AGENTS.md
 !README.md
 !INSTRUCTION.md
 build

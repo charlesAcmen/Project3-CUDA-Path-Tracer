@@ -1,0 +1,152 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Build & Run
+
+- **Windows (Visual Studio):** Generate with `cmake -B build`, then build with `cmake --build build --config Release` (or open the generated `.sln`).
+- **Linux/WSL (Make):** `make` or `make Release` builds with CMake into `build/`.
+- **Run:** `build/bin/cis565_path_tracer <scenefile.json>` — e.g. `build/bin/cis565_path_tracer scenes/cornell.json`. In VS, set `Debugging > Command Arguments` to `../scenes/cornell.json`.
+- **Clean:** `make clean`
+- **No test suite in the main build** — validation is visual inspection of the rendered output. Standalone tests live under `tests/` (`config_test`, `rng_test`, `refraction_test`) but are NOT wired into the root CMakeLists. Each has its own CMake project; build with `cmake -G "Visual Studio 17 2022" -A x64 -B <test>/build <test>` then `cmake --build <test>/build --config Release`.
+
+## Runtime Configuration (three-layer priority)
+
+`CLI flags > config.local.json > code defaults`, handled by `src/config.cpp`/`config.h` through the `appConfig()` singleton. Defaults (in `AppConfig`): `compactMethod = SharedMem`, `sortByMaterial = false`, `rngMode = LCG`, `fresnelMode = Schlick`, `autoSave = true`.
+
+| Flag | Meaning |
+|------|---------|
+| `--compact=N` | Compaction: 0=off, 1=global-mem scan, 2=Thrust `copy_if`, 3=shared-mem scan (default) |
+| `--sort=N` | Material sorting 0/1 (default off) |
+| `--fresnel=N` | 0=Schlick (default), 1=Accurate Fresnel |
+| `--rng=N` | 0=LCG (default), 1=scrambled Halton |
+| `--benchmark` | Enable profiler CSV output to `profiler_output/<scene>_<timestamp>/` |
+| `--warmup=N` | Profiler warmup iterations (default 3) |
+| `--save` / `--save-at=N1,N2,...` | Save final / checkpoint images |
+| `--config=PATH` | Load config JSON (default `config.local.json` in CWD) |
+| `-h`, `--help` | Help text |
+
+Many settings can also be toggled live via the ImGui overlay (`RenderImGui` in `main.cpp`); those mutate the same `g_opts` singleton through setters declared in `pathtrace.h`.
+
+## Project Architecture
+
+CUDA-based Monte Carlo path tracer (CIS 565 at UPenn). **All geometry is triangulated at load time** — there are no sphere/cube primitives anymore; every `Geom` is a mesh referencing a slice of a flat triangle array. Rendering is CUDA-GL interop with a live ImGui overlay.
+
+### Source Layout
+
+```
+src/
+├── main.cpp                  # GLFW/GL window, camera controls, ImGui, render loop → pathtrace()
+├── pathtrace.cu / .h         # GPU pipeline + runtime getters/setters; includes kernels/ + pipeline/
+├── config.cpp / config.h     # AppConfig singleton, JSON + CLI merge, startup help/summary
+├── scene_loader.cpp / .h     # JSON scene + OBJ/glTF mesh loading (tinyobjloader + cgltf, vertex normals)
+├── scene.cpp / scene.h       # Scene container + computeSceneStats
+├── sceneStructs.h            # All shared data structures (Ray, Geom, Material, PathSegment, …)
+├── constants.h               # PI, EPSILON, RAY_EPSILON, RR_P_MIN/MAX, LARGE_T, …
+├── utilities.h / .cu         # buildTransformationMatrix, checkCUDAErrorFn
+├── logger.h                  # tagged stdout/stderr logging (Log::info/warn/error/raw)
+├── kernel_config.h           # LAUNCH_KERNEL_AUTO macros, KernelConfig / OccupancyConfig / DeviceInfo
+├── image.h / .cpp            # PNG/HDR output (stb_image)
+├── glslUtility.* / window_setup.h   # GLFW/GL/CUDA-interop init, PBO registration & per-frame mapping
+├── kernels/                  # __global__ kernels (pure GPU, data passed as parameters):
+│   ├── ray_generation.cuh    #   primary rays + AA sub-pixel jitter + thin-lens DoF
+│   ├── intersection.cuh      #   naive O(N) ray–mesh linear scan (TODO: BVH)
+│   ├── shading.cuh           #   BSDF eval + scatterRay + Russian roulette
+│   └── accumulation.cuh      #   gatherTerminatedPaths, sendImageToPBO
+├── pipeline/                 # host-side orchestration (references g_opts / g_dev globals):
+│   ├── sort.cuh              #   material sorting (thrust sort_by_key + gather)
+│   ├── compact.cuh           #   stream-compaction dispatch (gather + compact per bounce)
+│   └── postprocess.cuh       #   bloom → prepareDisplay → ACES/sRGB → CA → vignette → PBO
+├── postprocess/              # bloom, tonemap (ACES + sRGB), chromatic_aberration, vignette kernels
+├── interactions/             # scatterRay + Fresnel (Schlick/Accurate) + hemisphere/Phong sampling
+├── intersection/             # intersections.h (ray utils, concentricSampleDisk), triangle.h (Möller–Trumbore)
+├── rng/rng.h                 # RngState: LCG + scrambled Halton, utilhash
+├── profiler/                 # Profiler singleton: cudaEvent GPU + chrono CPU timing, CSV export
+├── stream_compaction/        # efficient.cu/h: global-scan + shared-mem hierarchical-scan compaction
+├── ImGui/                    # Dear ImGui source
+└── json.hpp                  # nlohmann/json (header-only)
+```
+
+### Path Tracing Pipeline (one iteration = one sample per pixel)
+
+`pathtrace()` in `pathtrace.cu` runs once per frame:
+
+1. **`generateRayFromCamera`** — primary rays per pixel (AA jitter; thin-lens DoF if `lensRadius > 0`). All `pixelcount` paths start with `remainingBounces = traceDepth`.
+2. **Bounce loop** (until every path terminates or `depth ≥ traceDepth`):
+   - **`computeIntersections`** — naive linear scan: each active path is transformed into every mesh's object space (`inverseTransform`) and tested against that mesh's triangle slice (double-sided Möller–Trumbore with interpolated vertex normals). Records closest `t`, `materialId`, world-space `surfaceNormal`.
+   - **`sortPathsByMaterial`** *(optional)* — thrust sort_by_key on `materialId`, reorders paths + intersections so same-material paths are contiguous (less warp divergence).
+   - **`shadeMaterial`** — emissive hit: multiply by emittance, terminate. Miss: terminate black. Surface hit: `scatterRay()` (diffuse/glossy/mirror/refractive) then Russian roulette.
+   - **`compactActivePaths`** *(optional, 4 methods)* — first `gatherTerminatedPaths` banks dead-path colors into the HDR accumulation image, then stream-compacts survivors to the front of a ping-pong buffer.
+3. **`runPostProcess`** — bloom (linear HDR) → `prepareDisplayKernel` (÷iter, composite bloom) → ACES + sRGB tonemap → chromatic aberration → vignette → PBO.
+4. Copy the **tonemapped** display buffer (`g_dev.imageDisplay`) to host `state.image` so `saveImage()` matches the on-screen preview (raw HDR lives in `g_dev.image`).
+
+### Key Data Structures (all in `sceneStructs.h`)
+
+- **`Triangle`** — 3 vertices + 3 vertex normals (object space, for smooth shading).
+- **`Geom`** — `materialid`, transform/inverse/invTranspose, plus `meshTriangleOffset`/`meshTriangleCount` (slice into the device-wide flat triangle array; `-1,0` for none).
+- **`Material`** — `color`, `specular { exponent, color }`, `type` (`MaterialType` enum: Diffuse/Reflective/Refractive/Emissive), `indexOfRefraction` + `invIndexOfRefraction`, `emittance`.
+- **`Camera`** — resolution, position/lookAt/view/up/right, fov, pixelLength, `lensRadius` (0 = pinhole), `focalDistance`.
+- **`PathSegment`** — ray + accumulated color + pixelIndex + remainingBounces.
+- **`ShadeableIntersection`** — `t` (<0 = miss), `surfaceNormal`, `materialId`.
+- **`RenderState`** — camera + iterations + traceDepth + rrMinBounces + fresnelMode + host `image` buffer + `DebugConfig`.
+- **`AppConfig`** — runtime config singleton (see above).
+
+### Random Number Generation (`src/rng/rng.h`)
+
+`RngState` exposes a uniform `.next(dim)` API for both modes. `makeRngState(iter, pixelIndex, bounceNum * MAX_DRAWS_PER_BOUNCE, mode)` creates the per-bounce state (bounce encoding via `MAX_DRAWS_PER_BOUNCE = 8`).
+
+- **LCG** — `thrust::default_random_engine` seeded by `utilhash` (backward compatible).
+- **Halton** — `haltonIndex = hash(pixel, bounce) + iter` (consecutive walk across frames → low-discrepancy convergence). `next(dim)` picks a prime base per dimension (`HaltonDim`: AA jitter, lens, diffuse θ/φ, specular θ/φ, Fresnel roulette, path RR) and applies a Cranley-Patterson rotation with a **fixed** per-(pixel, bounce, dim) offset. `iter` is deliberately excluded from the CP seed (see comments in `rng.h`).
+- Dimensions 0–9 are allocated; 10–15 reserved.
+
+### Intersection Testing
+
+Mesh-only. The intersection kernel expects every `Geom` to be a triangulated mesh; non-mesh geoms silently miss. Triangle test in `intersection/triangle.h` is **double-sided** (accepts back faces — required for rays inside refractive objects) and reports the model's **true** shading normal (winding preserved). Opaque materials orient it toward the ray in `scatterRay`; refraction uses its sign (dot with the ray) to classify enter vs exit. `t` is the world-space distance along the normalized world ray (the parametric `t` maps linearly through the object transform).
+
+### Scattering (`interactions/interactions.cu`)
+
+- **Diffuse** — cosine-weighted hemisphere sampling; `color *= albedo` (the `cosθ/pdf` factor cancels the `1/π` in the Lambert BRDF).
+- **Reflective** — `exponent < 0` → perfect mirror (`glm::reflect`); `exponent ≥ 0` → glossy Phong lobe around the reflected direction.
+- **Refractive** — `classifyRefraction` (enter/exit), Fresnel via Schlick or Accurate (`fresnelMode`), Russian-roulette split between reflection and refraction with probability-compensated throughput; ray origin offset into the correct side of the surface by `EPSILON`.
+- **Russian roulette** (`shading.cuh`) — after `rrMinBounces`, survival probability = clamp(max RGB, `RR_P_MIN`, `RR_P_MAX`); survivors divide color by p.
+
+### Post-Processing
+
+Bloom runs in linear HDR space (threshold → separable Gaussian blur with shared-memory tiling). ACES filmic (Hill fit) + sRGB gamma in `tonemap.cuh`. Chromatic aberration and vignette run in sRGB space. The display buffer `g_dev.imageDisplay` is separate from the raw HDR accumulation `g_dev.image`.
+
+### Scene Files
+
+- **Materials** — `TYPE`: `Diffuse` / `Emitting` / `Specular` / `Refractive`. `Specular` supports `SPECULAR_COLOR` and `ROUGHNESS` (0 → mirror; higher → glossier via `exponent = 2/r² − 2`). `Refractive` uses `IOR`.
+- **Camera** — `RES`, `FOVY`, `ITERATIONS`, `DEPTH`, `RR_DEPTH`, `FILE`, `EYE`, `LOOKAT`, `UP`; optional `LENS_RADIUS` / `FOCAL_DISTANCE` (DoF) and `FRESNEL_MODE` (0/1).
+- **Objects** — `TYPE`: `"mesh"` with `FILE` (mesh path relative to the scene file; `.obj` via tinyobjloader, `.gltf`/`.glb` via cgltf), `MATERIAL`, `TRANS`, `ROTAT`, `SCALE`. Models live in `scenes/models/` (cube.obj, sphere.obj, sphere_inv.obj, light.obj, pyramid.obj, diamond.obj, cube.gltf, cube.glb).
+- **Winding / normals** — the renderer **trusts the model's winding and normal direction**. The intersection reports the true shading normal; `scatterRay` orients it toward the ray only for opaque materials, and refraction reads its sign (dot with the ray) to classify enter vs exit. For solid glass use an **outward-wound** mesh (`sphere.obj` — smooth `vn`, CCW). `sphere_inv.obj` is **inward-wound and flat-shaded** (no `vn`): it renders as inside-out glass — Fresnel wall reflections still visible, but the entry ray is misclassified as "exit", so there is **no lensing/caustics** (that's the correct winding-respecting behavior, not a bug).
+
+### Known Performance Notes
+
+- `checkCUDAError` (`utilities.h`) forces a `cudaDeviceSynchronize()` after every kernel (~25 call sites; more per frame inside the compaction sweep loops). Fine for correctness; consider disabling `ERRORCHECK` for pure benchmark runs.
+- `LAUNCH_KERNEL_AUTO` calls `cudaGetDeviceProperties` on every launch (`kernel_config.h`).
+- `computeIntersections` is O(N_geoms × N_paths) — BVH is the open TODO.
+- **Fast math** — `CMakeLists.txt` compiles CUDA with `-use_fast_math` (rcp.approx division, fast sqrt/trig/pow). Errors are ~2 ulp, invisible in a path tracer, and it makes the hot `1.0f / a` in `intersection/triangle.h` cheap. Consequence: **results differ from a precise-math build in the last few bits** — use the same flags when diffing renders or benchmarking.
+- **GPU division avoidance** — reciprocals and ratios that are constant per frame / per material are precomputed on the host: per-pixel `÷iter` became `*invIter` (`postprocess.cuh` → `tonemap.cuh`/`bloom.cuh`), Fresnel takes precomputed `eta` = n1/n2 (`interactions.cu`, from `invIndexOfRefraction`/`indexOfRefraction`), Phong takes precomputed `invExponentPlusOne` (`scene_loader.cpp` → `Material`), and `sendImageToPBO` no longer divides (display buffer is pre-averaged).
+
+## Controls (Runtime)
+
+| Key | Action |
+|-----|--------|
+| Esc | Save image and exit |
+| S   | Save image |
+| Space | Re-center camera to original lookAt |
+| Left mouse drag | Rotate camera |
+| Right mouse drag (vertical) | Zoom |
+| Middle mouse drag | Pan lookAt in XZ plane |
+| Mouse wheel | Zoom |
+
+## Open TODO Items
+
+- **BVH / hierarchical acceleration** — replace the naive linear scan in `computeIntersections` (`src/kernels/intersection.cuh`).
+- **Motion blur** — jitter rays "in time" (`src/kernels/ray_generation.cuh`).
+- **Wire `tests/` into the root CMake build.**
+
+## Dependencies
+
+CUDA (with Thrust), OpenGL, GLFW, GLEW, GLM (header-only, in `external/`), nlohmann/json (`src/json.hpp`), stb (`src/stb.cpp`), tinyobjloader (`external/include/tiny_obj_loader.h`), cgltf (`external/include/cgltf.h`). Compiled with C++17 / CUDA 17 standard, `CUDA_SEPARABLE_COMPILATION ON`, targeting `native` architecture.
