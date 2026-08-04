@@ -4,13 +4,12 @@
 // Bounding Volume Hierarchy — CPU build / GPU traverse
 //
 // Per-mesh BVH in object space.  Built on the host (exhaustive SAH in
-// bvh.cu), traversed iteratively on the GPU via an explicit stack.  The
-// single traversal routine, traverseBvhClosest, is __host__ __device__
-// so the host test harness validates exactly what the GPU kernel runs.
+// bvh.cu，穷举表面积启发式算法分割建树), 
+// traversed iteratively on the GPU via an explicit stack.  
 //
 // Triangle layout: leaves reference a contiguous chunk [left, right) of
-// the triangle array.  buildSceneBvh's flatten pass REORDERS triangles
-// into leaf-contiguous runs (per mesh), so a leaf's chunk is a
+// the triangle array.  buildSceneBvh's flatten pass（展平阶段）REORDERS triangles
+// into leaf-contiguous runs （同一个叶子节点所包含的三角形在内存中连续存放）(per mesh), so a leaf's chunk is a
 // sequential memory access — cache-friendly and coalesced, instead of
 // scattered leaf-index reads into the original scene-order array.
 //
@@ -59,7 +58,7 @@ struct BvhBuffers
     BvhNode* deviceNodes = nullptr;  int numNodes = 0;
     BvhMeta* deviceBvhMeta = nullptr; int numGeoms = 0;
     std::vector<BvhNode>  hostNodes;      // construction output
-    std::vector<BvhMeta>  hostBvhMeta;
+    std::vector<BvhMeta>  hostBvhMeta;    // per-geom metadata 
     std::vector<Triangle> hostTriangles;  // reordered flat triangles
 };
 
@@ -99,17 +98,20 @@ __host__ __device__ inline bool traverseBvhClosest(
         1.0f / objRay.direction.z);
 
     int stack[kMaxBvhStackDepth];
-    int sp = 0;
+    int sp = 0;//stack pointer 
     stack[sp++] = rootNodeIndex;
 
     bool hit = false;
 
     while (sp > 0)
     {
+        //pop the top node off the stack
         const int nodeIndex = stack[--sp];
         const BvhNode& node = nodes[nodeIndex];
 
+        //near side:RAY_EPSILON, far side:closestT
         if (!intersectRayAABB(objRay.origin, invDir, node.bounds, RAY_EPSILON, closestT))
+            //skip the node and its subtree if the ray misses the node's AABB
             continue;
 
         if (node.isLeaf)
