@@ -300,10 +300,10 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods
                 saveImage();
                 glfwSetWindowShouldClose(window, GL_TRUE);
                 break;
-            case GLFW_KEY_S:
+            case GLFW_KEY_P: // save image (S is now walk-backward)
                 saveImage();
                 break;
-            case GLFW_KEY_SPACE:
+            case GLFW_KEY_R: // recenter camera to original lookAt (was SPACE)
                 camchanged = true;
                 renderState = &scene->state;
                 Camera& cam = renderState->camera;
@@ -311,6 +311,46 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods
                 break;
         }
     }
+}
+
+// WASD / Space / Shift fly-translation.
+//
+// The orbit camera derives its position every frame from spherical coords
+// (zoom, theta, phi) around the pivot cam.lookAt:
+//     cam.position = cam.lookAt + offset(zoom, theta, phi)
+// so a camera can't be moved independently of the pivot without breaking
+// that model. Instead, translating cam.lookAt along the camera's own axes
+// moves the whole rig (camera + target) together with orientation intact —
+// the keyboard counterpart of the middle-mouse pan, extended to 3D.
+//   W/S forward/backward (cam.view), A/D left/right (cam.right),
+//   Space/Shift up/down (cam.up).
+void updateCameraMovement(float dt)
+{
+    if (io && io->WantCaptureKeyboard)
+    {
+        return; // ImGui text input active
+    }
+
+    Camera& cam = renderState->camera;
+
+    glm::vec3 translate(0.0f);
+    if (glfwGetKey(window, GLFW_KEY_W)             == GLFW_PRESS) translate += cam.view;
+    if (glfwGetKey(window, GLFW_KEY_S)             == GLFW_PRESS) translate -= cam.view;
+    if (glfwGetKey(window, GLFW_KEY_D)             == GLFW_PRESS) translate += cam.right;
+    if (glfwGetKey(window, GLFW_KEY_A)             == GLFW_PRESS) translate -= cam.right;
+    if (glfwGetKey(window, GLFW_KEY_SPACE)         == GLFW_PRESS) translate += cam.up;
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT)    == GLFW_PRESS) translate -= cam.up;
+
+    if (translate == glm::vec3(0.0f))
+    {
+        return;
+    }
+
+    // Speed scales with the camera-target distance so the same key feel
+    // works at both macro and micro scale (roughly zoom distance per 0.66s).
+    float speed = zoom * 1.5f * dt;
+    cam.lookAt += glm::normalize(translate) * speed;
+    camchanged = true; // resets accumulation & recomputes cam.position
 }
 
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
@@ -468,9 +508,16 @@ void runCuda()
 
 void mainLoop()
 {
+    double lastTime = glfwGetTime();
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+
+        // Frame-rate independent WASD / Space / Shift fly movement.
+        double now = glfwGetTime();
+        float dt = (float)std::fmin(now - lastTime, 0.1); // clamp against large first-frame/lag jumps
+        lastTime = now;
+        updateCameraMovement(dt);
 
         runCuda();
 
