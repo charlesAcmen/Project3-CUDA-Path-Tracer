@@ -209,9 +209,6 @@ __host__ __device__ float fresnelAccurate(float cosThetaI, float eta)
 __host__ __device__ HitSide classifyRefraction(
     glm::vec3 rayDir,//assumed to be normalized
     glm::vec3 surfaceNormal,//assumed to be normalized
-    float ior,//index of refraction of the material
-    float& outN1,//from IOR
-    float& outN2,//to IOR
     float& outCosThetaI//a positive value of costheta incident angle
 )
 {
@@ -221,15 +218,11 @@ __host__ __device__ HitSide classifyRefraction(
 
     if (cosTheta < 0.0f)
     {
-        outN1 = 1.0f;
-        outN2 = ior;
         outCosThetaI = -cosTheta;//invert the sign to make it positive
         return HitSide::Outside;
     }
     else
     {
-        outN1 = ior;
-        outN2 = 1.0f;
         outCosThetaI = cosTheta;
         return HitSide::Inside;
     }
@@ -270,8 +263,8 @@ __host__ __device__ void scatterRay(
     {
         case MaterialType::Refractive:
         {
-            float n1, n2, cosThetaI;
-            const HitSide hitSide = classifyRefraction(pathSegment.ray.direction, normal, m.indexOfRefraction, n1, n2, cosThetaI);
+            float cosThetaI;
+            const HitSide hitSide = classifyRefraction(pathSegment.ray.direction, normal, cosThetaI);
             const bool entering = (hitSide == HitSide::Outside);
             // Use invIndexOfRefraction to avoid division on entry.
             // The offset sign is keyed off the entering/exiting state rather than

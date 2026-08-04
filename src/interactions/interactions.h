@@ -22,9 +22,6 @@ __host__ __device__ float selectFresnelEvaluator(FresnelMode fresnelMode, float 
 __host__ __device__ HitSide classifyRefraction(
     glm::vec3 rayDir,
     glm::vec3 surfaceNormal,
-    float ior,
-    float& outN1,
-    float& outN2,
     float& outCosThetaI);
 
 /**
