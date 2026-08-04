@@ -574,9 +574,9 @@ Scene loadFromJSON(const std::string& jsonName)
     camera.lensRadius      = cameraData.value("LENS_RADIUS", 0.0f);
     camera.focalDistance   = cameraData.value("FOCAL_DISTANCE", 0.0f);
 
-    float yscaled = tan(fovy * (PI / 180));
+    float yscaled = tan(fovy * DEG_TO_RAD);
     float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
-    float fovx    = (atan(xscaled) * 180) / PI;
+    float fovx    = atan(xscaled) * RAD_TO_DEG;
     camera.fov    = glm::vec2(fovx, fovy);
 
     camera.view        = glm::normalize(camera.lookAt - camera.position);

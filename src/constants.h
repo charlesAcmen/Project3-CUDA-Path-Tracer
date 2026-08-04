@@ -10,6 +10,8 @@
 #define PI                3.1415926535897932384626422832795028841971f
 #define TWO_PI            6.2831853071795864769252867665590057683943f
 #define SQRT_OF_ONE_THIRD 0.5773502691896257645091487805019574556476f
+#define DEG_TO_RAD        (PI / 180.0f)   // degrees → radians (scene rotations, FOV)
+#define RAD_TO_DEG        (180.0f / PI)   // radians → degrees (FOV back-calc)
 #define EPSILON           0.00001f    // ray origin offset for self-intersection prevention
 #define RAY_EPSILON       1e-10f      // minimum ray–scene distance; rejects near-parallel / self-hit
 // Minimum squared length a refract() result must exceed to be a valid
