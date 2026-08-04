@@ -134,12 +134,15 @@ Bloom runs in linear HDR space (threshold → separable Gaussian blur with share
 | Key | Action |
 |-----|--------|
 | Esc | Save image and exit |
-| S   | Save image |
-| Space | Re-center camera to original lookAt |
-| Left mouse drag | Rotate camera |
-| Right mouse drag (vertical) | Zoom |
-| Middle mouse drag | Pan lookAt in XZ plane |
-| Mouse wheel | Zoom |
+| P   | Save image |
+| R   | Re-center camera to original lookAt |
+| W / A / S / D | Move forward / left / backward / right along camera axes |
+| Space / Shift | Move up / down along camera up |
+| Left mouse drag | Orbit camera around lookAt (rotate) |
+| Right mouse drag (vertical) / wheel | Dolly to/from lookAt (zoom) |
+| Middle mouse drag | Pan lookAt along the camera's right/up axes |
+
+The camera is an orbit camera: rotation and zoom act around the pivot `lookAt`; middle-drag or WASD/Space/Shift translate the pivot (and the camera) in the image plane or along the view axis. Fly speed scales with camera–target distance.
 
 ## Open TODO Items
 
