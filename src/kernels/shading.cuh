@@ -55,7 +55,13 @@ __device__ bool russianRouletteTerminate(
  *
  *   Register pressure is high — ShadeableIntersection + PathSegment +
  *   Material + RNG state per thread.  High register count lowers SM
- *   occupancy.  Switching from AoS to SoA layout would reduce this.
+ *   occupancy.  This is driven by the live values (path state, material
+ *   and RNG must coexist through the branchy scatter logic) and is
+ *   layout-independent — SoA changes where fields sit in memory, not how
+ *   many scalars are live per thread, so it would NOT reduce register
+ *   pressure.  The real levers are live-range trimming and the
+ *   scatterRay call boundary (a cross-TU device call, not inlined, so
+ *   the ABI save/restore can spill registers).
  *
  *   Material array access is uncoalesced when materialId varies across
  *   threads in a warp — material sorting also mitigates this.
