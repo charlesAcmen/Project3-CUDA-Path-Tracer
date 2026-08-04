@@ -1,0 +1,31 @@
+cmake --build build --config Release
+.\build\bin\Release\cis5650_boids.exe
+ctrl shift p select variant
+
+.\build\bin\Release\cis565_path_tracer.exe scenes/cornell.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_invsphere.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/cornellGlossy.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/cornellRefra_invsphere.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/cornellRefra.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_gltf.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_glb.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/light_test.json
+
+.\build\bin\Debug\cis565_path_tracer.exe scenes/cornell.json
+.\build\bin\RelWithDebInfo\cis565_path_tracer.exe scenes/cornellGlossy.json
+
+
+
+
+2799的2*16DDR5 6000 马甲条 战斧系列·陨铁黑 C38
+光威（Gloway）32GB(16GBX2) DDR5 6000 2919元
+32GB(16GBx2) DDR5 5600  阿斯加特（Asgard） 2499元
+长城 (Great Wall) 16GB DDR5 4800 2000元
+铭瑄（MAXSUN）32GB(16GBX2)套装 DDR5 5600  2499元
+
+
+baztkd2d                                                                                                                 
+xhczudfu
+adb connect 192.168.1.46:5555
+https://localhost:47990
+https://192.168.1.1/
