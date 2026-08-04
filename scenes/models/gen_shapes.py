@@ -8,6 +8,12 @@ Writes into this directory (scenes/models/):
   torus.gltf/.glb      flat torus in the XZ plane, major R=1, minor r=0.3
   capsule.gltf/.glb    capsule (pill), radius 0.5, total height 2 (y in [-1, 1])
 
+plus an "inverted" twin of each shape (e.g. sphere_inv.gltf/.glb): same
+geometry with BOTH the vertex normals and the triangle winding flipped.
+These are the glTF/GLB equivalents of the existing sphere_inv.obj — the
+renderer trusts winding/normal direction, so an inverted glass mesh renders
+as inside-out glass (Fresnel reflections but no lensing/caustics).
+
 All meshes are centered at the origin, outward-wound with smooth per-vertex
 normals, and use the same interleaved [pos.xyz | nrm.xyz] + uint16 index
 layout as cube.gltf.  The scene JSON places them purely via TRANS/SCALE/ROTAT.
@@ -233,6 +239,25 @@ def build_capsule(mesh, segments=24, stacks=6, r=0.5, half=0.5):
     hemi(-half, -1.0)
 
 
+def invert_mesh(mesh):
+    """Return an 'inward' copy of `mesh`: vertex normals flipped AND
+    triangle winding reversed (each triangle a,b,c -> a,c,b).
+
+    For opaque materials the renderer orients the shading normal toward
+    the ray, so an inverted mesh looks identical to the normal one; but
+    refraction reads the stored normal's sign to classify enter vs exit,
+    so an inverted glass mesh is misclassified as 'exit' on entry -> no
+    lensing/caustics (equivalent to scenes/models/sphere_inv.obj).
+    """
+    inv = Mesh()
+    inv.pos = list(mesh.pos)
+    inv.nrm = [-v for v in mesh.nrm]
+    inv.idx = []
+    for t in range(0, len(mesh.idx), 3):
+        inv.idx += [mesh.idx[t], mesh.idx[t + 2], mesh.idx[t + 1]]
+    return inv
+
+
 # ---------------------------------------------------------------------
 # glTF / GLB serialization
 # ---------------------------------------------------------------------
@@ -340,8 +365,14 @@ def main():
         assert all(0 <= i < 65536 for i in mesh.idx), name + " exceeds uint16"
         write_gltf(name + ".gltf", mesh)
         write_glb(name + ".glb", mesh)
+
+        inv = invert_mesh(mesh)
+        write_gltf(name + "_inv.gltf", inv)
+        write_glb(name + "_inv.glb", inv)
+
         tris = len(mesh.idx) // 3
-        print(f"{name}: {tris} tris, {len(mesh.pos)//3} verts -> {name}.gltf/.glb")
+        print(f"{name}: {tris} tris, {len(mesh.pos)//3} verts -> "
+              f"{name}.gltf/.glb + {name}_inv.gltf/.glb")
 
 
 if __name__ == "__main__":
