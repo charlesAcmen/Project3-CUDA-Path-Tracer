@@ -71,6 +71,8 @@ include_directories(${GLM_INCLUDE_DIRS})
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
 set(headers
+    src/bvh/aabb.h
+    src/bvh/bvh.h
     src/config/config.h
     src/image.h
     src/interactions/interactions.h
@@ -86,6 +88,7 @@ set(headers
 )
 
 set(sources
+    src/bvh/bvh.cu
     src/main.cpp
     src/stb.cpp
     src/config/config.cpp
