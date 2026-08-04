@@ -4,12 +4,16 @@
 // Triangle Intersection — Möller-Trumbore (莫勒-特伦博尔算法)
 //
 // Double-sided ray–triangle intersection.  Standard Möller-Trumbore
-// rejects back-face hits (a < 0); this version accepts them and
-// flips the normal to point toward the incident ray instead.
+// rejects back-face hits (a < 0); this version accepts them so that
+// rays inside a closed mesh (e.g. inside a glass object) can hit the
+// back face when exiting.
 //
-// Double-sided is required for closed meshes with refraction: a ray
-// inside a glass object hits the back face when exiting and must not
-// be rejected.
+// The reported normal is the model's TRUE shading normal — it is NOT
+// oriented toward the ray.  Winding / normal direction is meaningful:
+// opaque shading (diffuse/reflective) orients it toward the ray in
+// scatterRay, and refraction reads its sign (dot with the ray) to
+// classify entry vs exit.  A flip here would erase the winding and
+// make the refraction exit branch unreachable.
 //
 // Reference: Möller & Trumbore, "Fast, Minimum Storage Ray-Triangle
 // Intersection", Journal of Graphics Tools, 1997.
@@ -24,7 +28,8 @@
  * @param ray       Ray in object space
  * @param tri       Triangle in object space
  * @param outT      [out] Distance along ray to hit
- * @param outNormal [out] Face normal oriented toward the ray
+ * @param outNormal [out] Model's shading normal, TRUE orientation
+ *                        (winding preserved, not oriented toward the ray)
  * @return          true on hit (either side)
  */
 __device__ inline bool triangleIntersectionTest(
@@ -106,8 +111,9 @@ __device__ inline bool triangleIntersectionTest(
         outNormal = (geoLen2 > RAY_EPSILON) ? geoNormal * glm::inversesqrt(geoLen2) : tri.n0;
     }
 
-    if (a < 0.0f)
-        outNormal = -outNormal;
-
+    // Report the model's TRUE shading normal.  Opaque materials orient it
+    // toward the ray in scatterRay; refraction reads its sign (dot with the
+    // ray) to classify entry vs exit.  Flipping it here would erase the
+    // model's winding and make classifyRefraction's exit branch unreachable.
     return true;
 }

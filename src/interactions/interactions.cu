@@ -247,26 +247,19 @@ __host__ __device__ void scatterRay(
     //             refraction (glm::refract), with normal flipped for exit rays.
 
     // Generate new random direction for diffuse reflection (cosine-weighted hemisphere sampling)
-
-    // CRITICAL: Offset ray origin along the NORMAL direction to prevent self-intersection
-    // Using EPSILON (1e-5) provides sufficient clearance for the Cornell Box scale (units: ~10)
-    // 
     // Common mistake: offsetting along newDirection instead of normal
     // - When newDirection is nearly parallel to the surface (grazing angle),
     //   offset along newDirection has almost zero normal component
     // - This causes the ray to start below the surface -> self-intersection -> shadow acne
     // 
-    // Why 1e-5 works for this scene:
-    // - Scene scale: [-5, 10] -> typical values around 1-10 units
-    // - Float precision: approx 1e-7 relative error
-    // - Accumulated error after transforms: approx 1e-6 to 1e-5
-    // - Safety margin: 1e-5 is approx 10x the expected numerical error
-    // 
-    // When to adjust epsilon:
-    // - Increase to 1e-4 if seeing shadow acne (black speckles on surfaces)
-    // - Decrease to 1e-6 for scenes with very thin geometry (< 0.01 units)
-    // - For large-scale scenes (>1000 units), scale proportionally
-    
+    // Opaque (double-sided) materials shade on the hit side regardless of the
+    // model's winding: orient the shading normal toward the incoming ray so
+    // the diffuse hemisphere / reflection lobe is on the correct side.
+    // Refraction keeps the TRUE normal — its sign (dot with the ray) is what
+    // classifyRefraction uses to distinguish entry from exit.
+    const glm::vec3 rayDir        = pathSegment.ray.direction;
+    const glm::vec3 shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -normal : normal;
+
     // The offset sign for the new ray origin is determined per-branch below by
     // checking the dot product of the new ray direction against the geometric
     // normal, so the offset always pushes the origin to the correct side.
@@ -329,7 +322,7 @@ __host__ __device__ void scatterRay(
         }
         case MaterialType::Reflective:
         {
-            glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
+            glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, shadingNormal);
             glm::vec3 scatterDir;
 
             if (m.specular.exponent >= 0.0f)
@@ -337,7 +330,7 @@ __host__ __device__ void scatterRay(
                 // Glossy specular (imperfect specular)
                 glm::vec3 candidate = samplePhongSpecularDir(reflectedDir, m.specular.exponent, rng);
                 // Ensure the ray goes outward from the surface, otherwise fallback to perfect reflection
-                scatterDir = (glm::dot(candidate, normal) > 0.0f) ? candidate : reflectedDir;
+                scatterDir = (glm::dot(candidate, shadingNormal) > 0.0f) ? candidate : reflectedDir;
             }
             else
             {
@@ -345,8 +338,8 @@ __host__ __device__ void scatterRay(
                 scatterDir = reflectedDir;
             }
 
-            float offsetSign = glm::dot(scatterDir, normal) > 0.0f ? 1.0f : -1.0f;
-            pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
+            float offsetSign = glm::dot(scatterDir, shadingNormal) > 0.0f ? 1.0f : -1.0f;
+            pathSegment.ray.origin = intersect + shadingNormal * (EPSILON * offsetSign);
             pathSegment.ray.direction = scatterDir;
             pathSegment.color *= m.specular.color;
             break;
@@ -354,8 +347,8 @@ __host__ __device__ void scatterRay(
         case MaterialType::Diffuse:
         default:
         {
-            glm::vec3 newDirection = calculateRandomDirectionInHemisphere(normal, rng);
-            pathSegment.ray.origin = intersect + normal * EPSILON;
+            glm::vec3 newDirection = calculateRandomDirectionInHemisphere(shadingNormal, rng);
+            pathSegment.ray.origin = intersect + shadingNormal * EPSILON;
             // Apply diffuse material color (energy attenuation)
             // multiplier = fr * cos theta/pdf(omega)
             // where pdf(omega) = cos theta / PI
