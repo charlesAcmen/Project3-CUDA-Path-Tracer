@@ -10,7 +10,7 @@
 // Triangle layout: leaves reference a contiguous chunk [left, right) of
 // the triangle array.  buildSceneBvh's flatten pass（展平阶段）REORDERS triangles
 // into leaf-contiguous runs （同一个叶子节点所包含的三角形在内存中连续存放）(per mesh), so a leaf's chunk is a
-// sequential memory access — cache-friendly and coalesced, instead of
+// sequential memory access — cache-friendly instead of
 // scattered leaf-index reads into the original scene-order array.
 //
 // The reorder is within each mesh only: per-mesh triangle counts and

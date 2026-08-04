@@ -3,15 +3,15 @@
 //
 // CPU builds the BVH (exhaustive Surface Area Heuristic), GPU traverses
 // it iteratively (traverseBvhClosest in bvh.h).  Construction is pure
-// host code: scenes are ≤ ~1248 triangles, so an exhaustive per-axis
-// SAH sweep is a few milliseconds and there is no need for a binning
-// approximation.
+// host code: scenes are ≤ ~1248 triangles, so an exhaustive per-axis（每个轴向上）
+// SAH（穷举SAH扫描） sweep is a few milliseconds and there is no need for a binning
+// approximation（分桶近似）.
 //
-// Triangle layout: the build permutes a per-mesh `order` array in place
-// so each leaf's triangles occupy a CONTIGUOUS range of it.  buildMeshBvh
-// then runs a FLATTEN pass (post-order DFS) that writes each leaf's
-// triangles into a contiguous chunk of the reordered output buffer and
-// rewrites the leaf to point at that chunk.  Leaves therefore reference
+// Triangle layout: the build permutes a per-mesh `order`（三角形的索引而非三角形结构体本身）
+// array in place so each leaf's triangles occupy a CONTIGUOUS range of it.  
+// buildMeshBvh then runs a FLATTEN pass (post-order DFS，把真正的三角形数据写入连续的内存块) 
+// that writes each leaf's triangles into a contiguous chunk of the reordered output buffer 
+// and rewrites the leaf to point at that chunk.  Leaves therefore reference
 // sequential memory runs — cache-friendly GPU access, and exactly what
 // traverseBvhClosest's `tris[node.left + j]` expects.
 //
