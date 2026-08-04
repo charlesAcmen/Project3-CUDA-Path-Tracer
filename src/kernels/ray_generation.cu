@@ -40,10 +40,13 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
         if (cam.lensRadius > 0.0f) {
             // ---- Thin-lens depth of field ----
-            // 1. Intersect pinhole ray with the focal plane
+            // 1. Intersect pinhole ray with the focal plane.
+            // cosTheta is the ray's direction cosine to the view axis; the focal
+            // plane is hit iff cosTheta > 0 (ray points forward).  It is always
+            // ≥ cos(fov/2) for on-frustum rays, so the fallback is just a guard.
             float cosTheta = glm::dot(pinholeDir, cam.view);
-            float ft = (cosTheta > EPSILON) ? (cam.focalDistance / cosTheta)
-                                            : cam.focalDistance;
+            float ft = (cosTheta > 0.0f) ? (cam.focalDistance / cosTheta)
+                                         : cam.focalDistance;
             glm::vec3 pFocus = cam.position + ft * pinholeDir;
 
             // 2. Sample a point on the lens aperture via concentric disk mapping
