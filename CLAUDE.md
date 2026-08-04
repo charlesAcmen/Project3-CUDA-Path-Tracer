@@ -135,14 +135,14 @@ Bloom runs in linear HDR space (threshold → separable Gaussian blur with share
 |-----|--------|
 | Esc | Save image and exit |
 | P   | Save image |
-| R   | Re-center camera to original lookAt |
-| W / A / S / D | Move forward / left / backward / right along camera axes |
-| Space / Shift | Move up / down along camera up |
-| Left mouse drag | Orbit camera around lookAt (rotate) |
-| Right mouse drag (vertical) / wheel | Dolly to/from lookAt (zoom) |
-| Middle mouse drag | Pan lookAt along the camera's right/up axes |
+| R   | Re-center camera to original position + orientation |
+| W / A / S / D | Fly forward / left / backward / right along camera axes |
+| Space / Shift | Fly up / down along camera up |
+| Left mouse drag | Rotate camera **in place** (yaw/pitch; position unchanged) |
+| Right mouse drag (vertical) / wheel | Dolly along the view axis (fly toward/away from the focused point) |
+| Middle mouse drag | Pan the camera along its right/up axes |
 
-The camera is an orbit camera: rotation and zoom act around the pivot `lookAt`; middle-drag or WASD/Space/Shift translate the pivot (and the camera) in the image plane or along the view axis. Fly speed scales with camera–target distance.
+The camera is a free-fly camera: `cam.position` is independent state, translated by WASD / middle-pan / scroll-dolly, while left-drag only changes the view orientation (`theta`/`phi`) — the camera turns in place and never moves. `cam.lookAt` is a derived reference point `zoom` units ahead along the view axis (bookkeeping only; the renderer uses position/view/up/right). Fly speed scales with `zoom` (the reference distance).
 
 ## Open TODO Items
 
