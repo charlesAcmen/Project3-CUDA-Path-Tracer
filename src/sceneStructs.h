@@ -55,6 +55,7 @@ struct Material
     {
         float exponent;           // Phong exponent or glossiness for specular highlight falloff
         //Phong指数或高光的光泽度，用于高光衰减
+        float invExponentPlusOne; // Precomputed 1/(exponent+1) to avoid GPU division in Phong sampling
         glm::vec3 color;          // Specular color tint for mirror-like reflections
         //镜面反射的高光颜色色调
     } specular;

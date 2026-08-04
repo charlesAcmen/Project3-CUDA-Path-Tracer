@@ -64,4 +64,5 @@ __host__ __device__ void scatterRay(
 __host__ __device__ glm::vec3 samplePhongSpecularDir(
     glm::vec3 reflectDir,
     float exponent,
+    float invExponentPlusOne,   // precomputed 1/(exponent+1) — no GPU division
     RngState& rng);

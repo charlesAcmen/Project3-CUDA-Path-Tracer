@@ -54,6 +54,7 @@ __host__ __device__ void buildOrthonormalBasis(
 __host__ __device__ glm::vec3 samplePhongSpecularDir(
     glm::vec3 reflectDir,
     float exponent,
+    float invExponentPlusOne,   // precomputed 1/(exponent+1) at load time
     RngState& rng)
 {
     float xi1 = rng.next(HaltonDim::SpecularTheta);  // dim 6 (prime 17): specular lobe theta
@@ -61,7 +62,7 @@ __host__ __device__ glm::vec3 samplePhongSpecularDir(
 
     // Eq.7: cos(theta_s) = xi1^(1/(n+1))
     // Optimization: if exponent is 0.0f (i.e. maximum roughness, r=1.0f), we skip powf
-    float cosTheta = (exponent < EPSILON) ? xi1 : powf(xi1, 1.0f / (exponent + 1.0f));
+    float cosTheta = (exponent < EPSILON) ? xi1 : powf(xi1, invExponentPlusOne);
     float sinTheta = sqrtf(fmaxf(0.0f, 1.0f - cosTheta * cosTheta));
 
     // Eq.8: phi_s = 2*pi*xi2
@@ -333,7 +334,7 @@ __host__ __device__ void scatterRay(
             if (m.specular.exponent >= 0.0f)
             {
                 // Glossy specular (imperfect specular)
-                glm::vec3 candidate = samplePhongSpecularDir(reflectedDir, m.specular.exponent, rng);
+                glm::vec3 candidate = samplePhongSpecularDir(reflectedDir, m.specular.exponent, m.specular.invExponentPlusOne, rng);
                 // Ensure the ray goes outward from the surface, otherwise fallback to perfect reflection
                 scatterDir = (glm::dot(candidate, shadingNormal) > 0.0f) ? candidate : reflectedDir;
             }

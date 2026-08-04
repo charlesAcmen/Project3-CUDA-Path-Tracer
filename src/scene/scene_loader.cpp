@@ -455,6 +455,13 @@ Scene loadFromJSON(const std::string& jsonName)
             {
                 newMaterial.specular.exponent = -1.0f;
             }
+            // Precompute 1/(exponent+1) for the Phong lobe here (host-side) so
+            // samplePhongSpecularDir never divides on the GPU.  Mirror
+            // (exponent = -1) never reaches the Phong branch — value is 0.
+            newMaterial.specular.invExponentPlusOne =
+                (newMaterial.specular.exponent >= 0.0f)
+                    ? 1.0f / (newMaterial.specular.exponent + 1.0f)
+                    : 0.0f;
         }
         else if (p["TYPE"] == "Refractive")
         {
