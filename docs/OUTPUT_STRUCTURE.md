@@ -45,7 +45,7 @@ build/profiler_output/
 │   ├── path_survival.png
 │   └── kernel_breakdown.png
 │
-├── cornell_closed_20260708_085541/
+├── cornellRefra_20260708_085541/
 │   ├── timing.csv
 │   ├── summary.csv
 │   ├── path_survival.csv
@@ -114,8 +114,8 @@ python ..\scripts\plot_kernel_breakdown.py .\profiler_output\cornell_20260708_08
 ```bash
 python ..\scripts\plot_comparison.py ^
   .\profiler_output\cornell_20260708_085529\timing.csv ^
-  .\profiler_output\cornell_closed_20260708_085541\timing.csv ^
-  --labels "Open Scene" "Closed Scene"
+  .\profiler_output\cornellRefra_20260708_085541\timing.csv ^
+  --labels "Diffuse (Cornell)" "Glass (CornellRefra)"
 ```
 
 Output appears at:

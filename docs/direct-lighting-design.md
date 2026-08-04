@@ -1,5 +1,13 @@
 # Direct Lighting (Next-Event Estimation)
 
+> **Status: proposal only — not implemented.** This design predates the mesh
+> refactor: the project is now **mesh-only** (no sphere/cube primitives), so
+> the cube/sphere-specific sections below — the surface-area formulas, the
+> sphere/cube point-sampling code, and the `ShadingConfig` / `geomIndex`
+> references — no longer match the codebase. When implementing NEE, port this
+> plan to triangles: compute emissive mesh area from the triangle slice and
+> sample a random point on an emissive triangle.
+
 ## Overview
 
 The current path tracer uses **pure unidirectional path tracing** — light enters the accumulation buffer only when a BSDF-sampled continuation ray randomly happens to hit an emissive surface. This is inefficient for small or distant light sources.

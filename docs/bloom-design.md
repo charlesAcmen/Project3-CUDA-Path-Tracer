@@ -9,8 +9,8 @@ Bloom (泛光) is a post-processing effect that simulates the scattering of brig
 ```
                     Linear HDR Space                          Display Space
                     ────────────────                          ─────────────
-g_dev.image ──→ thresholdExtract ──→ blurH ──→ blurV ──→ tonemapKernel ──→ PBO
-  (HDR sum)      (bright areas)    (H-temp)   (final)   (HDR+bloom→LDR)
+g_dev.image ──→ thresholdExtract ──→ blurH ──→ blurV ──→ prepareDisplayKernel ──→ tonemapKernel ──→ CA/vignette ──→ PBO
+  (HDR sum)      (bright areas)    (H-temp)   (final)   (÷iter + composite bloom)   (ACES+sRGB)
 ```
 
 **Bloom operates on linear HDR values BEFORE tone mapping.** This is critical:
@@ -70,15 +70,19 @@ Each thread loads one center pixel. The first `radius` threads additionally load
 
 ### Step 3: Composite + Tone Map
 
-Bloom is added to the original HDR image inside `tonemapKernel`, then the combined result passes through ACES tone mapping + sRGB gamma:
+Bloom is added to the original HDR image inside `prepareDisplayKernel`
+(`src/postprocess/tonemap.cuh`), which also averages the accumulation buffer
+(`÷iter`).  The composited linear HDR then passes through ACES tone mapping +
+sRGB gamma in `tonemapKernel`, followed by chromatic aberration / vignette:
 
 ```
-pix = (HDR_input + bloomIntensity * bloomBlurred) / iter
+pix = (HDR_average + bloomIntensity * bloomBlurred)
 pix = ACES_tone_map(pix)        // S-curve + highlight desaturation
 pix = LinearToSRGB(pix)         // Gamma encode for 8-bit display
 ```
 
-Compositing inside tonemapKernel saves one full-screen kernel launch and one intermediate buffer.
+Compositing inside `prepareDisplayKernel` (rather than a separate add pass)
+saves one full-screen kernel launch and one intermediate buffer.
 
 ## File Structure
 
