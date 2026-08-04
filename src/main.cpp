@@ -56,6 +56,15 @@ float zoom, theta, phi;
 glm::vec3 cameraPosition;
 glm::vec3 ogLookAt; // for recentering the camera
 
+// Camera control feel parameters (orbit + WASD fly).
+static constexpr float CAMERA_MIN_THETA      = 0.001f; // orbit latitude pole guard
+static constexpr float CAMERA_MIN_ZOOM       = 0.1f;   // min camera–target distance
+static constexpr float CAMERA_SCROLL_ZOOM_IN = 0.85f;  // scroll-up zoom multiplier
+static constexpr float CAMERA_SCROLL_ZOOM_OUT = 1.15f; // scroll-down zoom multiplier
+static constexpr float CAMERA_PAN_SPEED      = 0.01f;  // middle-drag pan sensitivity
+static constexpr float CAMERA_MOVE_SPEED     = 1.5f;   // WASD fly speed (× zoom, per second)
+static constexpr float CAMERA_MAX_FRAME_DT   = 0.1f;   // clamp against first-frame / lag jumps
+
 Scene* scene;
 RenderState* renderState;
 int iteration;
@@ -348,7 +357,7 @@ void updateCameraMovement(float dt)
 
     // Speed scales with the camera-target distance so the same key feel
     // works at both macro and micro scale (roughly zoom distance per 0.66s).
-    float speed = zoom * 1.5f * dt;
+    float speed = zoom * CAMERA_MOVE_SPEED * dt;
     cam.lookAt += glm::normalize(translate) * speed;
     camchanged = true; // resets accumulation & recomputes cam.position
 }
@@ -368,8 +377,8 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
 void scrollCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
     if (io && io->WantCaptureMouse) return;
-    zoom *= (yoffset > 0.0) ? 0.85f : 1.15f;
-    zoom = std::fmax(0.1f, zoom);
+    zoom *= (yoffset > 0.0) ? CAMERA_SCROLL_ZOOM_IN : CAMERA_SCROLL_ZOOM_OUT;
+    zoom = std::fmax(CAMERA_MIN_ZOOM, zoom);
     camchanged = true;
 }
 
@@ -385,13 +394,13 @@ void mousePositionCallback(GLFWwindow* window, double xpos, double ypos)
         // compute new camera parameters
         phi -= (xpos - lastX) / width;
         theta -= (ypos - lastY) / height;
-        theta = std::fmax(0.001f, std::fmin(theta, PI));
+        theta = std::fmax(CAMERA_MIN_THETA, std::fmin(theta, PI));
         camchanged = true;
     }
     else if (rightMousePressed)
     {
         zoom += (ypos - lastY) / height;
-        zoom = std::fmax(0.1f, zoom);
+        zoom = std::fmax(CAMERA_MIN_ZOOM, zoom);
         camchanged = true;
     }
     else if (middleMousePressed)
@@ -402,8 +411,8 @@ void mousePositionCallback(GLFWwindow* window, double xpos, double ypos)
         // Pan lookAt in the camera's image plane (screen space).
         //   Horizontal: along the camera's right vector
         //   Vertical:   along the camera's up vector (Y unlocked)
-        cam.lookAt -= (float)(xpos - lastX) * cam.right * 0.01f;
-        cam.lookAt += (float)(ypos - lastY) * cam.up    * 0.01f;
+        cam.lookAt -= (float)(xpos - lastX) * cam.right * CAMERA_PAN_SPEED;
+        cam.lookAt += (float)(ypos - lastY) * cam.up    * CAMERA_PAN_SPEED;
         camchanged = true;
     }
 
@@ -515,7 +524,7 @@ void mainLoop()
 
         // Frame-rate independent WASD / Space / Shift fly movement.
         double now = glfwGetTime();
-        float dt = (float)std::fmin(now - lastTime, 0.1); // clamp against large first-frame/lag jumps
+        float dt = (float)std::fmin(now - lastTime, CAMERA_MAX_FRAME_DT);
         lastTime = now;
         updateCameraMovement(dt);
 
