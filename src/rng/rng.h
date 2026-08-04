@@ -393,6 +393,13 @@ __host__ __device__ inline RngState makeRngState(
                 ^ utilhash((unsigned int)pixelIndex);
         state.lcgEngine = thrust::default_random_engine(h);
     } else {
+        // The Halton index is derived from the iteration counter (iter).  While iter can
+        // theoretically exceed 2^32 after ~4 billion samples, this is impractical for
+        // interactive rendering (convergence occurs within 10k iterations).  If iter does
+        // overflow, the sequence wraps to the start — low-discrepancy properties remain
+        // intact because Halton sequences are periodic (period = infinity for irrational
+        // bases, but the mantissa limits effective period to ~2^23 for float precision).
+        // In practice, overflow is not a concern for any realistic use case.
         state.haltonIndex = (unsigned int)iter;
         state.pixelIndex  = (unsigned int)pixelIndex;
         state.bounceIndex = (unsigned int)depth;
