@@ -164,13 +164,12 @@ target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Release>,
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-use_fast_math>")
 
 # Suppress common Thrust/CUDA warnings that clutter build output
-# --diag-suppress: suppress specific warning numbers
-# --display-error-number: show warning numbers (useful for finding IDs to suppress)
-target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:
-    -Xcudafe=--diag_suppress=20011
-    -Xcudafe=--diag_suppress=20014
-    -Xcudafe=--diag_suppress=implicit_return_from_non_void_function
->")
+# These warnings come from Thrust library internals (nextafter, uniform_real_distribution) and are safe to ignore
+target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE 
+    "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:--display-error-number>"
+    "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:-Xcudafe --diag_suppress=20011>"
+    "$<$<COMPILE_LANGUAGE:CUDA>:SHELL:-Xcudafe --diag_suppress=20014>"
+)
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
 
