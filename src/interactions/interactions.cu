@@ -62,7 +62,7 @@ __host__ __device__ glm::vec3 samplePhongSpecularDir(
 
     // Eq.7: cos(theta_s) = xi1^(1/(n+1))
     // Optimization: if exponent is 0.0f (i.e. maximum roughness, r=1.0f), we skip powf
-    float cosTheta = (exponent < EPSILON) ? xi1 : powf(xi1, invExponentPlusOne);
+    float cosTheta = (exponent < SPECULAR_EXPONENT_ZERO_EPSILON) ? xi1 : powf(xi1, invExponentPlusOne);
     float sinTheta = sqrtf(fmaxf(0.0f, 1.0f - cosTheta * cosTheta));
 
     // Eq.8: phi_s = 2*pi*xi2
