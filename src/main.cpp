@@ -222,11 +222,6 @@ void RenderImGui()
         }
 
         ImGui::Separator();
-        ImGui::Text("BVH Traversal:");
-        ImGui::Text("  Max depth: %d (build-time)", getBvhMaxDepth());
-        ImGui::Text("  Leaf size: %d (build-time)", getBvhLeafSize());
-
-        ImGui::Separator();
         ImGui::Text("Bloom:");
         bool bloomEnabled = getBloomEnabled();
         if (ImGui::Checkbox("Enable Bloom", &bloomEnabled))

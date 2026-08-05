@@ -79,8 +79,6 @@ void  setVignetteIntensity(float v)          { g_opts.vignette.intensity = v; }
 float getVignetteIntensity()                 { return g_opts.vignette.intensity; }
 void  setVignetteExponent(float v)           { g_opts.vignette.exponent = v; }
 float getVignetteExponent()                  { return g_opts.vignette.exponent; }
-int   getBvhMaxDepth()                       { return g_opts.bvh.maxDepth; }
-int   getBvhLeafSize()                       { return g_opts.bvh.leafSize; }
 
 // ====================================================================
 // Module Includes (kernels → pipeline)
@@ -133,9 +131,7 @@ void pathtraceInit(Scene* scene)
     // triangles) and upload the REORDERED flat triangle array as
     // deviceTriangles.  The reorder is within each mesh only; 
     {
-        bvh::buildSceneBvh(g_dev.bvh, scene->hostTriangles, scene->geoms,
-                           BvhBuildConfig{ g_opts.bvh.maxDepth,
-                                           g_opts.bvh.leafSize });
+        bvh::buildSceneBvh(g_dev.bvh, scene->hostTriangles, scene->geoms);
 
         const int n = (int)g_dev.bvh.hostTriangles.size();
         if (n > 0)

@@ -26,13 +26,6 @@
 
 #include <vector>
 
-// Explicit-stack capacity (compile-time).  The build-time depth clamp to
-// [1, kMaxBvhStackDepth-1] guarantees the traversal stack can never
-// overflow for a built tree.
-constexpr int kMaxBvhStackDepth = 64;
-// Upper bound on triangles per leaf (build-time clamp).
-constexpr int kMaxBvhLeafSize = 64;
-
 // A node in the flattened node array.
 //
 // `left`/`right` are overloaded by isLeaf, so read them through the
@@ -56,15 +49,6 @@ struct BvhNode
 struct BvhMeta
 {
     int rootNodeIndex = -1;
-};
-
-// Build-time BVH settings.  Bounded by the stack/leaf constants above at
-// build time; the defaults match AppConfig::BvhConfig so a plain
-// BvhBuildConfig{} reproduces the renderer defaults.
-struct BvhBuildConfig
-{
-    int maxDepth = 24;   // max tree depth, clamped to [1, kMaxBvhStackDepth-1]
-    int leafSize = 4;    // max triangles per leaf, clamped to [1, kMaxBvhLeafSize]
 };
 
 // Host build output + device upload for the per-mesh BVHs.
@@ -187,15 +171,13 @@ namespace bvh
     // index, or -1 for an empty mesh.
     int  buildMeshBvh(BvhBuffers& out,
                       const std::vector<Triangle>& hostTris,
-                      const Geom& geom,
-                      const BvhBuildConfig& cfg);
+                      const Geom& geom);
 
     // Build every mesh's BVH into out.hostNodes/out.hostTriangles and fill
     // out.hostBvhMeta.  Empty meshes keep rootNodeIndex = -1.
     void buildSceneBvh(BvhBuffers& out,
                        const std::vector<Triangle>& hostTris,
-                       const std::vector<Geom>& geoms,
-                       const BvhBuildConfig& cfg);
+                       const std::vector<Geom>& geoms);
 
     // Upload the host node + meta buffers to device memory.
     void uploadToDevice(BvhBuffers& b);

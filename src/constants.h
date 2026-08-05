@@ -33,3 +33,12 @@
 // legal radius range can't drift between the two.
 #define MAX_BLOOM_RADIUS 32           // max bloom Gaussian radius (device weights buffer size)
 #define BLOOM_BLOCK_SIZE 256          // threads per 1D block for the bloom blur kernels
+
+// ---- BVH build-time settings — single source of truth ----
+// Tree depth and leaf size are compile-time constants (tune here, no runtime
+// validation).  The traversal kernel's explicit stack holds at most
+// BVH_MAX_STACK_DEPTH entries, so BVH_MAX_DEPTH must stay well below it:
+// each tree level pushes up to two children.
+constexpr int kBvhMaxDepth      = 24;   // max tree depth
+constexpr int kBvhLeafSize      = 4;    // max triangles per leaf
+constexpr int kMaxBvhStackDepth = 64;   // explicit-stack capacity

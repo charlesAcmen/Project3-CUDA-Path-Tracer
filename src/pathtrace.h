@@ -1,6 +1,6 @@
 #pragma once
 
-#include "config/config.h"       // BloomConfig, ChromaticAberrationConfig, VignetteConfig, BvhConfig
+#include "config/config.h"       // BloomConfig, ChromaticAberrationConfig, VignetteConfig
 #include "bvh/bvh.h"             // BvhBuffers (per-mesh BVH trees + metadata)
 #include "scene/scene.h"
 
@@ -79,10 +79,3 @@ float getVignetteExponent();
 
 void setRngMode(RngMode mode);
 RngMode getRngMode();
-
-// BVH configuration
-// maxDepth / leafSize are BUILD-TIME knobs — changing them requires a re-init 
-//(the tree is rebuilt inside pathtraceInit). 
-// They are read-only at runtime; the ImGui panel shows them as text.
-int  getBvhMaxDepth();
-int  getBvhLeafSize();
