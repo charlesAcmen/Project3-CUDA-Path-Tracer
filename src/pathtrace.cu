@@ -83,6 +83,10 @@ void  setVignetteIntensity(float v)          { g_opts.vignette.intensity = v; }
 float getVignetteIntensity()                 { return g_opts.vignette.intensity; }
 void  setVignetteExponent(float v)           { g_opts.vignette.exponent = v; }
 float getVignetteExponent()                  { return g_opts.vignette.exponent; }
+void  setBvhEnabled(bool v)                  { g_opts.bvh.enabled = v; }
+bool  getBvhEnabled()                        { return g_opts.bvh.enabled; }
+int   getBvhMaxDepth()                       { return g_opts.bvh.maxDepth; }
+int   getBvhLeafSize()                       { return g_opts.bvh.leafSize; }
 
 // ====================================================================
 // Module Includes (kernels → pipeline)

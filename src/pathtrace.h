@@ -79,3 +79,13 @@ float getVignetteExponent();
 
 void setRngMode(RngMode mode);
 RngMode getRngMode();
+
+// BVH runtime configuration
+// enabled toggles the live kernel switch (O(N) vs BVH traversal) per frame.
+// maxDepth / leafSize are BUILD-TIME knobs — changing them requires a
+// re-init (the tree is rebuilt inside pathtraceInit).  They are read-only
+// at runtime; the ImGui panel shows them as text.
+void setBvhEnabled(bool enable);
+bool getBvhEnabled();
+int  getBvhMaxDepth();
+int  getBvhLeafSize();
