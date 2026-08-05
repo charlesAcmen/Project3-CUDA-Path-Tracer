@@ -12,7 +12,7 @@ Image::Image(int x, int y)
 
 Image::~Image()
 {
-    delete pixels;
+    delete[] pixels;  // pixels was allocated with new glm::vec3[x * y]
 }
 
 void Image::setPixel(int x, int y, const glm::vec3 &pixel)
