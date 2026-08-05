@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Runtime Configuration (three-layer priority)
 
-`CLI flags > config.local.json > code defaults`, handled by `src/config/config.cpp`/`config.h` through the `appConfig()` singleton. Defaults (in `AppConfig`): `compactMethod = SharedMem`, `sortByMaterial = false`, `rngMode = LCG`, `fresnelMode = Schlick`, `bvh.maxDepth = 24`, `bvh.leafSize = 4`, `autoSave = true`.
+`CLI flags > config.local.json > code defaults`, handled by `src/config/config.cpp`/`config.h` through the `appConfig()` singleton. Defaults (in `AppConfig`): `compactMethod = SharedMem`, `sortByMaterial = false`, `rngMode = LCG`, `fresnelMode = Schlick`, `autoSave = true`. BVH depth/leaf size are **compile-time constants** `kBvhMaxDepth`/`kBvhLeafSize` in `src/constants.h` — not runtime-configurable.
 
 | Flag | Meaning |
 |------|---------|
@@ -20,8 +20,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `--sort=N` | Material sorting 0/1 (default off) |
 | `--fresnel=N` | 0=Schlick (default), 1=Accurate Fresnel |
 | `--rng=N` | 0=LCG (default), 1=scrambled Halton |
-| `--bvh-depth=N` | BVH maximum tree depth (default 24, clamp [1, 63]) |
-| `--bvh-leaf=N` | BVH leaf size in triangles (default 4, clamp [1, 64]) |
 | `--benchmark` | Enable profiler CSV output to `profiler_output/<scene>_<timestamp>/` |
 | `--warmup=N` | Profiler warmup iterations (default 3) |
 | `--save` / `--save-at=N1,N2,...` | Save final / checkpoint images |
