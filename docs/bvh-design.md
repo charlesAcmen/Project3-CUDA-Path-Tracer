@@ -1,7 +1,9 @@
 # BVH Acceleration Design
 
-> Status: **planned** — implementation deferred until the glTF mesh loader lands.
-> This document records the agreed design so it survives the pause.
+> Status: **implemented** — CPU build + GPU iterative traversal wired into the renderer.
+> `src/bvh/` (build + host test) landed first; this document's remaining items
+> (GPU kernel, renderer wiring, config, ImGui) are now in place.  The only open
+> item is the GPU A/B byte-identical render check (see Verification).
 
 ## Scope & Requirements
 
@@ -40,7 +42,6 @@ struct AABB {
     void expand(const Triangle& t);        // v0,v1,v2
     void expand(const AABB& b);
     float surfaceArea() const;             // degenerate -> 1.0 (SAH divide-by-zero guard)
-    glm::vec3 centroid() const;
 };
 __host__ __device__ bool intersectRayAABB(const glm::vec3& o, const glm::vec3& invDir,
     const AABB& box, float tNear, float tFar);
