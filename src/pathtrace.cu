@@ -30,12 +30,6 @@
 #include "bvh/bvh.h"                      // bvh::buildSceneBvh, uploadToDevice, freeDevice
 #include "efficient.h"       // StreamCompaction::Efficient
 
-// Post-processing kernels (needed by pipeline/postprocess.cuh)
-#include "postprocess/tonemap.cuh"
-#include "postprocess/bloom.cuh"
-#include "postprocess/chromatic_aberration.cuh"
-#include "postprocess/vignette.cuh"
-
 // ====================================================================
 // Global State
 //
