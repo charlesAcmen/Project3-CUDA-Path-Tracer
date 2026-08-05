@@ -30,17 +30,26 @@
 // [1, kMaxBvhStackDepth-1] guarantees the traversal stack can never
 // overflow for a built tree.
 constexpr int kMaxBvhStackDepth = 64;
+// Upper bound on triangles per leaf (build-time clamp).
+constexpr int kMaxBvhLeafSize = 64;
 
-// Internal node: bounds + children.  Leaf: bounds + triangle chunk.
-// left/right are overloaded by isLeaf:
-//   internal: left = child node index, right = child node index
-//   leaf:     left = absolute triangle offset, right = triangle count
+// A node in the flattened node array.
+//
+// `left`/`right` are overloaded by isLeaf, so read them through the
+// accessors below — the meaning at each call site is then self-evident:
+//   internal node: left/right = child node indices
+//   leaf:          left/right = (triangle offset, triangle count)
 struct BvhNode
 {
     AABB bounds;
     int  left;
     int  right;
-    int  isLeaf;
+    bool isLeaf = false;
+
+    __host__ __device__ int childL() const        { return left; }  // internal: left child index
+    __host__ __device__ int childR() const        { return right; } // internal: right child index
+    __host__ __device__ int leafTriOffset() const { return left; }  // leaf: offset into the triangle array
+    __host__ __device__ int leafTriCount() const  { return right; } // leaf: triangle count
 };
 
 // Per-geom BVH metadata.  rootNodeIndex = -1 → empty mesh (kernel skips).
@@ -60,6 +69,17 @@ struct BvhBuffers
     std::vector<BvhNode>  hostNodes;      // construction output
     std::vector<BvhMeta>  hostBvhMeta;    // per-geom metadata 
     std::vector<Triangle> hostTriangles;  // reordered flat triangles
+};
+
+// Result of a closest-hit BVH traversal.
+// `hit` is true only when a triangle was found with t < the caller's far
+// plane (maxT); `t` is that closest distance and `normal` its object-space
+// shading normal.  On a miss `hit` stays false and `t` keeps maxT.
+struct BvhHit
+{
+    bool      hit   = false;
+    float     t     = LARGE_T;
+    glm::vec3 normal;
 };
 
 /**
