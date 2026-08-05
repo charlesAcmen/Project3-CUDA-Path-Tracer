@@ -101,6 +101,15 @@ void mergeConfigJson(AppConfig& cfg, const json& data)
         if (v.contains("exponent"))  cfg.vignette.exponent  = v["exponent"].get<float>();
     }
 
+    // BVH acceleration
+    if (data.contains("bvh"))
+    {
+        const auto& b = data["bvh"];
+        if (b.contains("enabled"))  cfg.bvh.enabled  = b["enabled"].get<bool>();
+        if (b.contains("maxDepth")) cfg.bvh.maxDepth = b["maxDepth"].get<int>();
+        if (b.contains("leafSize")) cfg.bvh.leafSize = b["leafSize"].get<int>();
+    }
+
     // Profiler
     if (data.contains("profiler"))
     {
@@ -197,6 +206,18 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
             int v = std::stoi(arg.substr(6));
             cfg.rngMode = static_cast<RngMode>(v);
         }
+        else if (arg.rfind("--bvh=", 0) == 0)
+        {
+            cfg.bvh.enabled = (std::stoi(arg.substr(6)) != 0);
+        }
+        else if (arg.rfind("--bvh-depth=", 0) == 0)
+        {
+            cfg.bvh.maxDepth = std::stoi(arg.substr(12));
+        }
+        else if (arg.rfind("--bvh-leaf=", 0) == 0)
+        {
+            cfg.bvh.leafSize = std::stoi(arg.substr(11));
+        }
         else if (arg.rfind("--warmup=", 0) == 0)
         {
             cfg.profCfg.warmupIters = std::stoi(arg.substr(9));
@@ -206,6 +227,9 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
             cfg.sceneFile = arg;
         }
     }
+
+    // ---- Enforce legal ranges on CLI-provided BVH values ----
+    cfg.bvh.clamp();
 
     // ---- Seed profCfg metadata ----
     cfg.profCfg.compactMethod  = cfg.compactMethod;
@@ -222,11 +246,12 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
         cfg.profCfg.sceneName = s;
     }
 
-    Log::info("Config", "compactMethod=%s  sortByMaterial=%s  rngMode=%s  fresnelMode=%s",
+    Log::info("Config", "compactMethod=%s  sortByMaterial=%s  rngMode=%s  fresnelMode=%s  bvh=%s",
            toString(cfg.compactMethod),
            cfg.sortByMaterial ? "yes" : "no",
            toString(cfg.rngMode),
-           toString(cfg.fresnelMode));
+           toString(cfg.fresnelMode),
+           cfg.bvh.enabled ? "yes" : "no");
 }
 
 // ====================================================================
@@ -265,6 +290,10 @@ void printStartupHelp(const char* exeName)
     Log::raw("    --sort=N       Material sorting: 0=off, nonzero=on (default on).\n");
     Log::raw("    --fresnel=N    Fresnel mode: 0=Schlick (default), 1=Accurate.\n");
     Log::raw("    --rng=N        RNG mode: 0=LCG (default), 1=scrambled Halton.\n");
+    Log::raw("    --bvh=0/1      Enable per-mesh BVH traversal (default 0=off,\n");
+    Log::raw("                   the O(N) linear scan).  Results are bit-identical.\n");
+    Log::raw("    --bvh-depth=N  BVH maximum tree depth (default 24, clamp [1, 63]).\n");
+    Log::raw("    --bvh-leaf=N   BVH leaf size in triangles (default 4, clamp [1, 64]).\n");
     Log::raw("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
     Log::raw("    --save         Save the final rendered image on exit.\n");
     Log::raw("                   (default: yes)\n");
@@ -290,6 +319,11 @@ void printStartupHelp(const char* exeName)
 
 void printStartupSummary(const AppConfig& cfg)
 {
+    // Unpack what the body prints from the config.
+    const ProfilerConfig& profCfg = cfg.profCfg;
+    const RngMode         rngMode = cfg.rngMode;
+    const BvhConfig&      bvhCfg  = cfg.bvh;
+
     Log::raw("\n");
     Log::raw("======================================================================\n");
     Log::raw("  Startup Summary\n");
@@ -319,6 +353,9 @@ void printStartupSummary(const AppConfig& cfg)
     Log::raw("  Fresnel mode: %s\n", fresnelName);
     const char* rngName = (rngMode == RngMode::HALTON ? "Scrambled Halton" : "LCG");
     Log::raw("  RNG mode: %s\n", rngName);
+    Log::raw("  BVH traversal: %s  (max depth %d, leaf size %d)\n",
+           bvhCfg.enabled ? "enabled" : "disabled (O(N) scan)",
+           bvhCfg.maxDepth, bvhCfg.leafSize);
     Log::raw("  Auto-save final image: %s\n", g_autoSave ? "yes" : "no");
     Log::raw("======================================================================\n");
     Log::raw("\n");
