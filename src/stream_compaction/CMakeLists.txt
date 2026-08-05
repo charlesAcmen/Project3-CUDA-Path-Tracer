@@ -4,7 +4,6 @@ set(headers
     )
 
 set(sources
-    common.cu
     efficient.cu
     )
 

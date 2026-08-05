@@ -23,19 +23,3 @@ inline int ilog2(int x) {
 inline int ilog2ceil(int x) {
     return x == 1 ? 0 : ilog2(x - 1) + 1;
 }
-
-namespace StreamCompaction {
-    namespace Common {
-        //map the input array to an array of 0s and 1s,FIRST STEP OF COMPACTWITHSCAN
-        __global__ void kernMapToBoolean(int n, int *bools, const int *idata);
-
-        //scatter the input array to an array of 0s and 1s,SECOND STEP OF COMPACTWITHSCAN
-        __global__ void kernScatter(int n, int *odata,
-                const int *idata, const int *bools, const int *indices);
-
-        // NOTE: Timing functionality is provided by the Profiler singleton
-        // (src/profiler/profiler.h).  The legacy PerformanceTimer class that
-        // lived here has been removed — Profiler covers both cudaEvent GPU
-        // timing and std::chrono CPU timing with CSV output and GUI integration.
-    }
-}
