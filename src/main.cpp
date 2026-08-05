@@ -8,7 +8,6 @@
 #include "window_setup.h"  // init, initTextures, initCuda, initPBO, etc.
 
 #include <glm/glm.hpp>
-#include <glm/gtx/transform.hpp>
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -20,9 +19,6 @@
 #include <cuda_gl_interop.h>
 
 #include <cstdlib>
-#include <cstring>
-#include <iostream>
-#include <fstream>
 #include <sstream>
 #include <string>
 
