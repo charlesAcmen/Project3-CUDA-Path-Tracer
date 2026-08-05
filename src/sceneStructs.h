@@ -7,8 +7,6 @@
 #include <string>
 #include <vector>
 
-#define BACKGROUND_COLOR (glm::vec3(0.0f))
-
 // Object-space triangle backed by an OBJ mesh.
 // The intersection test transforms rays to object space via
 // the geometry's inverseTransform, keeping triangles untransformed.
