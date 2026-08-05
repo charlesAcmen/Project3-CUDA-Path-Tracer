@@ -1,5 +1,6 @@
 // ====================================================================
-// bvh_test — host-side BVH build + traverse validation
+// bvh_test — host-side BVH build + traverse validation, with an optional
+// interactive TRACE of the build / traversal intermediate state.
 //
 // Builds per-mesh BVHs for synthetic meshes (axis-aligned cube, random
 // triangle cloud, degenerate soup) across maxDepth × leafSize
@@ -11,6 +12,12 @@
 // traversal on the reordered buffer still matches brute force on both
 // the reordered and the original buffers.
 //
+// TRACING: the production BVH code stays clean — instead, bvh_test uses
+// TRACED COPIES under traced/ (aabb_traced.h / bvh_traced.h /
+// bvh_traced.cu) that print the intermediate state of AABB / BvhNode /
+// the order permutation / the SAH split search / the stack walk.  Set
+// trace::level (or run `bvh_test --quiet` to skip the demo) to see it.
+//
 // Host-only: the CUDA build/traverse functions are compiled for host
 // execution (no kernels launched, no GPU required).
 // ====================================================================
@@ -18,14 +25,33 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
-#include "bvh/bvh.h"                 // AABB, BvhNode, traverseBvhClosest
+#include "traced/trace.h"       // TRACE macro + trace::level (+ trace::indent/vec)
+#include "traced/bvh_traced.h"  // TRACED AABB, BvhNode, traverseBvhClosest
 #include "constants.h"
 
-// Build code (SAH construction + flatten).  Compiled once here; do NOT
-// add src/bvh/bvh.cu to this test's CMake sources.
-#include "bvh/bvh.cu"
+// Traced build code (SAH construction + flatten).  Compiled once here; do
+// NOT add src/bvh/bvh.cu to this test's CMake sources.
+#include "traced/bvh_traced.cu"
+
+// ---------------------------------------------------------------------
+// trace facility definitions (host-only; declared in traced/trace.h)
+// ---------------------------------------------------------------------
+
+namespace trace {
+    void indent(int depth)
+    {
+        if (level <= 0) return;
+        for (int i = 0; i < depth; i++) std::printf("  ");
+    }
+    void vec(const char* label, const glm::vec3& v)
+    {
+        if (level <= 0) return;
+        std::printf("%s=(%.4g,%.4g,%.4g)", label, v.x, v.y, v.z);
+    }
+}
 
 namespace {
 
@@ -47,6 +73,13 @@ Triangle makeTriangle(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c
 {
     glm::vec3 n = glm::normalize(glm::cross(b - a, c - a));
     return Triangle{ a, b, c, n, n, n };
+}
+
+// Box centroid — production AABB no longer provides this (it was
+// test-only, used solely to aim rays here), so the harness computes it.
+glm::vec3 centroidOf(const AABB& bounds)
+{
+    return 0.5f * (bounds.min + bounds.max);
 }
 
 // ---------------------------------------------------------------------
@@ -142,7 +175,7 @@ std::vector<Ray> makeRayBatch(const std::vector<Triangle>& tris, unsigned int se
     AABB bounds;
     for (const auto& t : tris)
         bounds.expand(t);
-    const glm::vec3 center = bounds.centroid();
+    const glm::vec3 center = centroidOf(bounds);
     const float radius = glm::length(bounds.max - bounds.min) * 0.5f + 1.0f;
 
     Lcg rng(seed);
@@ -168,6 +201,54 @@ std::vector<Ray> makeRayBatch(const std::vector<Triangle>& tris, unsigned int se
         rays.push_back(Ray{ center + glm::vec3(radius * sign, 0, 0), glm::vec3((float)sign, 0, 0) });
     }
     return rays;
+}
+
+// ---------------------------------------------------------------------
+// Trace demo — build + traverse a small cube with trace::level = 2 so
+// every intermediate struct state is printed.  `--quiet` skips this.
+// ---------------------------------------------------------------------
+
+void traceDemo()
+{
+    const std::vector<Triangle> cube = makeCube(1.0f);   // 12 tris, spans [-1,1]^3
+
+    std::vector<Geom> geoms(1);
+    geoms[0].meshTriangleOffset = 0;
+    geoms[0].meshTriangleCount  = (int)cube.size();
+
+    BvhBuffers bufs;
+    trace::level = 1;
+
+    std::printf("\n================ BUILD TRACE — cube, 12 tris, leafSize=4 maxDepth=24 ================\n");
+    bvh::buildSceneBvh(bufs, cube, geoms, 24, 4);
+    const int root = bufs.hostBvhMeta[0].rootNodeIndex;
+
+    std::printf("\n================ TRAVERSE TRACE ================\n");
+    const glm::vec3 oA(2.0f, 1.5f, 0.5f);            // outside, aimed at centroid -> HIT
+    const glm::vec3 oB(0.0f, 0.0f, 2.0f);            // above cube, moving +x -> MISS (pruned at root)
+    const glm::vec3 oC(0.0f, 0.0f, 3.0f);            // axis-aligned onto +z face -> HIT (zero dir comps)
+    const Ray rays[] = {
+        Ray{ oA, glm::normalize(glm::vec3(0.0f) - oA) },
+        Ray{ oB, glm::vec3(1.0f, 0.0f, 0.0f) },
+        Ray{ oC, glm::vec3(0.0f, 0.0f, -1.0f) },
+    };
+    const char* names[] = {
+        "A: aimed at centroid",
+        "B: outside moving +x (root AABB prune)",
+        "C: axis-aligned -z, zero direction components",
+    };
+    for (int i = 0; i < 3; i++)
+    {
+        std::printf("\n--- Traverse ray %s ---\n", names[i]);
+        float t = LARGE_T;
+        glm::vec3 n;
+        const bool hit = traverseBvhClosest(rays[i], bufs.hostNodes.data(), root,
+                                            bufs.hostTriangles.data(), t, n);
+        std::printf("--- Result: %s  t=%.4g  normal=(%.4g,%.4g,%.4g) ---\n\n",
+                    hit ? "HIT" : "MISS", t, n.x, n.y, n.z);
+    }
+
+    trace::level = 0;
 }
 
 // ---------------------------------------------------------------------
@@ -397,8 +478,15 @@ bool testSceneFlatten()
 
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
+    const bool quiet = (argc > 1 && std::strcmp(argv[1], "--quiet") == 0);
+
+    if (!quiet)
+        traceDemo();
+    else
+        std::printf("--quiet: skipping the trace demo, running validation only\n");
+
     const std::vector<Triangle> cube  = makeCube(1.0f);
     const std::vector<Triangle> cloud = makeRandomCloud(120, 0xDEADBEEFu);
     const std::vector<Triangle> degen = makeDegenerate(40);
