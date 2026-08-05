@@ -21,11 +21,13 @@
 #include "glm/glm.hpp"
 #include "glm/gtx/norm.hpp"
 
-#include "intersection/intersections.h"   // getPointOnRay, getExactPointOnRay, concentricSampleDisk
+#include "intersection/intersections.h"   // getExactPointOnRay, concentricSampleDisk
 #include "interactions/interactions.h"    // scatterRay, fresnel*, classifyRefraction
 #include "profiler/profiler.h"
 #include "kernels/kernel_config.h"
+#include "kernels/bvh_traversal.cuh"      // bvhTraverse (BVH GPU traversal)
 #include "rng/rng.h"
+#include "bvh/bvh.h"                      // bvh::buildSceneBvh, uploadToDevice, freeDevice
 #include "efficient.h"       // StreamCompaction::Efficient
 
 // Post-processing kernels (needed by pipeline/postprocess.cuh)
