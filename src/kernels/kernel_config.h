@@ -118,26 +118,7 @@ public:
         // Clamp grid size to device limits
         gridSize.x = std::min(gridSize.x, (unsigned int)deviceProp.maxGridSize[0]);
     }
-    
-    /**
-     * Get device properties for current device
-     */
-    static cudaDeviceProp getDeviceProperties(int deviceId = 0) {
-        cudaDeviceProp prop;
-        cudaGetDeviceProperties(&prop, deviceId);
-        return prop;
-    }
-    
-    /**
-     * Print configuration details (useful for debugging)
-     */
-    void print() const {
-        printf("KernelConfig: grid(%d, %d, %d) block(%d, %d, %d) -> %d threads\n",
-               gridSize.x, gridSize.y, gridSize.z,
-               blockSize.x, blockSize.y, blockSize.z,
-               effectiveThreads);
-    }
-    
+
 private:
     /**
      * Compute optimal block size based on device architecture
