@@ -11,7 +11,6 @@
 // ====================================================================
 
 #include "sceneStructs.h"
-#include "utils/utilities.h"
 
 /**
  * Writes the display buffer to the OpenGL pixel buffer for rendering.

@@ -15,9 +15,8 @@
 //
 // The reorder is within each mesh only: per-mesh triangle counts and
 // the mesh concatenation order are unchanged, so Geom::meshTriangleOffset
-// / meshTriangleCount still slice the same triangle set.  The O(N)
-// computeIntersections kernel is order-independent and stays correct on
-// the reordered buffer, so both paths share one deviceTriangles.
+// / meshTriangleCount still slice the same triangle set.  The reordered
+// buffer is the single triangle array the BVH traversal kernel reads.
 // ====================================================================
 
 #include "aabb.h"
@@ -27,8 +26,9 @@
 
 #include <vector>
 
-// Explicit-stack capacity (compile-time).  Build-time depth clamp to
-// [1, 63] guarantees the stack can never overflow for a built tree.
+// Explicit-stack capacity (compile-time).  The build-time depth clamp to
+// [1, kMaxBvhStackDepth-1] guarantees the traversal stack can never
+// overflow for a built tree.
 constexpr int kMaxBvhStackDepth = 64;
 
 // Internal node: bounds + children.  Leaf: bounds + triangle chunk.

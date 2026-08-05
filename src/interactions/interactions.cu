@@ -256,9 +256,11 @@ __host__ __device__ void scatterRay(
     const glm::vec3 rayDir        = pathSegment.ray.direction;
     const glm::vec3 shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -normal : normal;
 
-    // The offset sign for the new ray origin is determined per-branch below by
-    // checking the dot product of the new ray direction against the geometric
-    // normal, so the offset always pushes the origin to the correct side.
+    // Offset the new ray origin off the surface by EPSILON so it cannot
+    // immediately re-hit the same triangle.  The offset direction is chosen
+    // per branch below: refractive keys off the entering/exiting state
+    // (numerically stable near grazing angles), reflective keys off the
+    // shading-normal orientation, diffuse always pushes outward.
     switch (m.type)
     {
         case MaterialType::Refractive:
