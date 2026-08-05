@@ -267,8 +267,6 @@ void pathtrace(uchar4* pbo, int iter)
     const dim3 blocksPerGrid2d(
         (cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
         (cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
-    // 1D block for path-tracing kernels
-    const int blockSize1d = 128;
 
     Profiler& prof = g_profiler();
     prof.beginIteration(iter);
@@ -329,7 +327,6 @@ void pathtrace(uchar4* pbo, int iter)
     // by gatherTerminatedPaths inside compactActivePaths.
     if (g_opts.compactMethod == CompactMethod::Off)
     {
-        dim3 numBlocks((pixelcount + blockSize1d - 1) / blockSize1d);
         LAUNCH_KERNEL_AUTO(gatherTerminatedPaths, pixelcount,
             pixelcount, g_dev.image, g_dev.paths);
     }
