@@ -71,8 +71,6 @@ void  setBloomRadius(int v)         {
     } 
 }
 int   getBloomRadius()              { return g_opts.bloom.radius; }
-void  setBloomSigma(float v)        { g_opts.bloom.sigma = v; }
-float getBloomSigma()               { return g_opts.bloom.sigma; }
 void  setRngMode(RngMode mode)      { g_opts.rngMode = mode; }
 RngMode getRngMode()                { return g_opts.rngMode; }
 void  setChromaticAberrationEnabled(bool v)  { g_opts.chromaticAberration.enabled = v; }
