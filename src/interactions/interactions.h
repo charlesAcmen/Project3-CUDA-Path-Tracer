@@ -6,7 +6,6 @@
 
 #include "rng/rng.h"
 
-// CHECKITOUT
 /**
  * Computes a cosine-weighted random direction in a hemisphere.
  * Used for diffuse lighting.

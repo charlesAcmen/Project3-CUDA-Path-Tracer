@@ -132,7 +132,6 @@ void saveImage()
     ss << filename << "." << startTimeString << "." << iteration << "samp";
     filename = ss.str();
 
-    // CHECKITOUT
     img.savePNG(filename);
     //img.saveHDR(filename);  // Save a Radiance HDR file
 }

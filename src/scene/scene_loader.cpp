@@ -406,7 +406,6 @@ Scene loadFromJSON(const std::string& jsonName)
         Material newMaterial{};
         newMaterial.indexOfRefraction = 1.0f;
         newMaterial.invIndexOfRefraction = 1.0f;
-        // TODO: handle materials loading differently
         if (p["TYPE"] == "Diffuse")
         {
             const auto& col = p["RGB"];
