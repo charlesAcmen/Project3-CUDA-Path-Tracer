@@ -256,7 +256,7 @@ static void updateGuiAfterFrame(Profiler& prof) {
 //   4. runPostProcess           — bloom → tone → CA → vignette → PBO
 // ====================================================================
 
-void pathtrace(uchar4* pbo, int frame, int iter)
+void pathtrace(uchar4* pbo, int iter)
 {
     const int traceDepth = hst_scene->state.traceDepth;
     const Camera& cam    = hst_scene->state.camera;
