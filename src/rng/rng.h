@@ -71,7 +71,7 @@
  *
  * Usage:
  *   RngState rng = makeRngState(iter, pixelIdx, depth, rngMode);
- *   float u = rng.next(dim);  // dim = 0..HALTON_NUM_DIMS-1
+ *   float u = rng.next(dim);  // dim indexes the Halton dimension table below
  */
 
 #include "constants.h"
@@ -99,8 +99,6 @@ __host__ __device__ inline unsigned int utilhash(unsigned int a)
 // ============================================================================
 // Halton sequence constants
 // ============================================================================
-
-constexpr int HALTON_NUM_DIMS = 16;
 
 // --- Halton dimension assignment ---
 // Each independent sampling decision in the pipeline gets a unique
