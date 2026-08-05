@@ -58,16 +58,25 @@ struct BvhMeta
     int rootNodeIndex = -1;
 };
 
-// BVH buffers: host build output + device upload.
+// Build-time BVH settings.  Bounded by the stack/leaf constants above at
+// build time; the defaults match AppConfig::BvhConfig so a plain
+// BvhBuildConfig{} reproduces the renderer defaults.
+struct BvhBuildConfig
+{
+    int maxDepth = 24;   // max tree depth, clamped to [1, kMaxBvhStackDepth-1]
+    int leafSize = 4;    // max triangles per leaf, clamped to [1, kMaxBvhLeafSize]
+};
+
+// Host build output + device upload for the per-mesh BVHs.
 // hostTriangles holds the REORDERED flat triangle array (per-mesh
-// flatten) — uploaded to the renderer as deviceTriangles in M4.
+// flatten) — uploaded to the renderer as deviceTriangles.
 struct BvhBuffers
 {
     // Device-side buffers (allocated in uploadToDevice, freed in freeDevice)
-    BvhNode* deviceNodes = nullptr;  int numNodes = 0;
-    BvhMeta* deviceBvhMeta = nullptr; int numGeoms = 0;
+    BvhNode*  deviceNodes   = nullptr;
+    BvhMeta*  deviceBvhMeta = nullptr;
     std::vector<BvhNode>  hostNodes;      // construction output
-    std::vector<BvhMeta>  hostBvhMeta;    // per-geom metadata 
+    std::vector<BvhMeta>  hostBvhMeta;    // per-geom metadata
     std::vector<Triangle> hostTriangles;  // reordered flat triangles
 };
 
@@ -86,7 +95,7 @@ struct BvhHit
  * Iterative closest-hit BVH traversal — THE algorithm both the GPU
  * kernel and the host test execute, so correctness is validated once.
  *
- * The AABB test clips to [RAY_EPSILON, closestT]: the near bound skips
+ * The AABB test clips to [RAY_EPSILON, maxT]: the near bound skips
  * self-hits, the far bound is the caller's current best distance, so
  * subtrees that cannot beat it are pruned (far-plane pruning).  Leaf
  * triangles are tested with the SAME triangleIntersectionTest as the
@@ -97,20 +106,21 @@ struct BvhHit
  * @param nodes         Node array (device or host)
  * @param rootNodeIndex Root of the mesh's subtree (-1 → no hit)
  * @param tris          Triangle array (leaf chunks reference into it)
- * @param closestT      [in] initial far plane (e.g. best t so far);
- *                      [out] closest hit distance on success
- * @param objNormal     [out] object-space shading normal of the hit
- * @return              true on hit with t < (input) closestT
+ * @param maxT          Far plane: only hits with t < maxT are reported.
+ *                      Pass the caller's current best t to prune subtrees.
+ * @return              BvhHit — hit = true only if a triangle with t < maxT
  */
-__host__ __device__ inline bool traverseBvhClosest(
+__host__ __device__ inline BvhHit traverseBvhClosest(
     const Ray& objRay,
     const BvhNode* nodes,
     int rootNodeIndex,
     const Triangle* tris,
-    float& closestT,
-    glm::vec3& objNormal)
+    float maxT)
 {
-    if (rootNodeIndex < 0) return false;
+    BvhHit result;
+    result.t = maxT;   // tighten this as closer hits are found
+
+    if (rootNodeIndex < 0) return result;   // no subtree → miss
 
     const glm::vec3 invDir(
         1.0f / objRay.direction.x,
@@ -118,37 +128,36 @@ __host__ __device__ inline bool traverseBvhClosest(
         1.0f / objRay.direction.z);
 
     int stack[kMaxBvhStackDepth];
-    int sp = 0;//stack pointer 
+    int sp = 0;                             // stack pointer
     stack[sp++] = rootNodeIndex;
-
-    bool hit = false;
 
     while (sp > 0)
     {
-        //pop the top node off the stack
         const int nodeIndex = stack[--sp];
         const BvhNode& node = nodes[nodeIndex];
 
-        //near side:RAY_EPSILON, far side:closestT
-        if (!intersectRayAABB(objRay.origin, invDir, node.bounds, RAY_EPSILON, closestT))
-            //skip the node and its subtree if the ray misses the node's AABB
+        // Near side: RAY_EPSILON, far side: current best (result.t).  Skip
+        // the node and its subtree if the ray misses the AABB in that window.
+        if (!intersectRayAABB(objRay.origin, invDir, node.bounds, RAY_EPSILON, result.t))
             continue;
 
         if (node.isLeaf)
         {
             // Sequential chunk — leaf triangles were reordered into a
             // contiguous run by the build's flatten pass.
-            for (int j = 0; j < node.right; j++)
+            const int triBase  = node.leafTriOffset();
+            const int triCount = node.leafTriCount();
+            for (int j = 0; j < triCount; j++)
             {
                 float t;
                 glm::vec3 triNormal;
-                if (triangleIntersectionTest(objRay, tris[node.left + j], t, triNormal))
+                if (triangleIntersectionTest(objRay, tris[triBase + j], t, triNormal))
                 {
-                    if (t < closestT)
+                    if (t < result.t)
                     {
-                        closestT  = t;
-                        objNormal = triNormal;
-                        hit = true;
+                        result.t      = t;
+                        result.normal = triNormal;
+                        result.hit    = true;
                     }
                 }
             }
@@ -156,41 +165,39 @@ __host__ __device__ inline bool traverseBvhClosest(
         else
         {
             // Push both children (top of stack = right, visited first).
-            // Build-time depth clamp keeps the stack within capacity; the
-            // guard is defense-in-depth against a malformed tree.
+            // The build-time depth clamp keeps the stack within capacity;
+            // the guard is defense-in-depth against a malformed tree.
             if (sp < kMaxBvhStackDepth - 1)
             {
-                stack[sp++] = node.left;
-                stack[sp++] = node.right;
+                stack[sp++] = node.childL();
+                stack[sp++] = node.childR();
             }
         }
     }
 
-    return hit;
+    return result;
 }
 
 // Host-side construction + GPU memory management, implemented in bvh.cu.
 namespace bvh
 {
-    // Build one mesh's BVH and append its nodes to `out`.  The mesh's
-    // triangles are ALSO appended to `dstTris` reordered into
-    // leaf-contiguous chunks, and every leaf is rewritten to point at its
-    // chunk (traverseBvhClosest reads tris[node.left + j]).  Returns the
-    // root node index, or -1 for an empty mesh.
-    int  buildMeshBvh(std::vector<BvhNode>& out,
-                      std::vector<Triangle>& dstTris,
-                      const std::vector<Triangle>& srcTris,
-                      int triOffset, int triCount,
-                      int maxDepth, int leafSize);
+    // Build one mesh's BVH, appending its nodes to out.hostNodes and its
+    // reordered triangles to out.hostTriangles.  The mesh's triangle slice
+    // is read from geom.meshTriangleOffset/count.  Returns the root node
+    // index, or -1 for an empty mesh.
+    int  buildMeshBvh(BvhBuffers& out,
+                      const std::vector<Triangle>& hostTris,
+                      const Geom& geom,
+                      const BvhBuildConfig& cfg);
 
-    // Build every mesh's BVH, reorder its triangles into
-    // out.hostTriangles, and fill out.hostBvhMeta.
+    // Build every mesh's BVH into out.hostNodes/out.hostTriangles and fill
+    // out.hostBvhMeta.  Empty meshes keep rootNodeIndex = -1.
     void buildSceneBvh(BvhBuffers& out,
                        const std::vector<Triangle>& hostTris,
                        const std::vector<Geom>& geoms,
-                       int maxDepth, int leafSize);
+                       const BvhBuildConfig& cfg);
 
-    // Upload node + meta buffers to device memory.
+    // Upload the host node + meta buffers to device memory.
     void uploadToDevice(BvhBuffers& b);
     void freeDevice(BvhBuffers& b);
 } // namespace bvh

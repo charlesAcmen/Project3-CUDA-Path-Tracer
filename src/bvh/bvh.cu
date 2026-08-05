@@ -17,8 +17,7 @@
 //
 // The reorder stays within each mesh (counts and concatenation order are
 // unchanged), so Geom::meshTriangleOffset / meshTriangleCount still slice
-// the same triangle set and the O(N) computeIntersections kernel remains
-// correct on the reordered buffer.
+// the same triangle set for the BVH traversal kernel.
 // ====================================================================
 
 #include "bvh/bvh.h"
@@ -40,6 +39,21 @@ float centroidComponent(const Triangle& t, int axis)
     return axis == 0 ? c.x : (axis == 1 ? c.y : c.z);
 }
 
+// Everything the recursive build needs that does NOT change during one
+// mesh's recursion: the shared buffers plus the per-mesh build settings.
+// Bundling them collapses the build-time params that were threaded
+// through buildRecursive / flattenRecursive into a single context object.
+struct BvhBuildContext
+{
+    std::vector<BvhNode>*         nodes;     // construction output (hostNodes)
+    const std::vector<Triangle>*  tris;      // source triangles (hostTris, read-only)
+    std::vector<int>*             order;     // permutable triangle indices (per-mesh)
+    std::vector<Triangle>*        dstTris;   // reordered output (hostTriangles)
+    int triOffset;   // this mesh's triangle base index
+    int maxDepth;
+    int leafSize;
+};
+
 /**
  * Recursive SAH build over the contiguous range [begin, end) of the
  * mesh's `order` array (which holds absolute triangle indices).  The
@@ -54,36 +68,39 @@ float centroidComponent(const Triangle& t, int axis)
  *     cost = 1 + (areaL * nL + areaR * nR) / areaNode
  * vs. the leaf cost n.  Split iff the best SAH cost beats the leaf cost.
  */
-int buildRecursive(std::vector<BvhNode>& nodes,
-                   const std::vector<Triangle>& tris,
-                   std::vector<int>& order,   // permutable working array
-                   int begin, int end,
-                   int triOffset,
-                   int maxDepth, int leafSize, int depth)
+int buildRecursive(BvhBuildContext& ctx,
+                   int begin, int end, int depth)
 {
-    const int n = end - begin;//number of triangles in this node's range
+    // Unpack the context into local names so the body reads as before.
+    std::vector<BvhNode>&        nodes     = *ctx.nodes;
+    const std::vector<Triangle>& tris      = *ctx.tris;
+    std::vector<int>&            order     = *ctx.order;
+    const int triOffset = ctx.triOffset;
+    const int maxDepth  = ctx.maxDepth;
+    const int leafSize  = ctx.leafSize;
+
+    const int n = end - begin;   // number of triangles in this node's range
 
     AABB bounds;
     for (int i = begin; i < end; i++)
-        bounds.expand(tris[order[i]]);//access the triangle by its index in the order array
+        bounds.expand(tris[order[i]]);   // access the triangle by its index in the order array
 
     const int nodeIndex = (int)nodes.size();
     nodes.push_back(BvhNode{});
     nodes[nodeIndex].bounds = bounds;
-    nodes[nodeIndex].isLeaf = 0;
+    nodes[nodeIndex].isLeaf = false;
 
     auto makeLeaf = [&]() {
-        //&:access n, triOffset, begin
-        nodes[nodeIndex].isLeaf = 1;//mark this node as a leaf
-        nodes[nodeIndex].left  = triOffset + begin;   // stores the offset into the order array as starting index of the triangles in this leaf
-        nodes[nodeIndex].right = n; // stores the number of triangles in this leaf
+        nodes[nodeIndex].isLeaf = true;
+        nodes[nodeIndex].left  = triOffset + begin;   // start of the leaf's run in the order array
+        nodes[nodeIndex].right = n;                    // number of triangles in this leaf
     };
 
-    //too few triangles or too deep → make a leaf
+    // Too few triangles or too deep → make a leaf.
     if (n <= leafSize || depth >= maxDepth)
     {
         makeLeaf();
-        return nodeIndex;//return the index of this node in the nodes vector
+        return nodeIndex;   // return the index of this node in the nodes vector
     }
 
     // ---- SAH: find the best (axis, split) ----
@@ -95,7 +112,7 @@ int buildRecursive(std::vector<BvhNode>& nodes,
     if (ext[axes[0]] < ext[axes[1]]) std::swap(axes[0], axes[1]);
 
     const float nodeArea = bounds.surfaceArea();   // degenerate → 1.0 guard
-    const float leafCost = (float)n;    //cost of making a leaf with n triangles (1.0 + area * n / area = 1.0 + n)
+    const float leafCost = (float)n;               // cost of not splitting
 
     int bestAxis = -1, bestSplit = -1;   // bestSplit = element count in the LEFT half
     float bestCost = FLT_MAX;
@@ -106,7 +123,7 @@ int buildRecursive(std::vector<BvhNode>& nodes,
     for (int a = 0; a < 3; a++)
     {
         const int axis = axes[a];
-        //sort order array by the centroid of the triangles along the current axis,the smallest centroid first
+        // Sort the range by triangle centroid along this axis (ascending).
         std::sort(order.begin() + begin, order.begin() + end,
             [&](int lhs, int rhs) {
                 return centroidComponent(tris[lhs], axis) < centroidComponent(tris[rhs], axis);
@@ -130,8 +147,8 @@ int buildRecursive(std::vector<BvhNode>& nodes,
         {
             const float areaL = pref[k - 1].surfaceArea();
             const float areaR = suff[k].surfaceArea();
-            //cost = 1 + area of left child * number of triangles in left child + area of right child * number of triangles in right child 
-            //area of parent node
+            // SAH cost of splitting at k (left has k tris, right has n-k):
+            //   1 + (areaL * k + areaR * (n - k)) / nodeArea
             const float cost  = 1.0f + (areaL * k + areaR * (n - k)) / nodeArea;
             if (cost < bestCost)
             {
@@ -142,8 +159,7 @@ int buildRecursive(std::vector<BvhNode>& nodes,
         }
     }
 
-
-    //making a leaf is cheaper than splitting → make a leaf
+    // Making a leaf is cheaper than splitting → make a leaf.
     if (bestAxis < 0 || bestCost >= leafCost)
     {
         makeLeaf();
@@ -163,8 +179,8 @@ int buildRecursive(std::vector<BvhNode>& nodes,
     // temporaries makes this correct regardless of the host C++ standard's
     // assignment sequencing rules (RHS-before-LHS is only guaranteed since
     // C++17; this project's tests compile with older defaults).
-    const int leftChild  = buildRecursive(nodes, tris, order, begin, begin + bestSplit, triOffset, maxDepth, leafSize, depth + 1);
-    const int rightChild = buildRecursive(nodes, tris, order, begin + bestSplit, end, triOffset, maxDepth, leafSize, depth + 1);
+    const int leftChild  = buildRecursive(ctx, begin, begin + bestSplit, depth + 1);
+    const int rightChild = buildRecursive(ctx, begin + bestSplit, end, depth + 1);
     nodes[nodeIndex].left  = leftChild;
     nodes[nodeIndex].right = rightChild;
     return nodeIndex;
@@ -178,20 +194,22 @@ int buildRecursive(std::vector<BvhNode>& nodes,
  * a "front + count" guess.  `cursor` is the running write offset within
  * this mesh's output region [dstBase, dstBase + triCount).
  */
-void flattenRecursive(std::vector<BvhNode>& nodes,
+void flattenRecursive(BvhBuildContext& ctx,
                       int nodeIndex,
-                      const std::vector<int>& order,
-                      const std::vector<Triangle>& srcTris,
-                      std::vector<Triangle>& dstTris,
-                      int triOffset,
                       int dstBase,
                       int& cursor)
 {
+    std::vector<BvhNode>&        nodes   = *ctx.nodes;
+    const std::vector<int>&      order   = *ctx.order;
+    const std::vector<Triangle>& srcTris = *ctx.tris;
+    std::vector<Triangle>&       dstTris = *ctx.dstTris;
+    const int triOffset = ctx.triOffset;
+
     BvhNode& node = nodes[nodeIndex];
     if (node.isLeaf)
     {
-        const int orderStart = node.left - triOffset;   // offset into the mesh's order array
-        const int count      = node.right;
+        const int orderStart = node.leafTriOffset() - triOffset;   // offset into the mesh's order array
+        const int count      = node.leafTriCount();
         for (int j = 0; j < count; j++)
             dstTris[dstBase + cursor + j] = srcTris[order[orderStart + j]];
         node.left = dstBase + cursor;   // now points into the reordered buffer
@@ -199,39 +217,51 @@ void flattenRecursive(std::vector<BvhNode>& nodes,
     }
     else
     {
-        flattenRecursive(nodes, node.left,  order, srcTris, dstTris, triOffset, dstBase, cursor);
-        flattenRecursive(nodes, node.right, order, srcTris, dstTris, triOffset, dstBase, cursor);
+        flattenRecursive(ctx, node.childL(), dstBase, cursor);
+        flattenRecursive(ctx, node.childR(), dstBase, cursor);
     }
 }
 
-} // namespace:private in the current translation unit,not shown to other cpp files
+} // anonymous namespace (translation-unit private)
 
-int buildMeshBvh(std::vector<BvhNode>& out,//hostNodes
-                 std::vector<Triangle>& dstTris,//hostTriangles
-                 const std::vector<Triangle>& srcTris,//hostTris
-                 int triOffset, int triCount,
-                 int maxDepth, int leafSize)
+int buildMeshBvh(BvhBuffers& out,
+                 const std::vector<Triangle>& hostTris,
+                 const Geom& geom,
+                 const BvhBuildConfig& cfg)
 {
-    // Clamp so the tree can never overflow the traversal stack and the
-    // leaf size stays sane.
-    maxDepth = std::min(63, std::max(1, maxDepth));
-    leafSize = std::min(64, std::max(1, leafSize));
+    // Defensive clamp: a built tree must never overflow the traversal
+    // stack and the leaf size must stay sane.  BvhConfig::clamp() already
+    // bounds the renderer path; this guards direct callers/tests.
+    const int maxDepth = std::min(kMaxBvhStackDepth - 1, std::max(1, cfg.maxDepth));
+    const int leafSize = std::min(kMaxBvhLeafSize, std::max(1, cfg.leafSize));
 
+    const int triOffset = geom.meshTriangleOffset;
+    const int triCount  = geom.meshTriangleCount;
     if (triCount <= 0) return -1;   // empty mesh → no root
+
+    // Bundle the shared buffers + this mesh's build settings into a context
+    // so the recursive build/flatten no longer thread them as parameters.
+    BvhBuildContext ctx;
+    ctx.nodes     = &out.hostNodes;
+    ctx.tris      = &hostTris;
+    ctx.dstTris   = &out.hostTriangles;
+    ctx.triOffset = triOffset;
+    ctx.maxDepth  = maxDepth;
+    ctx.leafSize  = leafSize;
 
     std::vector<int> order(triCount);
     for (int i = 0; i < triCount; i++)
-        order[i] = triOffset + i;//indices rather than triangle structs themselves
+        order[i] = triOffset + i;   // store indices, not triangle structs
+    ctx.order = &order;
 
-    const int root = buildRecursive(out, srcTris, order, 0, triCount,
-                                    triOffset, maxDepth, leafSize, 0);
+    const int root = buildRecursive(ctx, 0, triCount, 0);
 
-    // Flatten: append this mesh's reordered triangles to dstTris and fix
-    // the leaves to reference the contiguous chunks.
-    const int dstBase = (int)dstTris.size();
-    dstTris.resize(dstBase + triCount);
+    // Flatten: append this mesh's reordered triangles to out.hostTriangles
+    // and fix the leaves to reference the contiguous chunks.
+    const int dstBase = (int)out.hostTriangles.size();
+    out.hostTriangles.resize(dstBase + triCount);
     int cursor = 0;
-    flattenRecursive(out, root, order, srcTris, dstTris, triOffset, dstBase, cursor);
+    flattenRecursive(ctx, root, dstBase, cursor);
 
     return root;
 }
@@ -239,26 +269,19 @@ int buildMeshBvh(std::vector<BvhNode>& out,//hostNodes
 void buildSceneBvh(BvhBuffers& out,
                    const std::vector<Triangle>& hostTris,
                    const std::vector<Geom>& geoms,
-                   int maxDepth, int leafSize)
+                   const BvhBuildConfig& cfg)
 {
-    maxDepth = std::min(63, std::max(1, maxDepth));
-    leafSize = std::min(64, std::max(1, leafSize));
 
     out.hostNodes.clear();
     out.hostBvhMeta.assign(geoms.size(), BvhMeta{});   // default root = -1 (empty)
     out.hostTriangles.clear();
-    out.hostTriangles.reserve(hostTris.size());// preallocate for the reordered output
+    out.hostTriangles.reserve(hostTris.size());   // preallocate for the reordered output
 
     for (size_t i = 0; i < geoms.size(); i++)
     {
-        const int triOffset = geoms[i].meshTriangleOffset;
-        const int triCount  = geoms[i].meshTriangleCount;
-        if (triCount <= 0) continue;   // meta stays rootNodeIndex = -1
-
-        const int root = buildMeshBvh(out.hostNodes, out.hostTriangles, hostTris,
-                                      triOffset, triCount, maxDepth, leafSize);
-
-        out.hostBvhMeta[i].rootNodeIndex = root;
+        if (geoms[i].meshTriangleCount <= 0) continue;   // meta stays root = -1
+        out.hostBvhMeta[i].rootNodeIndex =
+            buildMeshBvh(out, hostTris, geoms[i], cfg);
     }
 }
 
@@ -269,7 +292,6 @@ void uploadToDevice(BvhBuffers& b)
         cudaMalloc(&b.deviceNodes, b.hostNodes.size() * sizeof(BvhNode));
         cudaMemcpy(b.deviceNodes, b.hostNodes.data(),
                    b.hostNodes.size() * sizeof(BvhNode), cudaMemcpyHostToDevice);
-        b.numNodes = (int)b.hostNodes.size();
         checkCUDAError("bvh upload nodes");
     }
     if (!b.hostBvhMeta.empty())
@@ -277,7 +299,6 @@ void uploadToDevice(BvhBuffers& b)
         cudaMalloc(&b.deviceBvhMeta, b.hostBvhMeta.size() * sizeof(BvhMeta));
         cudaMemcpy(b.deviceBvhMeta, b.hostBvhMeta.data(),
                    b.hostBvhMeta.size() * sizeof(BvhMeta), cudaMemcpyHostToDevice);
-        b.numGeoms = (int)b.hostBvhMeta.size();
         checkCUDAError("bvh upload meta");
     }
 }
@@ -286,8 +307,6 @@ void freeDevice(BvhBuffers& b)
 {
     if (b.deviceNodes)    { cudaFree(b.deviceNodes);    b.deviceNodes = nullptr; }
     if (b.deviceBvhMeta)  { cudaFree(b.deviceBvhMeta);  b.deviceBvhMeta = nullptr; }
-    b.numNodes = 0;
-    b.numGeoms = 0;
 }
 
 } // namespace bvh

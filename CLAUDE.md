@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Runtime Configuration (three-layer priority)
 
-`CLI flags > config.local.json > code defaults`, handled by `src/config.cpp`/`config.h` through the `appConfig()` singleton. Defaults (in `AppConfig`): `compactMethod = SharedMem`, `sortByMaterial = false`, `rngMode = LCG`, `fresnelMode = Schlick`, `autoSave = true`.
+`CLI flags > config.local.json > code defaults`, handled by `src/config/config.cpp`/`config.h` through the `appConfig()` singleton. Defaults (in `AppConfig`): `compactMethod = SharedMem`, `sortByMaterial = false`, `rngMode = LCG`, `fresnelMode = Schlick`, `bvh.maxDepth = 24`, `bvh.leafSize = 4`, `autoSave = true`.
 
 | Flag | Meaning |
 |------|---------|
@@ -20,6 +20,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `--sort=N` | Material sorting 0/1 (default off) |
 | `--fresnel=N` | 0=Schlick (default), 1=Accurate Fresnel |
 | `--rng=N` | 0=LCG (default), 1=scrambled Halton |
+| `--bvh-depth=N` | BVH maximum tree depth (default 24, clamp [1, 63]) |
+| `--bvh-leaf=N` | BVH leaf size in triangles (default 4, clamp [1, 64]) |
 | `--benchmark` | Enable profiler CSV output to `profiler_output/<scene>_<timestamp>/` |
 | `--warmup=N` | Profiler warmup iterations (default 3) |
 | `--save` / `--save-at=N1,N2,...` | Save final / checkpoint images |
@@ -38,7 +40,7 @@ CUDA-based Monte Carlo path tracer (CIS 565 at UPenn). **All geometry is triangu
 src/
 ├── main.cpp                  # GLFW/GL window, camera controls, ImGui, render loop → pathtrace()
 ├── pathtrace.cu / .h         # GPU pipeline + runtime getters/setters; includes kernels/ + pipeline/
-├── config.cpp / config.h     # AppConfig singleton, JSON + CLI merge, startup help/summary
+├── config/config.cpp / .h    # AppConfig singleton, JSON + CLI merge, startup help/summary
 ├── scene_loader.cpp / .h     # JSON scene + OBJ/glTF mesh loading (tinyobjloader + cgltf, vertex normals)
 ├── scene.cpp / scene.h       # Scene container + computeSceneStats
 ├── sceneStructs.h            # All shared data structures (Ray, Geom, Material, PathSegment, …)
@@ -48,9 +50,13 @@ src/
 ├── kernel_config.h           # LAUNCH_KERNEL_AUTO macros, KernelConfig / OccupancyConfig / DeviceInfo
 ├── image.h / .cpp            # PNG/HDR output (stb_image)
 ├── glslUtility.* / window_setup.h   # GLFW/GL/CUDA-interop init, PBO registration & per-frame mapping
+├── bvh/                      # per-mesh BVH: AABB + node/meta structs + host SAH build + flatten
+│   ├── aabb.h                #   AABB + sign-based slab ray test (__host__ __device__)
+│   ├── bvh.h                 #   BvhNode/BvhMeta/BvhBuffers + shared traverseBvhClosest
+│   └── bvh.cu                #   buildSceneBvh (SAH) → flatten → uploadToDevice/freeDevice
 ├── kernels/                  # __global__ kernels (pure GPU, data passed as parameters):
 │   ├── ray_generation.cuh    #   primary rays + AA sub-pixel jitter + thin-lens DoF
-│   ├── intersection.cuh      #   naive O(N) ray–mesh linear scan (TODO: BVH)
+│   ├── bvh_traversal.cuh     #   per-mesh BVH closest-hit traversal (only intersection path)
 │   ├── shading.cuh           #   BSDF eval + scatterRay + Russian roulette
 │   └── accumulation.cuh      #   gatherTerminatedPaths, sendImageToPBO
 ├── pipeline/                 # host-side orchestration (references g_opts / g_dev globals):
@@ -73,7 +79,7 @@ src/
 
 1. **`generateRayFromCamera`** — primary rays per pixel (AA jitter; thin-lens DoF if `lensRadius > 0`). All `pixelcount` paths start with `remainingBounces = traceDepth`.
 2. **Bounce loop** (until every path terminates or `depth ≥ traceDepth`):
-   - **`computeIntersections`** — naive linear scan: each active path is transformed into every mesh's object space (`inverseTransform`) and tested against that mesh's triangle slice (double-sided Möller–Trumbore with interpolated vertex normals). Records closest `t`, `materialId`, world-space `surfaceNormal`.
+   - **Intersection** — `bvhTraverse` (per-mesh BVH closest-hit traversal, the only path). Each active path is transformed into every mesh's object space (`inverseTransform`) and tested against that mesh's BVH via `traverseBvhClosest` (double-sided Möller–Trumbore `triangleIntersectionTest` with interpolated vertex normals). Records closest `t`, `materialId`, world-space `surfaceNormal`.
    - **`sortPathsByMaterial`** *(optional)* — thrust sort_by_key on `materialId`, reorders paths + intersections so same-material paths are contiguous (less warp divergence).
    - **`shadeMaterial`** — emissive hit: multiply by emittance, terminate. Miss: terminate black. Surface hit: `scatterRay()` (diffuse/glossy/mirror/refractive) then Russian roulette.
    - **`compactActivePaths`** *(optional, 4 methods)* — first `gatherTerminatedPaths` banks dead-path colors into the HDR accumulation image, then stream-compacts survivors to the front of a ping-pong buffer.
@@ -125,7 +131,7 @@ Bloom runs in linear HDR space (threshold → separable Gaussian blur with share
 
 - `checkCUDAError` (`utilities.h`) forces a `cudaDeviceSynchronize()` after every kernel (~25 call sites; more per frame inside the compaction sweep loops). Fine for correctness; consider disabling `ERRORCHECK` for pure benchmark runs.
 - `LAUNCH_KERNEL_AUTO` calls `cudaGetDeviceProperties` on every launch (`kernel_config.h`).
-- `computeIntersections` is O(N_geoms × N_paths) — BVH is the open TODO.
+- Intersection is always per-mesh BVH closest-hit traversal (`bvhTraverse` + `traverseBvhClosest`). The win over a linear scan appears on large meshes; the exhaustive SAH build is a few ms at a few thousand triangles.
 - **Fast math** — `CMakeLists.txt` compiles CUDA with `-use_fast_math` (rcp.approx division, fast sqrt/trig/pow). Errors are ~2 ulp, invisible in a path tracer, and it makes the hot `1.0f / a` in `intersection/triangle.h` cheap. Consequence: **results differ from a precise-math build in the last few bits** — use the same flags when diffing renders or benchmarking.
 - **GPU division avoidance** — reciprocals and ratios that are constant per frame / per material are precomputed on the host: per-pixel `÷iter` became `*invIter` (`postprocess.cuh` → `tonemap.cuh`/`bloom.cuh`), Fresnel takes precomputed `eta` = n1/n2 (`interactions.cu`, from `invIndexOfRefraction`/`indexOfRefraction`), Phong takes precomputed `invExponentPlusOne` (`scene_loader.cpp` → `Material`), and `sendImageToPBO` no longer divides (display buffer is pre-averaged).
 
@@ -146,7 +152,6 @@ The camera is a free-fly camera: `cam.position` is independent state, translated
 
 ## Open TODO Items
 
-- **BVH / hierarchical acceleration** — replace the naive linear scan in `computeIntersections` (`src/kernels/intersection.cuh`).
 - **Motion blur** — jitter rays "in time" (`src/kernels/ray_generation.cuh`).
 - **Wire `tests/` into the root CMake build.**
 
