@@ -85,8 +85,6 @@ void  setVignetteIntensity(float v)          { g_opts.vignette.intensity = v; }
 float getVignetteIntensity()                 { return g_opts.vignette.intensity; }
 void  setVignetteExponent(float v)           { g_opts.vignette.exponent = v; }
 float getVignetteExponent()                  { return g_opts.vignette.exponent; }
-void  setBvhEnabled(bool v)                  { g_opts.bvh.enabled = v; }
-bool  getBvhEnabled()                        { return g_opts.bvh.enabled; }
 int   getBvhMaxDepth()                       { return g_opts.bvh.maxDepth; }
 int   getBvhLeafSize()                       { return g_opts.bvh.leafSize; }
 
@@ -102,7 +100,6 @@ int   getBvhLeafSize()                       { return g_opts.bvh.leafSize; }
 // ====================================================================
 
 #include "kernels/ray_generation.cuh"
-#include "kernels/intersection.cuh"
 #include "kernels/shading.cuh"
 #include "kernels/accumulation.cuh"
 
@@ -252,7 +249,7 @@ static void updateGuiAfterFrame(Profiler& prof) {
 // Called once per frame / iteration.  Pipeline:
 //   1. generateRayFromCamera  — primary rays → PathSegment buffer
 //   2. Bounce loop (up to traceDepth):
-//        computeIntersections  — ray ↔ scene intersection
+//        bvhTraverse          — BVH ray ↔ scene intersection
 //        [sortPathsByMaterial] — group by materialId          (optional)
 //        shadeMaterial         — BSDF eval, scatter / emit
 //        [compactActivePaths]  — remove dead paths            (optional)
@@ -289,13 +286,12 @@ void pathtrace(uchar4* pbo, int iter)
     {
         prof.recordBounce(depth, num_paths);
 
-        dim3 numBlocks((num_paths + blockSize1d - 1) / blockSize1d);
-
+        // Per-mesh BVH closest-hit traversal
         prof.gpuStart(ProfilerOp::ComputeIntersections);
-        LAUNCH_KERNEL_AUTO(computeIntersections, num_paths,
-            depth, num_paths, g_dev.paths,
+        LAUNCH_KERNEL_AUTO(bvhTraverse, num_paths,
+            num_paths, g_dev.paths,
             g_dev.geoms, hst_scene->geoms.size(), g_dev.intersections,
-            g_dev.deviceTriangles);
+            g_dev.deviceTriangles, g_dev.bvh.deviceNodes, g_dev.bvh.deviceBvhMeta);
         prof.gpuStop(ProfilerOp::ComputeIntersections);
         checkCUDAError("trace one bounce");
         depth++;

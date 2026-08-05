@@ -99,7 +99,6 @@ set(sources
     src/profiler/profiler.cu
     src/interactions/interactions.cu
     src/kernels/ray_generation.cu
-    src/kernels/intersection.cu
     src/kernels/bvh_traversal.cu
     src/kernels/shading.cu
     src/kernels/accumulation.cu

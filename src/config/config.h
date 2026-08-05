@@ -85,7 +85,6 @@ struct VignetteConfig {
 };
 
 struct BvhConfig {
-    bool enabled   = false;   // default OFF -> O(N) baseline
     int  maxDepth  = 24;      // clamp [1, 63]
     int  leafSize  = 4;       // clamp [1, 64]
 
@@ -95,7 +94,7 @@ struct BvhConfig {
     static constexpr int kMaxDepthMin = 1;
     static constexpr int kMaxDepthMax = kMaxBvhStackDepth - 1;  // 63
     static constexpr int kLeafSizeMin = 1;
-    static constexpr int kLeafSizeMax = 64;
+    static constexpr int kLeafSizeMax = kMaxBvhLeafSize;        // 64
 
     void clamp() {
         maxDepth = std::min(kMaxDepthMax, std::max(kMaxDepthMin, maxDepth));

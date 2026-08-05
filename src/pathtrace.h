@@ -33,8 +33,8 @@ struct DeviceBuffers {
 
     // Per-mesh BVH: host build output + device nodes/meta.  hostTriangles
     // holds the REORDERED flat triangle array (leaf-contiguous chunks);
-    // it is uploaded as deviceTriangles, so both the O(N) kernel and BVH
-    // traversal share one buffer (the O(N) path is order-independent).
+    // it is uploaded as deviceTriangles, the buffer the BVH traversal
+    // kernel reads.
     BvhBuffers              bvh;
 };
 
@@ -80,12 +80,9 @@ float getVignetteExponent();
 void setRngMode(RngMode mode);
 RngMode getRngMode();
 
-// BVH runtime configuration
-// enabled toggles the live kernel switch (O(N) vs BVH traversal) per frame.
-// maxDepth / leafSize are BUILD-TIME knobs — changing them requires a
-// re-init (the tree is rebuilt inside pathtraceInit).  They are read-only
-// at runtime; the ImGui panel shows them as text.
-void setBvhEnabled(bool enable);
-bool getBvhEnabled();
+// BVH configuration
+// maxDepth / leafSize are BUILD-TIME knobs — changing them requires a re-init 
+//(the tree is rebuilt inside pathtraceInit). 
+// They are read-only at runtime; the ImGui panel shows them as text.
 int  getBvhMaxDepth();
 int  getBvhLeafSize();

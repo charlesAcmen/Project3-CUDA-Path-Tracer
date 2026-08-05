@@ -223,13 +223,6 @@ void RenderImGui()
 
         ImGui::Separator();
         ImGui::Text("BVH Traversal:");
-        bool bvhEnabled = getBvhEnabled();
-        if (ImGui::Checkbox("Enable BVH traversal", &bvhEnabled)) {
-            setBvhEnabled(bvhEnabled);
-            camchanged = true;   // reset accumulation for an A/B comparison
-        }
-        // max depth / leaf size are build-time knobs (tree is built once in
-        // pathtraceInit) — shown read-only to make that explicit.
         ImGui::Text("  Max depth: %d (build-time)", getBvhMaxDepth());
         ImGui::Text("  Leaf size: %d (build-time)", getBvhLeafSize());
 
