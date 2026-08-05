@@ -121,4 +121,4 @@ void           parseCliFlags(AppConfig& cfg, int argc, char** argv);
 // ---- Display helpers ----------------------------------------------------
 
 void printStartupHelp(const char* exeName);
-void printStartupSummary(const ProfilerConfig& profCfg, RngMode rngMode);
+void printStartupSummary(const AppConfig& cfg);

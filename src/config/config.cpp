@@ -287,7 +287,7 @@ void printStartupHelp(const char* exeName)
 // Display: startup summary
 // ====================================================================
 
-void printStartupSummary(const ProfilerConfig& profCfg, RngMode rngMode)
+void printStartupSummary(const AppConfig& cfg)
 {
     Log::raw("\n");
     Log::raw("======================================================================\n");

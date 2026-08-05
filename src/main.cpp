@@ -689,7 +689,7 @@ int main(int argc, char** argv)
     }
 
     // Print concise runtime summary before rendering
-    printStartupSummary(cfg.profCfg, cfg.rngMode);
+    printStartupSummary(cfg);
 
     // Scene complexity summary
     {
