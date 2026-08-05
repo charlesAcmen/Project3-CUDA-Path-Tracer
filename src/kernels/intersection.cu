@@ -5,7 +5,6 @@
 // ====================================================================
 
 __global__ void computeIntersections(
-    int depth,
     int num_paths,
     PathSegment* pathSegments,
     Geom* geoms,
