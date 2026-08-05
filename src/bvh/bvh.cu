@@ -50,8 +50,6 @@ struct BvhBuildContext
     std::vector<int>*             order;     // permutable triangle indices (per-mesh)
     std::vector<Triangle>*        dstTris;   // reordered output (hostTriangles)
     int triOffset;   // this mesh's triangle base index
-    // Depth / leaf-size limits come from the compile-time constants
-    // kBvhMaxDepth / kBvhLeafSize (constants.h) — no per-call settings.
 };
 
 /**
@@ -72,8 +70,6 @@ int buildRecursive(BvhBuildContext& ctx,
                    int begin, int end, int depth)
 {
     // Unpack the context into local names so the body reads as before.
-    // Depth / leaf-size limits are the compile-time constants kBvhMaxDepth
-    // / kBvhLeafSize (constants.h).
     std::vector<BvhNode>&        nodes     = *ctx.nodes;
     const std::vector<Triangle>& tris      = *ctx.tris;
     std::vector<int>&            order     = *ctx.order;
@@ -228,17 +224,11 @@ int buildMeshBvh(BvhBuffers& out,
                  const std::vector<Triangle>& hostTris,
                  const Geom& geom)
 {
-    // Depth / leaf-size limits are the compile-time constants kBvhMaxDepth
-    // / kBvhLeafSize (constants.h).  kBvhMaxDepth is bounded well below
-    // kMaxBvhStackDepth, so the traversal stack can never overflow.
 
     const int triOffset = geom.meshTriangleOffset;
     const int triCount  = geom.meshTriangleCount;
     if (triCount <= 0) return -1;   // empty mesh → no root
 
-    // Bundle the shared buffers into a context so the recursive build/flatten
-    // no longer thread them as parameters.  Depth/leaf limits are the
-    // compile-time constants (bvh.h).
     BvhBuildContext ctx;
     ctx.nodes     = &out.hostNodes;
     ctx.tris      = &hostTris;
