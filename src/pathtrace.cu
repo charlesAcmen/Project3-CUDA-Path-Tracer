@@ -128,17 +128,24 @@ void pathtraceInit(Scene* scene)
 
     checkCUDAError("copy geoms and materials");
 
-    // ---- Mesh triangles ----
-    // Copy the flat triangle array to device so the intersection kernel
-    // can test rays against mesh geometry.
+    // ---- Mesh triangles + BVH ----
+    // Always build the per-mesh BVHs (cheap: scenes are a few thousand
+    // triangles) and upload the REORDERED flat triangle array as
+    // deviceTriangles.  The reorder is within each mesh only; 
     {
-        int n = (int)scene->hostTriangles.size();
+        bvh::buildSceneBvh(g_dev.bvh, scene->hostTriangles, scene->geoms,
+                           BvhBuildConfig{ g_opts.bvh.maxDepth,
+                                           g_opts.bvh.leafSize });
+
+        const int n = (int)g_dev.bvh.hostTriangles.size();
         if (n > 0)
         {
             cudaMalloc(&g_dev.deviceTriangles, n * sizeof(Triangle));
-            cudaMemcpy(g_dev.deviceTriangles, scene->hostTriangles.data(),
+            cudaMemcpy(g_dev.deviceTriangles, g_dev.bvh.hostTriangles.data(),
                        n * sizeof(Triangle), cudaMemcpyHostToDevice);
         }
+
+        bvh::uploadToDevice(g_dev.bvh);   // node + meta buffers (null if no meshes)
     }
 
     cudaMalloc(&g_dev.intersections, pixelcount * sizeof(ShadeableIntersection));
@@ -194,6 +201,7 @@ void pathtraceFree()
     cudaFree(g_dev.bloomWeights);  // bloom Gaussian weight buffer
     cudaFree(g_dev.deviceTriangles);
     g_dev.deviceTriangles = nullptr;
+    bvh::freeDevice(g_dev.bvh);   // BVH node + meta device buffers
     StreamCompaction::Efficient::freeCompactionWorkspace();
 
     checkCUDAError("pathtraceFree");
