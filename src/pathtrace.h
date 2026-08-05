@@ -1,6 +1,7 @@
 #pragma once
 
-#include "config/config.h"       // BloomConfig, ChromaticAberrationConfig, VignetteConfig
+#include "config/config.h"       // BloomConfig, ChromaticAberrationConfig, VignetteConfig, BvhConfig
+#include "bvh/bvh.h"             // BvhBuffers (per-mesh BVH trees + metadata)
 #include "scene/scene.h"
 
 // ====================================================================
@@ -29,6 +30,12 @@ struct DeviceBuffers {
 
     // Mesh geometry (OBJ)
     Triangle*               deviceTriangles     = nullptr;
+
+    // Per-mesh BVH: host build output + device nodes/meta.  hostTriangles
+    // holds the REORDERED flat triangle array (leaf-contiguous chunks);
+    // it is uploaded as deviceTriangles, so both the O(N) kernel and BVH
+    // traversal share one buffer (the O(N) path is order-independent).
+    BvhBuffers              bvh;
 };
 
 void pathtraceInit(Scene* scene);
