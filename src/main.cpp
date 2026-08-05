@@ -512,9 +512,8 @@ void runCuda()
                                              NULL, cuda_pbo_resource);
 
         // execute the kernel
-        int frame = 0;
         g_profiler().beginFrame();
-        pathtrace(pbo_dptr, frame, iteration);
+        pathtrace(pbo_dptr, iteration);
         g_profiler().endFrame();
 
         // Ensure CUDA work completes before GL touches the PBO.
