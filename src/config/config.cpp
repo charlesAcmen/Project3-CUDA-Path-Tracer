@@ -117,6 +117,7 @@ void mergeConfigJson(AppConfig& cfg, const json& data)
     cfg.bloom.clamp();
     cfg.chromaticAberration.clamp();
     cfg.vignette.clamp();
+    cfg.bvh.clamp();
 }
 
 // ====================================================================

@@ -15,6 +15,7 @@
 #include "profiler/profiler.h"    // ProfilerConfig
 #include "sceneStructs.h"         // CompactMethod, RngMode, FresnelMode
 #include "constants.h"            // MAX_BLOOM_RADIUS (BloomConfig::kRadiusMax)
+#include "bvh/bvh.h"              // kMaxBvhStackDepth (BvhConfig depth clamp)
 
 #include <algorithm>              // std::min / std::max (config clamping)
 #include <string>
@@ -83,6 +84,25 @@ struct VignetteConfig {
     }
 };
 
+struct BvhConfig {
+    bool enabled   = false;   // default OFF -> O(N) baseline
+    int  maxDepth  = 24;      // clamp [1, 63]
+    int  leafSize  = 4;       // clamp [1, 64]
+
+    // ---- Legal ranges (single source of truth; see BloomConfig) ----
+    // maxDepth is capped at kMaxBvhStackDepth - 1 so a built tree can never
+    // overflow the traversal kernel's explicit stack (depth clamp in bvh.cu).
+    static constexpr int kMaxDepthMin = 1;
+    static constexpr int kMaxDepthMax = kMaxBvhStackDepth - 1;  // 63
+    static constexpr int kLeafSizeMin = 1;
+    static constexpr int kLeafSizeMax = 64;
+
+    void clamp() {
+        maxDepth = std::min(kMaxDepthMax, std::max(kMaxDepthMin, maxDepth));
+        leafSize = std::min(kLeafSizeMax, std::max(kLeafSizeMin, leafSize));
+    }
+};
+
 // ---- Unified startup configuration --------------------------------------
 
 struct AppConfig {
@@ -98,6 +118,9 @@ struct AppConfig {
     BloomConfig              bloom;
     ChromaticAberrationConfig chromaticAberration;
     VignetteConfig           vignette;
+
+    // BVH acceleration (per-mesh trees, GPU iterative traversal)
+    BvhConfig                bvh;
 
     // Other
     bool             autoSave         = true;
