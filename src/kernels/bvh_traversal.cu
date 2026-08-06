@@ -63,8 +63,8 @@ __global__ void bvhTraverse(
     }
     else
     {
-        intersections[path_index].t           = t_min;
-        intersections[path_index].materialId  = geoms[hit_geom_index].materialid;
-        intersections[path_index].surfaceNormal = hit_normal;
+        intersections[path_index].t            = hit.t;
+        intersections[path_index].surfaceNormal = hit.normal;   // world space (baked)
+        intersections[path_index].materialId    = deviceTriangles[hit.triIndex].materialId;
     }
 }

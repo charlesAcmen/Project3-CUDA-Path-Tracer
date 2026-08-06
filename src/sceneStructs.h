@@ -17,6 +17,7 @@
 struct Triangle {
     glm::vec3 v0, v1, v2;  // three vertex positions
     glm::vec3 n0, n1, n2;  // vertex normals (smooth shading interpolation)
+    int materialId = -1;   // material index; set during the world-space bake
 };
 
 struct Ray

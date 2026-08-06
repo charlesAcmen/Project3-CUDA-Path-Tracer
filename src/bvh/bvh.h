@@ -3,20 +3,18 @@
 // ====================================================================
 // Bounding Volume Hierarchy — CPU build / GPU traverse
 //
-// Per-mesh BVH in object space.  Built on the host (exhaustive SAH in
-// bvh.cu，穷举表面积启发式算法分割建树), 
-// traversed iteratively on the GPU via an explicit stack.  
+// Single world-space BVH over ALL mesh triangles.  buildSceneBvh (bvh.cu)
+// bakes every mesh's triangles to world space (vertices via the geom
+// transform, normals via the inverse-transpose) and tags each with its
+// materialId, then builds ONE tree over the combined array (exhaustive SAH,
+// 穷举表面积启发式算法分割建树).  The traversal kernel runs one closest-hit
+// query per ray — no per-mesh loop, no ray transformation.
 //
 // Triangle layout: leaves reference a contiguous chunk [left, right) of
 // the triangle array.  buildSceneBvh's flatten pass（展平阶段）REORDERS triangles
-// into leaf-contiguous runs （同一个叶子节点所包含的三角形在内存中连续存放）(per mesh), so a leaf's chunk is a
-// sequential memory access — cache-friendly instead of
+// into leaf-contiguous runs （同一个叶子节点所包含的三角形在内存中连续存放）, so a leaf's
+// chunk is a sequential memory access — cache-friendly instead of
 // scattered leaf-index reads into the original scene-order array.
-//
-// The reorder is within each mesh only: per-mesh triangle counts and
-// the mesh concatenation order are unchanged, so Geom::meshTriangleOffset
-// / meshTriangleCount still slice the same triangle set.  The reordered
-// buffer is the single triangle array the BVH traversal kernel reads.
 // ====================================================================
 
 #include "aabb.h"
@@ -75,31 +73,27 @@ struct BvhHit
  * kernel and the host test execute, so correctness is validated once.
  *
  * The AABB test clips to [RAY_EPSILON, maxT]: the near bound skips
- * self-hits, the far bound is the caller's current best distance, so
- * subtrees that cannot beat it are pruned (far-plane pruning).  Leaf
- * triangles are tested with the SAME triangleIntersectionTest as the
- * O(N) path, so for the same triangle the reported t / normal are
- * bit-identical between the two paths.
+ * self-hits, the far bound is the caller's current best distance.
  *
- * @param objRay        Ray in the mesh's object space
- * @param nodes         Node array (device or host)
- * @param rootNodeIndex Root of the mesh's subtree (-1 → no hit)
+ * The tree is a single scene-wide structure, so the root is always node 0;
+ * `nodes == nullptr` (empty scene → no tree) is a clean miss.
+ *
+ * @param objRay        Ray in world space (triangles are world-space baked)
+ * @param nodes         Node array (device or host); nullptr → miss
  * @param tris          Triangle array (leaf chunks reference into it)
  * @param maxT          Far plane: only hits with t < maxT are reported.
- *                      Pass the caller's current best t to prune subtrees.
  * @return              BvhHit — hit = true only if a triangle with t < maxT
  */
 __host__ __device__ inline BvhHit traverseBvhClosest(
     const Ray& objRay,
     const BvhNode* nodes,
-    int rootNodeIndex,
     const Triangle* tris,
     float maxT)
 {
     BvhHit result;
     result.t = maxT;   // tighten this as closer hits are found
 
-    if (rootNodeIndex < 0) return result;   // no subtree → miss
+    if (nodes == nullptr) return result;   // empty scene → no tree → miss
 
     const glm::vec3 invDir(
         1.0f / objRay.direction.x,
