@@ -56,7 +56,7 @@ struct AABB
 };
 
 /**
- * Ray/AABB slab test (sign-based).
+ * Ray/AABB slab test (sign-based) that also reports the entry distance.
  *
  * The near/far planes are swapped when a direction component is negative
  * (sign-based test).  For a zero direction component the slab becomes
@@ -66,16 +66,19 @@ struct AABB
  * operand, so it degrades gracefully to "no restriction" instead of
  * making the whole test false.
  *
- * @param o       Ray origin
- * @param invDir  1/direction — precomputed once per ray by the caller
- * @param box     The box to test
- * @param tNear   Near clip (RAY_EPSILON): skips self-hits
- * @param tFar    Far clip (current best closestT): far-plane pruning
- * @return        true iff the ray interval overlaps [tNear, tFar]
+ * @param o        Ray origin
+ * @param invDir   1/direction — precomputed once per ray by the caller
+ * @param box      The box to test
+ * @param tNear    Near clip (RAY_EPSILON): skips self-hits
+ * @param tFar     Far clip (current best closestT): far-plane pruning
+ * @param tEntry   [out] Ray distance where the ray enters the box (after
+ *                 the tNear clip) — used by ordered traversal to pick which
+ *                 child subtree to descend into first.
+ * @return         true iff the ray interval overlaps [tNear, tFar]
  */
-__host__ __device__ inline bool intersectRayAABB(
+__host__ __device__ inline bool intersectRayAABBEntry(
     const glm::vec3& o, const glm::vec3& invDir,
-    const AABB& box, float tNear, float tFar)
+    const AABB& box, float tNear, float tFar, float& tEntry)
 {
     // x slab
     float tmin = (box.min.x - o.x) * invDir.x;
@@ -100,5 +103,6 @@ __host__ __device__ inline bool intersectRayAABB(
     tNear = fmaxf(tNear, tmin);
     tFar  = fminf(tFar, tmax);
 
+    tEntry = tNear;
     return tNear <= tFar;
 }
