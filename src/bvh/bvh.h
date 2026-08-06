@@ -69,8 +69,14 @@ struct BvhHit
 };
 
 /**
- * Iterative closest-hit BVH traversal — THE algorithm both the GPU
- * kernel and the host test execute, so correctness is validated once.
+ * Iterative closest-hit BVH traversal with NEAR-CHILD-FIRST ordering —
+ * THE algorithm both the GPU kernel and the host test execute.
+ *
+ * Ordered traversal: at an internal node, the AABB entry distance of both
+ * children is computed; the FARTHER child is pushed onto the stack and the
+ * NEARER child is descended into immediately.  Finding close hits early
+ * tightens result.t sooner, so subtrees that cannot beat it are pruned
+ * earlier (far-plane pruning) — the classic BVH traversal optimization.
  *
  * The AABB test clips to [RAY_EPSILON, maxT]: the near bound skips
  * self-hits, the far bound is the caller's current best distance.
@@ -102,17 +108,22 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
 
     int stack[kMaxBvhStackDepth];
     int sp = 0;                             // stack pointer
-    stack[sp++] = rootNodeIndex;
+    int nodeIndex = 0;                      // root is always node 0
 
-    while (sp > 0)
+    // "current" node is examined before pushing; a LIFO pop resumes the
+    // loop after a subtree finishes.
+    while (true)
     {
-        const int nodeIndex = stack[--sp];
         const BvhNode& node = nodes[nodeIndex];
 
         // Near side: RAY_EPSILON, far side: current best (result.t).  Skip
         // the node and its subtree if the ray misses the AABB in that window.
         if (!intersectRayAABB(objRay.origin, invDir, node.bounds, RAY_EPSILON, result.t))
+        {
+            if (sp == 0) break;
+            nodeIndex = stack[--sp];        // pop
             continue;
+        }
 
         if (node.isLeaf)
         {
@@ -128,23 +139,52 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
                 {
                     if (t < result.t)
                     {
-                        result.t      = t;
-                        result.normal = triNormal;
-                        result.hit    = true;
+                        result.t       = t;
+                        result.normal  = triNormal;
+                        result.hit     = true;
+                        result.triIndex = triBase + j;
                     }
                 }
             }
+
+            if (sp == 0) break;
+            nodeIndex = stack[--sp];        // pop
+            continue;
+        }
+
+        // Internal node: order children by ray-entry distance.  Descend into
+        // the nearer child immediately; push the farther one for later.
+        float entryL, entryR;
+        const bool hitL = intersectRayAABBEntry(objRay.origin, invDir,
+            nodes[node.childL()].bounds, RAY_EPSILON, result.t, entryL);
+        const bool hitR = intersectRayAABBEntry(objRay.origin, invDir,
+            nodes[node.childR()].bounds, RAY_EPSILON, result.t, entryR);
+
+        if (hitL && hitR)
+        {
+            if (entryL < entryR)
+            {
+                if (sp < kMaxBvhStackDepth - 1) stack[sp++] = node.childR();
+                nodeIndex = node.childL();
+            }
+            else
+            {
+                if (sp < kMaxBvhStackDepth - 1) stack[sp++] = node.childL();
+                nodeIndex = node.childR();
+            }
+        }
+        else if (hitL)
+        {
+            nodeIndex = node.childL();
+        }
+        else if (hitR)
+        {
+            nodeIndex = node.childR();
         }
         else
         {
-            // Push both children (top of stack = right, visited first).
-            // The build-time depth clamp keeps the stack within capacity;
-            // the guard is defense-in-depth against a malformed tree.
-            if (sp < kMaxBvhStackDepth - 1)
-            {
-                stack[sp++] = node.childL();
-                stack[sp++] = node.childR();
-            }
+            if (sp == 0) break;
+            nodeIndex = stack[--sp];        // both children miss → pop
         }
     }
 
