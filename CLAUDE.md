@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Linux/WSL (Make):** `make` or `make Release` builds with CMake into `build/`.
 - **Run:** `build/bin/cis565_path_tracer <scenefile.json>` — e.g. `build/bin/cis565_path_tracer scenes/cornell.json`. In VS, set `Debugging > Command Arguments` to `../scenes/cornell.json`.
 - **Clean:** `make clean`
-- **No test suite in the main build** — validation is visual inspection of the rendered output. Standalone tests live under `tests/` (`config_test`, `rng_test`, `refraction_test`) but are NOT wired into the root CMakeLists. Each has its own CMake project; build with `cmake -G "Visual Studio 17 2022" -A x64 -B <test>/build <test>` then `cmake --build <test>/build --config Release`.
+- **No test suite in the main build** — validation is visual inspection of the rendered output. Standalone tests live under `tests/` (`bvh_test`, `config_test`, `rng_test`, `refraction_test`) but are NOT wired into the root CMakeLists. Each has its own CMake project; build with `cmake -G "Visual Studio 17 2022" -A x64 -B <test>/build <test>` then `cmake --build <test>/build --config Release`. `bvh_test` compiles the production `src/bvh/bvh.cu` directly (no duplicate copies) and validates the world-space bake, single-tree structure, near-first `traverseBvhClosest` vs brute force, and `intersectRayAABBEntry`.
 
 ## Runtime Configuration (three-layer priority)
 
@@ -48,13 +48,13 @@ src/
 ├── kernel_config.h           # LAUNCH_KERNEL_AUTO macros, KernelConfig / OccupancyConfig / DeviceInfo
 ├── image.h / .cpp            # PNG/HDR output (stb_image)
 ├── glslUtility.* / window_setup.h   # GLFW/GL/CUDA-interop init, PBO registration & per-frame mapping
-├── bvh/                      # per-mesh BVH: AABB + node/meta structs + host SAH build + flatten
-│   ├── aabb.h                #   AABB + sign-based slab ray test (__host__ __device__)
-│   ├── bvh.h                 #   BvhNode/BvhMeta/BvhBuffers + shared traverseBvhClosest
-│   └── bvh.cu                #   buildSceneBvh (SAH) → flatten → uploadToDevice/freeDevice
+├── bvh/                      # single world-space BVH: AABB + node structs + host SAH build + flatten
+│   ├── aabb.h                #   AABB + sign-based slab ray test + entry-distance variant (__host__ __device__)
+│   ├── bvh.h                 #   BvhNode/BvhBuffers/BvhHit + shared traverseBvhClosest (near-first)
+│   └── bvh.cu                #   buildSceneBvh (world-space bake + SAH) → flatten → uploadToDevice/freeDevice
 ├── kernels/                  # __global__ kernels (pure GPU, data passed as parameters):
 │   ├── ray_generation.cuh    #   primary rays + AA sub-pixel jitter + thin-lens DoF
-│   ├── bvh_traversal.cuh     #   per-mesh BVH closest-hit traversal (only intersection path)
+│   ├── bvh_traversal.cuh     #   single world-space BVH closest-hit traversal (only intersection path)
 │   ├── shading.cuh           #   BSDF eval + scatterRay + Russian roulette
 │   └── accumulation.cuh      #   gatherTerminatedPaths, sendImageToPBO
 ├── pipeline/                 # host-side orchestration (references g_opts / g_dev globals):
@@ -77,7 +77,7 @@ src/
 
 1. **`generateRayFromCamera`** — primary rays per pixel (AA jitter; thin-lens DoF if `lensRadius > 0`). All `pixelcount` paths start with `remainingBounces = traceDepth`.
 2. **Bounce loop** (until every path terminates or `depth ≥ traceDepth`):
-   - **Intersection** — `bvhTraverse` (per-mesh BVH closest-hit traversal, the only path). Each active path is transformed into every mesh's object space (`inverseTransform`) and tested against that mesh's BVH via `traverseBvhClosest` (double-sided Möller–Trumbore `triangleIntersectionTest` with interpolated vertex normals). Records closest `t`, `materialId`, world-space `surfaceNormal`.
+   - **Intersection** — `bvhTraverse` (single world-space BVH closest-hit traversal, the only path). Triangles were baked to world space at build time (and tagged with `materialId`), so each active path runs ONE `traverseBvhClosest` over the whole tree — no per-mesh loop, no ray transform. Near-child-first traversal orders children by AABB entry distance to tighten the far plane early. Double-sided Möller–Trumbore `triangleIntersectionTest` with interpolated vertex normals; records closest `t`, `materialId` (from the hit triangle), world-space `surfaceNormal`.
    - **`sortPathsByMaterial`** *(optional)* — thrust sort_by_key on `materialId`, reorders paths + intersections so same-material paths are contiguous (less warp divergence).
    - **`shadeMaterial`** — emissive hit: multiply by emittance, terminate. Miss: terminate black. Surface hit: `scatterRay()` (diffuse/glossy/mirror/refractive) then Russian roulette.
    - **`compactActivePaths`** *(optional, 4 methods)* — first `gatherTerminatedPaths` banks dead-path colors into the HDR accumulation image, then stream-compacts survivors to the front of a ping-pong buffer.
@@ -86,8 +86,8 @@ src/
 
 ### Key Data Structures (all in `sceneStructs.h`)
 
-- **`Triangle`** — 3 vertices + 3 vertex normals (object space, for smooth shading).
-- **`Geom`** — `materialid`, transform/inverse/invTranspose, plus `meshTriangleOffset`/`meshTriangleCount` (slice into the device-wide flat triangle array; `-1,0` for none).
+- **`Triangle`** — 3 vertices + 3 vertex normals + `materialId`. Object space in `Scene::hostTriangles`; baked to world space (vertices via `transform`, normals via `invTranspose`) by `buildSceneBvh`.
+- **`Geom`** — `materialid`, transform/inverse/invTranspose (used only by the world-space bake at build time; no longer read by any kernel), plus `meshTriangleOffset`/`meshTriangleCount` (slice into `Scene::hostTriangles`; `-1,0` for none).
 - **`Material`** — `color`, `specular { exponent, color }`, `type` (`MaterialType` enum: Diffuse/Reflective/Refractive/Emissive), `indexOfRefraction` + `invIndexOfRefraction`, `emittance`.
 - **`Camera`** — resolution, position/lookAt/view/up/right, fov, pixelLength, `lensRadius` (0 = pinhole), `focalDistance`.
 - **`PathSegment`** — ray + accumulated color + pixelIndex + remainingBounces.
@@ -105,7 +105,7 @@ src/
 
 ### Intersection Testing
 
-Mesh-only. The intersection kernel expects every `Geom` to be a triangulated mesh; non-mesh geoms silently miss. Triangle test in `intersection/triangle.h` is **double-sided** (accepts back faces — required for rays inside refractive objects) and reports the model's **true** shading normal (winding preserved). Opaque materials orient it toward the ray in `scatterRay`; refraction uses its sign (dot with the ray) to classify enter vs exit. `t` is the world-space distance along the normalized world ray (the parametric `t` maps linearly through the object transform).
+Mesh-only. Every `Geom` is a triangulated mesh; non-mesh geoms silently miss. Triangles are baked to world space at BVH build time, so the traversal kernel works directly in world space (no per-mesh ray transform). Triangle test in `intersection/triangle.h` is **double-sided** (accepts back faces — required for rays inside refractive objects) and reports the model's **true** shading normal (winding preserved — the bake's `invTranspose` normal transform preserves it). Opaque materials orient it toward the ray in `scatterRay`; refraction uses its sign (dot with the ray) to classify enter vs exit. `t` is the world-space distance along the normalized world ray.
 
 ### Scattering (`interactions/interactions.cu`)
 
@@ -129,7 +129,7 @@ Bloom runs in linear HDR space (threshold → separable Gaussian blur with share
 
 - `checkCUDAError` (`utilities.h`) forces a `cudaDeviceSynchronize()` after every kernel (~25 call sites; more per frame inside the compaction sweep loops). Fine for correctness; consider disabling `ERRORCHECK` for pure benchmark runs.
 - `LAUNCH_KERNEL_AUTO` calls `cudaGetDeviceProperties` on every launch (`kernel_config.h`).
-- Intersection is always per-mesh BVH closest-hit traversal (`bvhTraverse` + `traverseBvhClosest`). The win over a linear scan appears on large meshes; the exhaustive SAH build is a few ms at a few thousand triangles.
+- Intersection is always the single world-space BVH closest-hit traversal (`bvhTraverse` + `traverseBvhClosest`). One traversal per ray (no per-mesh loop or transform) with near-child-first ordering; the win over a linear scan appears on large meshes. The exhaustive SAH build + world-space bake is a few ms at a few thousand triangles.
 - **Fast math** — `CMakeLists.txt` compiles CUDA with `-use_fast_math` (rcp.approx division, fast sqrt/trig/pow). Errors are ~2 ulp, invisible in a path tracer, and it makes the hot `1.0f / a` in `intersection/triangle.h` cheap. Consequence: **results differ from a precise-math build in the last few bits** — use the same flags when diffing renders or benchmarking.
 - **GPU division avoidance** — reciprocals and ratios that are constant per frame / per material are precomputed on the host: per-pixel `÷iter` became `*invIter` (`postprocess.cuh` → `tonemap.cuh`/`bloom.cuh`), Fresnel takes precomputed `eta` = n1/n2 (`interactions.cu`, from `invIndexOfRefraction`/`indexOfRefraction`), Phong takes precomputed `invExponentPlusOne` (`scene_loader.cpp` → `Material`), and `sendImageToPBO` no longer divides (display buffer is pre-averaged).
 
