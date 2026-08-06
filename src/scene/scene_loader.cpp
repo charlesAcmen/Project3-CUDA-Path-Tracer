@@ -15,6 +15,9 @@
 #include "utils/utilities.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
+#include <glm/gtc/matrix_transform.hpp>   // glm::translate / glm::scale (node TRS)
+#include <glm/gtc/quaternion.hpp>         // glm::mat4_cast (node rotation)
+#include <glm/gtc/type_ptr.hpp>           // glm::make_mat4 (node matrix)
 #include "json.hpp"
 
 #include <algorithm>
@@ -175,17 +178,205 @@ static pair<int, int> loadOBJ(const string& objPath,
 // glTF 2.0 Mesh Loading
 // -----------------------------------------------------------------------
 
+// Local transform of a glTF node.  glTF 2.0 defines it either as an
+// explicit column-major 4x4 `matrix`, or as TRS: the composition T·R·S
+// (translation, then rotation, then scale) applied to the node's mesh and
+// children.  GLM reads column-major arrays directly, so `glm::mat4(m)` is
+// the exact glTF matrix.
+static glm::mat4 nodeLocalMatrix(const cgltf_node* n)
+{
+    if (n->has_matrix)
+        return glm::make_mat4(n->matrix);
+
+    glm::mat4 m(1.0f);
+    if (n->has_scale)
+        m = glm::scale(m, glm::vec3(n->scale[0], n->scale[1], n->scale[2]));
+    if (n->has_rotation)
+        // cgltf stores the quaternion as (x, y, z, w); GLM's constructor is (w, x, y, z).
+        m = glm::mat4_cast(glm::quat(n->rotation[3], n->rotation[0],
+                                     n->rotation[1], n->rotation[2])) * m;
+    if (n->has_translation)
+        m = glm::translate(m, glm::vec3(n->translation[0], n->translation[1],
+                                        n->translation[2]));
+    return m;   // m = T·R·S
+}
+
+// Emit one primitive's triangles, transformed into the node's accumulated
+// frame.  Vertices via `world`; normals via the inverse-transpose — left
+// UNnormalized, so the world-space bake + hit-time normalize compose with
+// it by linearity, exactly as with the per-geom transform.
+static void appendPrimitiveTriangles(const cgltf_primitive* prim,
+                                     const glm::mat4& world,
+                                     const glm::mat4& worldIT,
+                                     vector<Triangle>& triangles, int& count)
+{
+    if (prim->type != cgltf_primitive_type_triangles)
+    {
+        Log::warn("Scene", "glTF primitive is not triangles (mode %d); skipping",
+                  (int)prim->type);
+        return;
+    }
+
+    // ---- Locate POSITION / NORMAL accessors ----
+    const cgltf_accessor* posAcc = nullptr;
+    const cgltf_accessor* nrmAcc = nullptr;
+    for (cgltf_size ai = 0; ai < prim->attributes_count; ++ai)
+    {
+        const cgltf_attribute* attr = &prim->attributes[ai];
+        if (attr->type == cgltf_attribute_type_position)
+            posAcc = attr->data;
+        else if (attr->type == cgltf_attribute_type_normal)
+            nrmAcc = attr->data;
+    }
+    if (posAcc == nullptr)
+    {
+        Log::warn("Scene", "glTF primitive has no POSITION accessor; skipping");
+        return;
+    }
+
+    const cgltf_size vertCount = posAcc->count;
+
+    // Normals are indexed by the same vertex indices as positions, so a
+    // NORMAL accessor must cover every vertex — otherwise norm(i) below
+    // reads nrm out of bounds.  cgltf_validate() also requires all
+    // attributes to share a count, so this is defense-in-depth.
+    if (nrmAcc != nullptr && nrmAcc->count != vertCount)
+    {
+        Log::warn("Scene",
+                  "glTF primitive NORMAL count (%zu) != POSITION count "
+                  "(%zu); skipping",
+                  (size_t)nrmAcc->count, (size_t)vertCount);
+        return;
+    }
+
+    // Unpack all vertex positions.  read_float handles integer and
+    // normalized component types, so a VEC3 always yields 3 floats.
+    vector<float> pos(3 * (size_t)vertCount);
+    for (cgltf_size i = 0; i < vertCount; ++i)
+        cgltf_accessor_read_float(posAcc, i, &pos[3 * (size_t)i], 3);
+
+    // Normals (optional; makeTri falls back to the face normal).
+    vector<float> nrm;
+    if (nrmAcc != nullptr)
+    {
+        nrm.resize(3 * (size_t)vertCount);
+        for (cgltf_size i = 0; i < vertCount; ++i)
+            cgltf_accessor_read_float(nrmAcc, i, &nrm[3 * (size_t)i], 3);
+    }
+
+    auto vert = [&](cgltf_size i) -> glm::vec3 {
+        return glm::vec3(pos[3 * (size_t)i + 0],
+                         pos[3 * (size_t)i + 1],
+                         pos[3 * (size_t)i + 2]);
+    };
+    auto norm = [&](cgltf_size i) -> glm::vec3 {
+        return glm::vec3(nrm[3 * (size_t)i + 0],
+                         nrm[3 * (size_t)i + 1],
+                         nrm[3 * (size_t)i + 2]);
+    };
+
+    // Node-transform the local vertex / normal into the scene frame.
+    auto vTrans = [&](cgltf_size i) -> glm::vec3 {
+        return glm::vec3(world * glm::vec4(vert(i), 1.0f));
+    };
+    auto nTrans = [&](cgltf_size i) -> glm::vec3 {
+        return (nrmAcc != nullptr)
+            ? glm::vec3(worldIT * glm::vec4(norm(i), 0.0f))
+            : glm::vec3(0.0f);   // no vertex normal → makeTri's face-normal fallback
+    };
+
+    // ---- Emit triangles ----
+    if (prim->indices != nullptr)
+    {
+        const cgltf_accessor* idxAcc = prim->indices;
+
+        // Index count must be a whole number of triangles.
+        if (idxAcc->count % 3 != 0)
+        {
+            Log::warn("Scene",
+                      "glTF indexed primitive has %zu indices "
+                      "(not a multiple of 3); skipping",
+                      (size_t)idxAcc->count);
+            return;
+        }
+
+        const cgltf_size nTri = idxAcc->count / 3;
+        for (cgltf_size t = 0; t < nTri; ++t)
+        {
+            cgltf_size i0 = cgltf_accessor_read_index(idxAcc, 3 * t + 0);
+            cgltf_size i1 = cgltf_accessor_read_index(idxAcc, 3 * t + 1);
+            cgltf_size i2 = cgltf_accessor_read_index(idxAcc, 3 * t + 2);
+
+            // cgltf_validate() also cross-checks index bounds when buffer
+            // data is loaded, so this guard is defense-in-depth.
+            if (i0 >= vertCount || i1 >= vertCount || i2 >= vertCount)
+            {
+                Log::warn("Scene",
+                          "glTF indexed primitive has out-of-range "
+                          "vertex index (%zu/%zu/%zu of %zu); "
+                          "skipping triangle",
+                          (size_t)i0, (size_t)i1, (size_t)i2,
+                          (size_t)vertCount);
+                continue;
+            }
+
+            triangles.push_back(makeTri(vTrans(i0), vTrans(i1), vTrans(i2),
+                                        nTrans(i0), nTrans(i1), nTrans(i2)));
+            ++count;
+        }
+    }
+    else
+    {
+        // Non-indexed primitive: vertices are already in triangle order.
+        if (vertCount % 3 != 0)
+        {
+            Log::warn("Scene", "glTF non-indexed primitive has %zu vertices (not a multiple of 3); skipping", (size_t)vertCount);
+            return;
+        }
+        for (cgltf_size t = 0; t < vertCount; t += 3)
+        {
+            triangles.push_back(makeTri(vTrans(t + 0), vTrans(t + 1), vTrans(t + 2),
+                                        nTrans(t + 0), nTrans(t + 1), nTrans(t + 2)));
+            ++count;
+        }
+    }
+}
+
+// Emit all of a mesh's primitives under one accumulated transform.
+static void appendMeshTriangles(const cgltf_mesh* mesh, const glm::mat4& world,
+                                vector<Triangle>& triangles, int& count)
+{
+    const glm::mat4 worldIT = glm::inverseTranspose(world);
+    for (cgltf_size pi = 0; pi < mesh->primitives_count; ++pi)
+        appendPrimitiveTriangles(&mesh->primitives[pi], world, worldIT,
+                                 triangles, count);
+}
+
+// Depth-first walk of the scene graph.  The accumulated matrix `parentWorld`
+// is the composition of every ancestor's local transform; multiplying it by
+// this node's local transform gives the world matrix that places its mesh.
+static void walkNode(const cgltf_node* node, const glm::mat4& parentWorld,
+                     vector<Triangle>& triangles, int& count)
+{
+    const glm::mat4 world = parentWorld * nodeLocalMatrix(node);
+    if (node->mesh != nullptr)
+        appendMeshTriangles(node->mesh, world, triangles, count);
+    for (cgltf_size c = 0; c < node->children_count; ++c)
+        walkNode(node->children[c], world, triangles, count);
+}
+
 /**
  * Load triangles from a glTF 2.0 file (.gltf JSON or .glb binary) and
  * append them to the hostTriangles vector.
  *
+ * - The scene graph is walked and every node's accumulated transform is
+ *   applied, so multi-part models scattered across nodes are assembled
+ *   exactly as the file specifies (each (node, mesh) instance is emitted
+ *   once, with its own transform).
  * - Only triangle primitives (mode 4) are loaded; point/line primitives
  *   are skipped with a warning.
  * - glTF materials/textures are ignored — the scene JSON's MATERIAL field
  *   governs shading (texture mapping is a separate feature).
- * - Geometry is loaded in its raw coordinate frame (no Y→Z conversion),
- *   consistent with the OBJ path; the render frame is set by the scene
- *   JSON camera.
  * - Draco-compressed primitives are not supported (cgltf does not decode).
  *
  * @param gltfPath  Path to the .gltf or .glb file
@@ -224,146 +415,20 @@ static pair<int, int> loadGLTF(const string& gltfPath,
     int offset = (int)triangles.size();
     int count  = 0;
 
-    for (cgltf_size mi = 0; mi < data->meshes_count; ++mi)
+    // ---- Walk the scene graph, emitting one transformed instance per
+    // (node, mesh).  Parts scattered across nodes are assembled by the
+    // accumulated node transforms — the glTF-spec behavior.
+    const cgltf_scene* scene = data->scene;   // default scene
+    if (scene != nullptr && scene->nodes_count > 0)
     {
-        const cgltf_mesh* mesh = &data->meshes[mi];
-        for (cgltf_size pi = 0; pi < mesh->primitives_count; ++pi)
-        {
-            const cgltf_primitive* prim = &mesh->primitives[pi];
-            if (prim->type != cgltf_primitive_type_triangles)
-            {
-                Log::warn("Scene", "glTF primitive is not triangles (mode %d); skipping",
-                          (int)prim->type);
-                continue;
-            }
-
-            // ---- Locate POSITION / NORMAL accessors ----
-            const cgltf_accessor* posAcc = nullptr;
-            const cgltf_accessor* nrmAcc = nullptr;
-            for (cgltf_size ai = 0; ai < prim->attributes_count; ++ai)
-            {
-                const cgltf_attribute* attr = &prim->attributes[ai];
-                if (attr->type == cgltf_attribute_type_position)
-                    posAcc = attr->data;
-                else if (attr->type == cgltf_attribute_type_normal)
-                    nrmAcc = attr->data;
-            }
-            if (posAcc == nullptr)
-            {
-                Log::warn("Scene", "glTF primitive has no POSITION accessor; skipping");
-                continue;
-            }
-
-            const cgltf_size vertCount = posAcc->count;
-
-            // Normals are indexed by the same vertex indices as positions, so
-            // a NORMAL accessor must cover every vertex — otherwise norm(i)
-            // below reads nrm out of bounds.  cgltf_validate() also requires
-            // all attributes to share a count, so this is defense-in-depth
-            // against validation being skipped or relaxed.
-            if (nrmAcc != nullptr && nrmAcc->count != vertCount)
-            {
-                Log::warn("Scene",
-                          "glTF primitive NORMAL count (%zu) != POSITION count "
-                          "(%zu); skipping",
-                          (size_t)nrmAcc->count, (size_t)vertCount);
-                continue;
-            }
-
-            // Unpack all vertex positions.  read_float handles integer and
-            // normalized component types, so a VEC3 always yields 3 floats.
-            vector<float> pos(3 * (size_t)vertCount);
-            for (cgltf_size i = 0; i < vertCount; ++i)
-                cgltf_accessor_read_float(posAcc, i, &pos[3 * (size_t)i], 3);
-
-            // Normals (optional; makeTri falls back to the face normal).
-            vector<float> nrm;
-            if (nrmAcc != nullptr)
-            {
-                nrm.resize(3 * (size_t)vertCount);
-                for (cgltf_size i = 0; i < vertCount; ++i)
-                    cgltf_accessor_read_float(nrmAcc, i, &nrm[3 * (size_t)i], 3);
-            }
-
-            auto vert = [&](cgltf_size i) -> glm::vec3 {
-                return glm::vec3(pos[3 * (size_t)i + 0],
-                                 pos[3 * (size_t)i + 1],
-                                 pos[3 * (size_t)i + 2]);
-            };
-            auto norm = [&](cgltf_size i) -> glm::vec3 {
-                return glm::vec3(nrm[3 * (size_t)i + 0],
-                                 nrm[3 * (size_t)i + 1],
-                                 nrm[3 * (size_t)i + 2]);
-            };
-
-            // ---- Emit triangles ----
-            if (prim->indices != nullptr)
-            {
-                const cgltf_accessor* idxAcc = prim->indices;
-
-                // Index count must be a whole number of triangles, else
-                // idxAcc->count / 3 silently truncates.  Mirror the
-                // non-indexed guard below (warn + skip the primitive).
-                if (idxAcc->count % 3 != 0)
-                {
-                    Log::warn("Scene",
-                              "glTF indexed primitive has %zu indices "
-                              "(not a multiple of 3); skipping",
-                              (size_t)idxAcc->count);
-                    continue;
-                }
-
-                const cgltf_size nTri = idxAcc->count / 3;
-                for (cgltf_size t = 0; t < nTri; ++t)
-                {
-                    cgltf_size i0 = cgltf_accessor_read_index(idxAcc, 3 * t + 0);
-                    cgltf_size i1 = cgltf_accessor_read_index(idxAcc, 3 * t + 1);
-                    cgltf_size i2 = cgltf_accessor_read_index(idxAcc, 3 * t + 2);
-
-                    // cgltf_validate() also cross-checks index bounds when
-                    // buffer data is loaded, so this guard is defense-in-depth:
-                    // it keeps vert()/norm() in bounds even if validation is
-                    // skipped or a future cgltf relaxes the check.
-                    if (i0 >= vertCount || i1 >= vertCount || i2 >= vertCount)
-                    {
-                        Log::warn("Scene",
-                                  "glTF indexed primitive has out-of-range "
-                                  "vertex index (%zu/%zu/%zu of %zu); "
-                                  "skipping triangle",
-                                  (size_t)i0, (size_t)i1, (size_t)i2,
-                                  (size_t)vertCount);
-                        continue;
-                    }
-
-                    glm::vec3 n0 = (nrmAcc != nullptr) ? norm(i0) : glm::vec3(0.0f);
-                    glm::vec3 n1 = (nrmAcc != nullptr) ? norm(i1) : glm::vec3(0.0f);
-                    glm::vec3 n2 = (nrmAcc != nullptr) ? norm(i2) : glm::vec3(0.0f);
-
-                    triangles.push_back(
-                        makeTri(vert(i0), vert(i1), vert(i2), n0, n1, n2));
-                    ++count;
-                }
-            }
-            else
-            {
-                // Non-indexed primitive: vertices are already in triangle order.
-                if (vertCount % 3 != 0)
-                {
-                    Log::warn("Scene", "glTF non-indexed primitive has %zu vertices (not a multiple of 3); skipping", (size_t)vertCount);
-                    continue;
-                }
-                for (cgltf_size t = 0; t < vertCount; t += 3)
-                {
-                    glm::vec3 n0 = (nrmAcc != nullptr) ? norm(t + 0) : glm::vec3(0.0f);
-                    glm::vec3 n1 = (nrmAcc != nullptr) ? norm(t + 1) : glm::vec3(0.0f);
-                    glm::vec3 n2 = (nrmAcc != nullptr) ? norm(t + 2) : glm::vec3(0.0f);
-
-                    triangles.push_back(
-                        makeTri(vert(t + 0), vert(t + 1), vert(t + 2), n0, n1, n2));
-                    ++count;
-                }
-            }
-        }
+        for (cgltf_size i = 0; i < scene->nodes_count; ++i)
+            walkNode(scene->nodes[i], glm::mat4(1.0f), triangles, count);
+    }
+    else
+    {
+        // No scene graph (some minimal files): emit every mesh untransformed.
+        for (cgltf_size mi = 0; mi < data->meshes_count; ++mi)
+            appendMeshTriangles(&data->meshes[mi], glm::mat4(1.0f), triangles, count);
     }
 
     cgltf_free(data);
