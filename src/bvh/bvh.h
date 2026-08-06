@@ -170,8 +170,7 @@ namespace bvh
     // is read from geom.meshTriangleOffset/count.  Returns the root node
     // index, or -1 for an empty mesh.
     int  buildMeshBvh(BvhBuffers& out,
-                      const std::vector<Triangle>& hostTris,
-                      const Geom& geom);
+                      const std::vector<Triangle>& hostTris);
 
     // Build every mesh's BVH into out.hostNodes/out.hostTriangles and fill
     // out.hostBvhMeta.  Empty meshes keep rootNodeIndex = -1.

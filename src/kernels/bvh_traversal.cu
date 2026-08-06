@@ -11,8 +11,6 @@
 __global__ void bvhTraverse(
     int num_paths,
     PathSegment* pathSegments,
-    Geom* geoms,
-    int geoms_size,
     ShadeableIntersection* intersections,
     Triangle* deviceTriangles,
     BvhNode* deviceBvhNodes,

@@ -27,8 +27,6 @@
  *
  * \param num_paths         Number of active paths
  * \param pathSegments      Active-path buffer
- * \param geoms             Geom array (device)
- * \param geoms_size        Number of geoms
  * \param intersections     [out] Closest-hit result per path
  * \param deviceTriangles   Flat triangle array (REORDERED by the BVH build)
  * \param deviceBvhNodes    Node array (device, built on host)
@@ -37,8 +35,6 @@
 __global__ void bvhTraverse(
     int num_paths,
     PathSegment* pathSegments,
-    Geom* geoms,
-    int geoms_size,
     ShadeableIntersection* intersections,
     Triangle* deviceTriangles,
     BvhNode* deviceBvhNodes,

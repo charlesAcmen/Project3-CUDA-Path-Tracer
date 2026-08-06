@@ -15,7 +15,6 @@ struct DeviceBuffers {
     glm::vec3*              image               = nullptr;
     PathSegment*            paths               = nullptr;
     PathSegment*            pathsCompacted      = nullptr;
-    Geom*                   geoms               = nullptr;
     Material*               materials           = nullptr;
     ShadeableIntersection*  intersections       = nullptr;
     int*                    sortKeys            = nullptr;

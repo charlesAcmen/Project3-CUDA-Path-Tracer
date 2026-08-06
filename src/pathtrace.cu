@@ -118,13 +118,10 @@ void pathtraceInit(Scene* scene)
 
     cudaMalloc(&g_dev.pathsCompacted, pixelcount * sizeof(PathSegment));
 
-    cudaMalloc(&g_dev.geoms, scene->geoms.size() * sizeof(Geom));
-    cudaMemcpy(g_dev.geoms, scene->geoms.data(), scene->geoms.size() * sizeof(Geom), cudaMemcpyHostToDevice);
-
     cudaMalloc(&g_dev.materials, scene->materials.size() * sizeof(Material));
     cudaMemcpy(g_dev.materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
 
-    checkCUDAError("copy geoms and materials");
+    checkCUDAError("copy materials");
 
     // ---- Mesh triangles + BVH ----
     // Always build the per-mesh BVHs (cheap: scenes are a few thousand
@@ -185,7 +182,6 @@ void pathtraceFree()
     cudaFree(g_dev.image);
     cudaFree(g_dev.paths);
     cudaFree(g_dev.pathsCompacted);
-    cudaFree(g_dev.geoms);
     cudaFree(g_dev.materials);
     cudaFree(g_dev.intersections);
     cudaFree(g_dev.sortKeys);
@@ -288,8 +284,8 @@ void pathtrace(uchar4* pbo, int iter)
         prof.gpuStart(ProfilerOp::ComputeIntersections);
         LAUNCH_KERNEL_AUTO(bvhTraverse, num_paths,
             num_paths, g_dev.paths,
-            g_dev.geoms, hst_scene->geoms.size(), g_dev.intersections,
-            g_dev.deviceTriangles, g_dev.bvh.deviceNodes, g_dev.bvh.deviceBvhMeta);
+            g_dev.intersections,
+            g_dev.deviceTriangles, g_dev.bvh.deviceNodes);
         prof.gpuStop(ProfilerOp::ComputeIntersections);
         checkCUDAError("trace one bounce");
         depth++;
