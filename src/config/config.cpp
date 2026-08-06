@@ -62,16 +62,16 @@ void mergeConfigJson(AppConfig& cfg, const json& data)
     if (data.is_null() || data.empty()) return;
 
     if (data.contains("compactMethod"))
-        cfg.compactMethod = static_cast<CompactMethod>(data["compactMethod"].get<int>());
+        cfg.compactMethod = parseCompactMethod(data["compactMethod"], cfg.compactMethod);
 
     if (data.contains("sortByMaterial"))
         cfg.sortByMaterial = data["sortByMaterial"].get<bool>();
 
     if (data.contains("rngMode"))
-        cfg.rngMode = static_cast<RngMode>(data["rngMode"].get<int>());
+        cfg.rngMode = parseRngMode(data["rngMode"], cfg.rngMode);
 
     if (data.contains("fresnelMode"))
-        cfg.fresnelMode = static_cast<FresnelMode>(data["fresnelMode"].get<int>());
+        cfg.fresnelMode = parseFresnelMode(data["fresnelMode"], cfg.fresnelMode);
 
     // Bloom
     if (data.contains("bloom"))
@@ -191,7 +191,6 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
         {
             int v = std::stoi(arg.substr(10));
             cfg.fresnelMode = (v == 1) ? FresnelMode::Accurate : FresnelMode::Schlick;
-            cfg.fresnelSet  = true;
         }
         else if (arg.rfind("--rng=", 0) == 0)
         {
@@ -264,7 +263,7 @@ void printStartupHelp(const char* exeName)
     Log::raw("    --compact=N    Compaction mode: 0=off, 1=global scan, 2=Thrust copy_if,\n");
     Log::raw("                   3=shared-memory scan (default).\n");
     Log::raw("    --sort=N       Material sorting: 0=off, nonzero=on (default on).\n");
-    Log::raw("    --fresnel=N    Fresnel mode: 0=Schlick (default), 1=Accurate.\n");
+    Log::raw("    --fresnel=N    Fresnel mode: 0=Schlick, 1=Accurate (default).\n");
     Log::raw("    --rng=N        RNG mode: 0=LCG (default), 1=scrambled Halton.\n");
     Log::raw("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
     Log::raw("    --save         Save the final rendered image on exit.\n");
@@ -319,7 +318,7 @@ void printStartupSummary(const AppConfig& cfg)
     }
     Log::raw("  Compact method: %s\n", compactName);
     Log::raw("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
-    const char* fresnelName = (renderState->fresnelMode == FresnelMode::Accurate
+    const char* fresnelName = (cfg.fresnelMode == FresnelMode::Accurate
                                ? "Accurate" : "Schlick");
     Log::raw("  Fresnel mode: %s\n", fresnelName);
     const char* rngName = (rngMode == RngMode::HALTON ? "Scrambled Halton" : "LCG");

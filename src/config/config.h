@@ -93,6 +93,7 @@ struct AppConfig {
     CompactMethod    compactMethod    = CompactMethod::SharedMem;
     bool             sortByMaterial   = false;
     RngMode          rngMode          = RngMode::LCG;
+    FresnelMode      fresnelMode      = FresnelMode::Accurate;
 
     // Post-processing
     BloomConfig              bloom;
@@ -103,8 +104,6 @@ struct AppConfig {
     // Other
     bool             autoSave         = true;
     bool             showHelp         = false;
-    FresnelMode      fresnelMode      = FresnelMode::Schlick;
-    bool             fresnelSet       = false;   // CLI --fresnel= was given
     std::vector<int> saveAtIterations;
 };
 
