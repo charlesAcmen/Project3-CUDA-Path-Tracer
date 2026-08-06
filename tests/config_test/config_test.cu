@@ -10,9 +10,10 @@
  *   2. JSON merge overrides defaults
  *   3. CLI flags override JSON
  *   4. JSON + CLI combined priority (CLI wins)
- *   5. --config=PATH loads an alternative file
- *   6. Fresnel mode: config JSON sets value (scene overrides),
- *      CLI --fresnel= sets both value and fresnelSet flag
+ *   5. Real config file → loadConfigFile → mergeConfigJson overrides defaults
+ *      (the exact chain config.local.json takes in the app)
+ *   6. Fresnel: a renderer setting like rngMode — config JSON and CLI both
+ *      set it, CLI wins
  */
 
 #include "config.h"
@@ -21,6 +22,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cassert>
+#include <fstream>    // std::ofstream — write a temp config file
 #include <string>
 #include <vector>
 
@@ -71,8 +73,7 @@ static int testDefaults()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::SharedMem)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, false)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::LCG)) return 1;
-    if (checkEq("fresnelMode", (int)cfg.fresnelMode, (int)FresnelMode::Schlick)) return 1;
-    if (checkBool("fresnelSet", cfg.fresnelSet, false)) return 1;
+    if (checkEq("fresnelMode", (int)cfg.fresnelMode, (int)FresnelMode::Accurate)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, false)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, false)) return 1;
     if (checkBool("autoSave", cfg.autoSave, true)) return 1;
@@ -87,10 +88,10 @@ static int testJsonMerge()
     TEST("JSON merge overrides defaults");
     AppConfig cfg;
     json j = json::parse(R"({
-        "compactMethod": 0,
+        "compactMethod": "Off",
         "sortByMaterial": true,
-        "rngMode": 1,
-        "fresnelMode": 1,
+        "rngMode": "Halton",
+        "fresnelMode": "Schlick",
         "bloom": { "enabled": true, "threshold": 0.5, "intensity": 0.3, "radius": 5 },
         "chromaticAberration": { "enabled": true },
         "vignette": { "enabled": true, "intensity": 0.8, "exponent": 4.0 },
@@ -101,8 +102,7 @@ static int testJsonMerge()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Off)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
-    if (checkEq("fresnelMode", (int)cfg.fresnelMode, (int)FresnelMode::Accurate)) return 1;
-    if (checkBool("fresnelSet", cfg.fresnelSet, false)) return 1;  // JSON never sets fresnelSet
+    if (checkEq("fresnelMode", (int)cfg.fresnelMode, (int)FresnelMode::Schlick)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
     if (checkBool("profCfg.verbose", cfg.profCfg.verbose, true)) return 1;
@@ -128,7 +128,6 @@ static int testCliOverride()
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
     if (checkEq("fresnelMode", (int)cfg.fresnelMode, (int)FresnelMode::Accurate)) return 1;
-    if (checkBool("fresnelSet", cfg.fresnelSet, true)) return 1;
     if (checkBool("autoSave", cfg.autoSave, true)) return 1;
     if (checkEq("profCfg.warmupIters", cfg.profCfg.warmupIters, 5)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
@@ -157,24 +156,19 @@ static int testPriority()
     return 0;
 }
 
-// ---- Test: FresnelSet preserved after CLI ------------------------------
+// ---- Test: fresnelMode priority (CLI wins over JSON, like rngMode) -------
 
-static int testFresnelSet()
+static int testFresnelPriority()
 {
-    TEST("fresnelSet is true only after CLI --fresnel=");
+    TEST("CLI --fresnel overrides JSON fresnelMode");
     AppConfig base;
-    json j = json::parse(R"({ "fresnelMode": 1 })");
-    mergeConfigJson(base, j);
+    mergeConfigJson(base, json::parse(R"({ "fresnelMode": "Schlick" })"));
+    if (checkEq("after JSON fresnelMode", (int)base.fresnelMode, (int)FresnelMode::Schlick)) return 1;
 
-    // JSON alone: fresnelSet stays false
-    if (checkBool("after JSON fresnelSet", base.fresnelSet, false)) return 1;
-
-    // CLI --fresnel= sets both
-    const char* argv[] = { "prog", "--fresnel=0" };
+    const char* argv[] = { "prog", "--fresnel=1" };
     int argc = 2;
     parseCliFlags(base, argc, (char**)argv);
-    if (checkBool("after CLI fresnelSet", base.fresnelSet, true)) return 1;
-    if (checkEq("after CLI fresnelMode", (int)base.fresnelMode, (int)FresnelMode::Schlick)) return 1;
+    if (checkEq("after CLI fresnelMode", (int)base.fresnelMode, (int)FresnelMode::Accurate)) return 1;
     PASS();
     return 0;
 }
@@ -206,6 +200,84 @@ static int testEmptyJson()
     json j = json::object();
     mergeConfigJson(cfg, j);
     if (checkEq("compactMethod preserved", (int)cfg.compactMethod, (int)CompactMethod::Thrust)) return 1;
+    PASS();
+    return 0;
+}
+
+// ---- Test: real config file → loadConfigFile → mergeConfigJson ---------
+// Exercises the exact chain the app runs for config.local.json: the file is
+// read off disk by loadConfigFile (nlohmann parse), then merged into
+// AppConfig by mergeConfigJson.  A temp file is used so the test never
+// depends on the developer's local config.local.json (which is gitignored).
+
+static int testConfigFileLoad()
+{
+    TEST("config file (loadConfigFile + merge) overrides code defaults");
+    const char* path = "_test_config.json";
+    {
+        std::ofstream f(path);
+        f << R"({ "compactMethod": "Thrust", "sortByMaterial": true, "rngMode": "Halton",
+                  "fresnelMode": "Accurate",
+                  "bloom": { "enabled": true, "threshold": 0.7 },
+                  "profiler": { "enabled": true, "warmup": 7 } })";
+    }
+
+    AppConfig cfg;
+    json j = loadConfigFile(path);    // real file → parsed JSON
+    mergeConfigJson(cfg, j);          // JSON → AppConfig (same path config.local.json takes)
+
+    std::remove(path);
+
+    if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Thrust)) return 1;
+    if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
+    if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
+    if (checkEq("fresnelMode", (int)cfg.fresnelMode, (int)FresnelMode::Accurate)) return 1;
+    if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
+    if (checkBool("bloom.threshold", cfg.bloom.threshold == 0.7f, true)) return 1;
+    if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
+    if (checkEq("profCfg.warmupIters", cfg.profCfg.warmupIters, 7)) return 1;
+    // untouched keys stay at code defaults
+    if (checkBool("vignette.enabled (default)", cfg.vignette.enabled, false)) return 1;
+    PASS();
+    return 0;
+}
+
+// ---- Test: enum values accept names (case-insensitive) OR legacy numbers --
+
+static int testEnumStringParsing()
+{
+    TEST("enum values accept string names, legacy numbers, reject unknowns");
+    AppConfig cfg;
+
+    // String name, mixed case
+    mergeConfigJson(cfg, json::parse(R"({ "compactMethod": "Thrust" })"));
+    if (checkEq("compactMethod 'Thrust'", (int)cfg.compactMethod, (int)CompactMethod::Thrust)) return 1;
+
+    // Lowercase name
+    mergeConfigJson(cfg, json::parse(R"({ "compactMethod": "sharedmem" })"));
+    if (checkEq("compactMethod 'sharedmem'", (int)cfg.compactMethod, (int)CompactMethod::SharedMem)) return 1;
+
+    // Legacy number still accepted (backward compat)
+    mergeConfigJson(cfg, json::parse(R"({ "compactMethod": 1 })"));
+    if (checkEq("compactMethod 1 (legacy)", (int)cfg.compactMethod, (int)CompactMethod::GlobalScan)) return 1;
+
+    // rngMode names + case
+    mergeConfigJson(cfg, json::parse(R"({ "rngMode": "Halton" })"));
+    if (checkEq("rngMode 'Halton'", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
+    mergeConfigJson(cfg, json::parse(R"({ "rngMode": "lcg" })"));
+    if (checkEq("rngMode 'lcg'", (int)cfg.rngMode, (int)RngMode::LCG)) return 1;
+
+    // fresnelMode names + case + legacy number
+    mergeConfigJson(cfg, json::parse(R"({ "fresnelMode": "accurate" })"));
+    if (checkEq("fresnelMode 'accurate'", (int)cfg.fresnelMode, (int)FresnelMode::Accurate)) return 1;
+    mergeConfigJson(cfg, json::parse(R"({ "fresnelMode": 0 })"));
+    if (checkEq("fresnelMode 0 (legacy)", (int)cfg.fresnelMode, (int)FresnelMode::Schlick)) return 1;
+
+    // Unknown name keeps the current value (falls back, does not throw)
+    cfg.compactMethod = CompactMethod::Thrust;
+    mergeConfigJson(cfg, json::parse(R"({ "compactMethod": "nope" })"));
+    if (checkEq("unknown compactMethod keeps value", (int)cfg.compactMethod, (int)CompactMethod::Thrust)) return 1;
+
     PASS();
     return 0;
 }
@@ -272,9 +344,11 @@ int main()
     failures += testJsonMerge();
     failures += testCliOverride();
     failures += testPriority();
-    failures += testFresnelSet();
+    failures += testFresnelPriority();
     failures += testPartialJson();
     failures += testEmptyJson();
+    failures += testConfigFileLoad();
+    failures += testEnumStringParsing();
     failures += testMissingSceneFile();
     failures += testJsonOnly();
 

@@ -12,7 +12,8 @@
 //      world space (vertices via transform, normals via invTranspose),
 //      tags materialId, and flattens leaves into contiguous runs.
 //   2. Single-tree build: root is node 0, every node reachable, leaf
-//      chunks within the triangle array.
+//      chunks tile the triangle array exactly (contiguous, non-overlapping,
+//      gap-free — the per-leaf sequential-read property).
 //   3. traverseBvhClosest (near-child-first) matches a brute-force O(N)
 //      scan on the baked array — hit flag, t, normal, materialId.
 //   4. intersectRayAABBEntry entry-distance correctness.
@@ -359,7 +360,6 @@ bool testTraversalVsBrute(const char* name, const std::vector<Triangle>& tris,
         printf("FAIL %s: no tree built\n", name);
         return false;
     }
-    const int root = 0;   // single tree → root is node 0
 
     // Rays aim at the BAKED geometry (world space), like the renderer.
     const std::vector<Ray> rays = makeRayBatch(out.hostTriangles, 0x1234567u);
@@ -368,7 +368,7 @@ bool testTraversalVsBrute(const char* name, const std::vector<Triangle>& tris,
         float bt = LARGE_T; glm::vec3 bn; int bidx = -1;
         const bool bhit = bruteForceClosest(ray, out.hostTriangles, 0, (int)out.hostTriangles.size(), bt, bn, bidx);
 
-        const BvhHit vhit = traverseBvhClosest(ray, out.hostNodes.data(), root,
+        const BvhHit vhit = traverseBvhClosest(ray, out.hostNodes.data(),
                                                out.hostTriangles.data(), LARGE_T);
 
         if (bhit != vhit.hit)
@@ -399,8 +399,11 @@ bool testTraversalVsBrute(const char* name, const std::vector<Triangle>& tris,
 }
 
 // Test 4: tree structure.  Root is node 0; DFS reaches every node exactly
-// once (no cycles, no orphans), and every leaf chunk lies inside the baked
-// triangle array.
+// once (no cycles, no orphans), and the flattened triangle array is a
+// PERFECT TILING of the leaves: every leaf chunk is a contiguous run, and
+// the runs partition [0, N) with no overlap and no gap.  That tiling is
+// exactly the property that makes the traversal's per-leaf sequential read
+// `tris[triBase + j]` cache-friendly.
 bool testBuildStructure(const std::vector<Triangle>& tris, const glm::mat4& T, int materialId)
 {
     std::vector<Geom> geoms(1);
@@ -414,6 +417,8 @@ bool testBuildStructure(const std::vector<Triangle>& tris, const glm::mat4& T, i
         return false;
     }
 
+    const int total = (int)out.hostTriangles.size();
+    std::vector<int> coverage(total, 0);   // cells covered by exactly one leaf ⇒ tiling
     std::vector<int> visited(out.hostNodes.size(), 0);
     std::vector<int> stack{ 0 };
     int reached = 0;
@@ -439,12 +444,19 @@ bool testBuildStructure(const std::vector<Triangle>& tris, const glm::mat4& T, i
         {
             const int off = n.leafTriOffset();
             const int cnt = n.leafTriCount();
-            if (off < 0 || cnt < 0 || off + cnt > (int)out.hostTriangles.size())
+            if (off < 0 || cnt < 1 || off + cnt > total)
             {
-                printf("FAIL structure: leaf chunk [%d,+%d) out of triangle range (%zu)\n",
-                       off, cnt, out.hostTriangles.size());
+                printf("FAIL structure: leaf chunk [%d,+%d) out of triangle range (%d)\n",
+                       off, cnt, total);
                 return false;
             }
+            // Mark this leaf's contiguous run; a cell already covered ⇒ overlap.
+            for (int j = 0; j < cnt; j++)
+                if (coverage[off + j]++)
+                {
+                    printf("FAIL structure: leaf chunks overlap at triangle %d\n", off + j);
+                    return false;
+                }
         }
         else
         {
@@ -457,6 +469,16 @@ bool testBuildStructure(const std::vector<Triangle>& tris, const glm::mat4& T, i
         printf("FAIL structure: reached %d of %zu nodes\n", reached, out.hostNodes.size());
         return false;
     }
+
+    // Every triangle covered by exactly one leaf ⇒ leaves tile [0, N):
+    // no gaps, no duplication.  Combined with testWorldBake's multiset
+    // check, each leaf's run is exactly the build's assigned triangles.
+    for (int i = 0; i < total; i++)
+        if (coverage[i] != 1)
+        {
+            printf("FAIL structure: triangle %d covered by %d leaves (want 1)\n", i, coverage[i]);
+            return false;
+        }
     return true;
 }
 
@@ -535,8 +557,8 @@ bool testAabbEntry()
     return true;
 }
 
-// Test 6: empty scene.  No triangles → no tree; traversal with root -1 must
-// miss without touching any buffers.
+// Test 6: empty scene.  No triangles → no tree; traversal with null buffers
+// must miss without touching any memory.
 bool testEmptyScene()
 {
     std::vector<Triangle> none;
@@ -551,10 +573,10 @@ bool testEmptyScene()
     }
 
     const Ray ray{ glm::vec3(0, 0, 0), glm::vec3(1, 0, 0) };
-    const BvhHit h = traverseBvhClosest(ray, nullptr, -1, nullptr, LARGE_T);
+    const BvhHit h = traverseBvhClosest(ray, nullptr, nullptr, LARGE_T);
     if (h.hit)
     {
-        printf("FAIL empty: traversal with root -1 reported a hit\n");
+        printf("FAIL empty: traversal with null buffers reported a hit\n");
         return false;
     }
     return true;
