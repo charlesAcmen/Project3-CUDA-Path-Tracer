@@ -280,7 +280,7 @@ void pathtrace(uchar4* pbo, int iter)
     {
         prof.recordBounce(depth, num_paths);
 
-        // Per-mesh BVH closest-hit traversal
+        // Single world-space BVH closest-hit traversal
         prof.gpuStart(ProfilerOp::ComputeIntersections);
         LAUNCH_KERNEL_AUTO(bvhTraverse, num_paths,
             num_paths, g_dev.paths,

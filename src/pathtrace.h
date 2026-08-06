@@ -1,7 +1,7 @@
 #pragma once
 
 #include "config/config.h"       // BloomConfig, ChromaticAberrationConfig, VignetteConfig
-#include "bvh/bvh.h"             // BvhBuffers (per-mesh BVH trees + metadata)
+#include "bvh/bvh.h"             // BvhBuffers (single scene-wide BVH + baked triangles)
 #include "scene/scene.h"
 
 // ====================================================================
@@ -27,13 +27,11 @@ struct DeviceBuffers {
     glm::vec3*              bloomBufB           = nullptr;  // horizontal blur output (HDR ping-pong)
     float*                  bloomWeights        = nullptr;  // 1D Gaussian kernel weights (device)
 
-    // Mesh geometry (OBJ)
+    // World-space mesh triangles (baked + REORDERED into leaf-contiguous
+    // chunks by the BVH build), uploaded from BvhBuffers::hostTriangles.
     Triangle*               deviceTriangles     = nullptr;
 
-    // Per-mesh BVH: host build output + device nodes/meta.  hostTriangles
-    // holds the REORDERED flat triangle array (leaf-contiguous chunks);
-    // it is uploaded as deviceTriangles, the buffer the BVH traversal
-    // kernel reads.
+    // Single scene-wide BVH: host build output + device nodes.
     BvhBuffers              bvh;
 };
 

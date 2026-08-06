@@ -6,8 +6,10 @@
 // Pure data — no parsing, no file I/O.  Populated by SceneLoader or
 // constructed programmatically for testing.
 //
-// Mesh triangles live in a flat hostTriangles vector; each Geom with
-// type == MESH references a slice via meshTriangleOffset / ::count.
+// Mesh triangles live in a flat hostTriangles vector (OBJECT space — the
+// source geometry); each Geom references a slice via meshTriangleOffset /
+// ::count.  buildSceneBvh (src/bvh/bvh.cu) bakes them to world space and
+// reorders them into its own BvhBuffers::hostTriangles.
 // ====================================================================
 
 #include "sceneStructs.h"

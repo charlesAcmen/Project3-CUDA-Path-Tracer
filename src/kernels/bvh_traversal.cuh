@@ -3,32 +3,29 @@
 // ====================================================================
 // BVH Traversal Kernel
 //
-// GPU-side closest-hit traversal over the per-mesh BVHs built on the host
-// (src/bvh/bvh.cu).  One thread per active path, outer loop over all
-// geoms, writing the ShadeableIntersection layout the shading kernels read.
+// GPU-side closest-hit traversal over the single scene-wide world-space
+// BVH built on the host (src/bvh/bvh.cu).  One thread per active path, ONE
+// traverseBvhClosest call per ray — no per-geom loop, no ray transform.
 //
-// Each geom's subtree is located through deviceBvhMeta (rootNodeIndex;
-// -1 = empty mesh, skipped).  The ray is transformed to object space with
-// the exact same transformRayToObjectSpace helper, and the subtree is
-// traversed with traverseBvhClosest (src/bvh/bvh.h) — the identical
-// iterative closest-hit algorithm the host test validates.
+// The ray is already world-space (camera/scatter output); the triangles
+// were baked to world space by buildSceneBvh, so a single traversal over
+// the whole tree finds the closest hit of any mesh.  Root is node 0.
 //
 // AABB pruning only skips subtrees that cannot contain a hit closer than
 // the current far plane, so traversal never misses a closer hit.
 // ====================================================================
 
 #include "sceneStructs.h"
-#include "intersection/intersections.h"   // transformRayToObjectSpace, recordWorldNormal
-#include "bvh/bvh.h"                       // BvhNode, BvhMeta, traverseBvhClosest
+#include "bvh/bvh.h"                       // BvhNode, BvhHit, traverseBvhClosest
 
 /**
- * Compute the nearest ray–mesh intersection for every active path using
- * the per-mesh BVHs.
+ * Compute the nearest ray–scene intersection for every active path using
+ * the single world-space BVH.
  *
  * \param num_paths         Number of active paths
  * \param pathSegments      Active-path buffer
  * \param intersections     [out] Closest-hit result per path
- * \param deviceTriangles   Flat triangle array (REORDERED by the BVH build)
+ * \param deviceTriangles   World-space flat triangle array (REORDERED by the BVH build)
  * \param deviceBvhNodes    Node array (device, built on host)
  * \param deviceBvhMeta     Per-geom BVH metadata (rootNodeIndex = -1 → skip)
  */

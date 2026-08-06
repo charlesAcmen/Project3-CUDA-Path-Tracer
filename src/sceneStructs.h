@@ -7,9 +7,13 @@
 #include <string>
 #include <vector>
 
-// Object-space triangle backed by an OBJ mesh.
-// The intersection test transforms rays to object space via
-// the geometry's inverseTransform, keeping triangles untransformed.
+// Triangle backed by an OBJ mesh.
+//
+// Triangles are stored in object space in the Scene's hostTriangles, then
+// baked to WORLD space by buildSceneBvh (vertices via the geom transform,
+// normals via the inverse-transpose).  The device array the traversal reads
+// is therefore world-space; materialId tags which material the triangle
+// belongs to so the shading kernel can resolve it from the hit triangle.
 struct Triangle {
     glm::vec3 v0, v1, v2;  // three vertex positions in object space
     glm::vec3 n0, n1, n2;  // vertex normals (smooth shading interpolation)
