@@ -16,7 +16,8 @@
 //      gap-free — the per-leaf sequential-read property).
 //   3. traverseBvhClosest (near-child-first) matches a brute-force O(N)
 //      scan on the baked array — hit flag, t, normal, materialId.
-//   4. intersectRayAABBEntry entry-distance correctness.
+//   4. intersectRayAABBEntry entry-distance correctness + the near-first
+//      ordering metric (two boxes, both ray directions, inside-box).
 //   5. Empty scene: no nodes, traversal misses.
 //
 // Host-only: no kernels launched, no GPU required.
@@ -550,6 +551,69 @@ bool testAabbEntry()
         if (intersectRayAABBEntry(o, invDirPX, box, RAY_EPSILON, 2.0f, entry))
         {
             printf("FAIL aabb-entry: expected miss (far plane 2 < entry 5)\n");
+            return false;
+        }
+    }
+
+    // ---- Near-first ordering metric ----
+    // traverseBvhClosest orders children by tEntry: the smaller entry is the
+    // nearer child and is descended first.  These cases lock that tEntry is
+    // the true ray-distance entry, so the ordering picks the physically
+    // first-hit box (including under negative direction).
+    const AABB boxNear = box;                       // [0,2] × [0,1] × [0,1]
+    AABB boxFar;
+    boxFar.min = glm::vec3(3, 0, 0);
+    boxFar.max = glm::vec3(5, 1, 1);
+
+    // +x ray from (-5, .5, .5): boxNear entered at 5, boxFar at 8 → boxNear
+    // has the smaller entry (near child).
+    {
+        const glm::vec3 o(-5.0f, 0.5f, 0.5f);
+        float en = -1.0f, ef = -1.0f;
+        if (!intersectRayAABBEntry(o, invDirPX, boxNear, RAY_EPSILON, LARGE_T, en) ||
+            !intersectRayAABBEntry(o, invDirPX, boxFar,  RAY_EPSILON, LARGE_T, ef))
+        {
+            printf("FAIL aabb-entry: both boxes should hit (+x)\n");
+            return false;
+        }
+        if (fabsf(en - 5.0f) > 1e-4f || fabsf(ef - 8.0f) > 1e-4f || !(en < ef))
+        {
+            printf("FAIL aabb-entry: +x near=%f far=%f (want near 5 < far 8)\n", en, ef);
+            return false;
+        }
+    }
+
+    // -x ray from (7, .5, .5): the far box [3,5] is hit FIRST (entry 2), the
+    // near box second (entry 5).  The ordering must still pick the smaller
+    // entry — the box the ray physically reaches first.
+    {
+        const glm::vec3 o(7.0f, 0.5f, 0.5f);
+        float en = -1.0f, ef = -1.0f;
+        if (!intersectRayAABBEntry(o, invDirNX, boxNear, RAY_EPSILON, LARGE_T, en) ||
+            !intersectRayAABBEntry(o, invDirNX, boxFar,  RAY_EPSILON, LARGE_T, ef))
+        {
+            printf("FAIL aabb-entry: both boxes should hit (-x)\n");
+            return false;
+        }
+        if (fabsf(ef - 2.0f) > 1e-4f || fabsf(en - 5.0f) > 1e-4f || !(ef < en))
+        {
+            printf("FAIL aabb-entry: -x first-hit=%f second=%f (want first-hit entry 2 < second 5)\n", ef, en);
+            return false;
+        }
+    }
+
+    // Ray origin INSIDE a box: entry clips to RAY_EPSILON (the box is "here").
+    {
+        const glm::vec3 o(1.0f, 0.5f, 0.5f);   // inside [0,2]×[0,1]×[0,1]
+        float entry = -1.0f;
+        if (!intersectRayAABBEntry(o, invDirPX, box, RAY_EPSILON, LARGE_T, entry))
+        {
+            printf("FAIL aabb-entry: expected hit from inside box\n");
+            return false;
+        }
+        if (fabsf(entry - RAY_EPSILON) > 1e-6f)
+        {
+            printf("FAIL aabb-entry: inside-box entry=%f, want RAY_EPSILON\n", entry);
             return false;
         }
     }
