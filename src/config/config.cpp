@@ -3,6 +3,7 @@
 #include "utils/logger.h"
 
 #include <algorithm>
+#include <cctype>     // std::tolower — case-insensitive enum-name parsing
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -51,6 +52,78 @@ json loadConfigFile(const std::string& path)
 
     Log::info("Config", "Loading: %s", path.c_str());
     return json::parse(f);
+}
+
+// ====================================================================
+// Enum string parsing (config JSON accepts names OR legacy numbers)
+//
+// mergeConfigJson accepts either the enum's string name (case-insensitive,
+// e.g. "SharedMem" / "sharedmem") or the legacy integer value (e.g. 3), so
+// existing numeric config files keep working.  An unknown name is NOT a
+// silent no-op — it logs a warning and keeps the current value.
+// ====================================================================
+
+static std::string toLower(std::string s)
+{
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    return s;
+}
+
+static CompactMethod parseCompactMethod(const json& v, CompactMethod fallback)
+{
+    if (v.is_number_integer())
+        return static_cast<CompactMethod>(v.get<int>());
+    if (!v.is_string())
+    {
+        Log::warn("Config", "compactMethod must be a name or int — keeping %s",
+                  toString(fallback));
+        return fallback;
+    }
+    const std::string s = toLower(v.get<std::string>());
+    if (s == "off")        return CompactMethod::Off;
+    if (s == "globalscan") return CompactMethod::GlobalScan;
+    if (s == "thrust")     return CompactMethod::Thrust;
+    if (s == "sharedmem")  return CompactMethod::SharedMem;
+    Log::warn("Config", "unknown compactMethod '%s' — keeping %s",
+              v.get<std::string>().c_str(), toString(fallback));
+    return fallback;
+}
+
+static RngMode parseRngMode(const json& v, RngMode fallback)
+{
+    if (v.is_number_integer())
+        return static_cast<RngMode>(v.get<int>());
+    if (!v.is_string())
+    {
+        Log::warn("Config", "rngMode must be a name or int — keeping %s",
+                  toString(fallback));
+        return fallback;
+    }
+    const std::string s = toLower(v.get<std::string>());
+    if (s == "lcg")    return RngMode::LCG;
+    if (s == "halton") return RngMode::HALTON;
+    Log::warn("Config", "unknown rngMode '%s' — keeping %s",
+              v.get<std::string>().c_str(), toString(fallback));
+    return fallback;
+}
+
+static FresnelMode parseFresnelMode(const json& v, FresnelMode fallback)
+{
+    if (v.is_number_integer())
+        return static_cast<FresnelMode>(v.get<int>());
+    if (!v.is_string())
+    {
+        Log::warn("Config", "fresnelMode must be a name or int — keeping %s",
+                  toString(fallback));
+        return fallback;
+    }
+    const std::string s = toLower(v.get<std::string>());
+    if (s == "schlick")  return FresnelMode::Schlick;
+    if (s == "accurate") return FresnelMode::Accurate;
+    Log::warn("Config", "unknown fresnelMode '%s' — keeping %s",
+              v.get<std::string>().c_str(), toString(fallback));
+    return fallback;
 }
 
 // ====================================================================
