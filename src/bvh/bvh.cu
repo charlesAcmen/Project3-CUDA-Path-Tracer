@@ -262,14 +262,33 @@ void buildSceneBvh(BvhBuffers& out,
 {
     out.hostNodes.clear();
     out.hostTriangles.clear();
-    out.hostTriangles.reserve(hostTris.size());   // preallocate for the reordered output
 
-    for (size_t i = 0; i < geoms.size(); i++)
+    // 1. Bake every mesh's triangles from object space to world space and tag
+    //    each with its materialId.  Vertices use the model transform; normals
+    //    use the inverse-transpose (the normal transform the old kernel
+    //    applied per hit).
+    std::vector<Triangle> worldTris;
+    worldTris.reserve(hostTris.size());
+    for (const Geom& g : geoms)
     {
-        if (geoms[i].meshTriangleCount <= 0) continue;   // meta stays root = -1
-        out.hostBvhMeta[i].rootNodeIndex =
-            buildMeshBvh(out, hostTris, geoms[i]);
+        if (g.meshTriangleCount <= 0) continue;
+        for (int i = 0; i < g.meshTriangleCount; i++)
+        {
+            const Triangle& src = hostTris[g.meshTriangleOffset + i];
+            Triangle dst;
+            dst.v0         = bakePoint(g.transform, src.v0);
+            dst.v1         = bakePoint(g.transform, src.v1);
+            dst.v2         = bakePoint(g.transform, src.v2);
+            dst.n0         = bakeNormal(g.invTranspose, src.n0);
+            dst.n1         = bakeNormal(g.invTranspose, src.n1);
+            dst.n2         = bakeNormal(g.invTranspose, src.n2);
+            dst.materialId = g.materialid;
+            worldTris.push_back(dst);
+        }
     }
+
+    // 2. ONE tree over the combined world-space array.
+    buildMeshBvh(out, worldTris);
 }
 
 void uploadToDevice(BvhBuffers& b)
