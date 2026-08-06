@@ -106,3 +106,16 @@ __host__ __device__ inline bool intersectRayAABBEntry(
     tEntry = tNear;
     return tNear <= tFar;
 }
+
+/**
+ * Ray/AABB overlap test — the entry-distance variant with the entry value
+ * discarded.  Callers that only need a boolean go through here so there is a
+ * single implementation of the slab test.
+ */
+__host__ __device__ inline bool intersectRayAABB(
+    const glm::vec3& o, const glm::vec3& invDir,
+    const AABB& box, float tNear, float tFar)
+{
+    float entry;
+    return intersectRayAABBEntry(o, invDir, box, tNear, tFar, entry);
+}
