@@ -15,7 +15,7 @@
 // is therefore world-space; materialId tags which material the triangle
 // belongs to so the shading kernel can resolve it from the hit triangle.
 struct Triangle {
-    glm::vec3 v0, v1, v2;  // three vertex positions in object space
+    glm::vec3 v0, v1, v2;  // three vertex positions
     glm::vec3 n0, n1, n2;  // vertex normals (smooth shading interpolation)
 };
 
