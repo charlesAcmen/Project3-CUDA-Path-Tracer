@@ -12,13 +12,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Runtime Configuration (three-layer priority)
 
-`CLI flags > config.local.json > code defaults`, handled by `src/config/config.cpp`/`config.h` through the `appConfig()` singleton. Defaults (in `AppConfig`): `compactMethod = SharedMem`, `sortByMaterial = false`, `rngMode = LCG`, `fresnelMode = Schlick`, `autoSave = true`. BVH depth/leaf size are **compile-time constants** `kBvhMaxDepth`/`kBvhLeafSize` in `src/constants.h` — not runtime-configurable.
+`CLI flags > config.local.json > code defaults`, handled by `src/config/config.cpp`/`config.h` through the `appConfig()` singleton. Defaults: `compactMethod = SharedMem`, `sortByMaterial = false`, `rngMode = LCG`, `fresnelMode = Accurate`, `autoSave = true`. All runtime renderer settings live in the `AppConfig` singleton — `fresnelMode` is a plain field there (like `rngMode`, default Accurate), **not** in `RenderState`. BVH depth/leaf size are **compile-time constants** `kBvhMaxDepth`/`kBvhLeafSize` in `src/constants.h` — not runtime-configurable.
+
+In `config.local.json`, enum fields (`compactMethod`, `rngMode`, `fresnelMode`) accept either the **case-insensitive name** (`"SharedMem"`, `"lcg"`, `"Accurate"`) or the **legacy integer** (`3`, `0`, `1`); unknown names fall back to the current value with a warning. CLI flags stay numeric (`--compact=N`, `--rng=N`, `--fresnel=N`).
 
 | Flag | Meaning |
 |------|---------|
 | `--compact=N` | Compaction: 0=off, 1=global-mem scan, 2=Thrust `copy_if`, 3=shared-mem scan (default) |
 | `--sort=N` | Material sorting 0/1 (default off) |
-| `--fresnel=N` | 0=Schlick (default), 1=Accurate Fresnel |
+| `--fresnel=N` | 0=Schlick, 1=Accurate Fresnel (default) |
 | `--rng=N` | 0=LCG (default), 1=scrambled Halton |
 | `--benchmark` | Enable profiler CSV output to `profiler_output/<scene>_<timestamp>/` |
 | `--warmup=N` | Profiler warmup iterations (default 3) |
@@ -92,7 +94,7 @@ src/
 - **`Camera`** — resolution, position/lookAt/view/up/right, fov, pixelLength, `lensRadius` (0 = pinhole), `focalDistance`.
 - **`PathSegment`** — ray + accumulated color + pixelIndex + remainingBounces.
 - **`ShadeableIntersection`** — `t` (<0 = miss), `surfaceNormal`, `materialId`.
-- **`RenderState`** — camera + iterations + traceDepth + rrMinBounces + fresnelMode + host `image` buffer + `DebugConfig`.
+- **`RenderState`** — camera + iterations + traceDepth + rrMinBounces + host `image` buffer + `DebugConfig`. (Renderer settings like `fresnelMode`/`rngMode`/compaction live in `AppConfig`, not here.)
 - **`AppConfig`** — runtime config singleton (see above).
 
 ### Random Number Generation (`src/rng/rng.h`)
@@ -121,7 +123,7 @@ Bloom runs in linear HDR space (threshold → separable Gaussian blur with share
 ### Scene Files
 
 - **Materials** — `TYPE`: `Diffuse` / `Emitting` / `Specular` / `Refractive`. `Specular` supports `SPECULAR_COLOR` and `ROUGHNESS` (0 → mirror; higher → glossier via `exponent = 2/r² − 2`). `Refractive` uses `IOR`.
-- **Camera** — `RES`, `FOVY`, `ITERATIONS`, `DEPTH`, `RR_DEPTH`, `FILE`, `EYE`, `LOOKAT`, `UP`; optional `LENS_RADIUS` / `FOCAL_DISTANCE` (DoF) and `FRESNEL_MODE` (0/1).
+- **Camera** — `RES`, `FOVY`, `ITERATIONS`, `DEPTH`, `RR_DEPTH`, `FILE`, `EYE`, `LOOKAT`, `UP`; optional `LENS_RADIUS` / `FOCAL_DISTANCE` (DoF). (Fresnel mode is a renderer setting — set via config.local.json `fresnelMode` or CLI `--fresnel`, not the scene file.)
 - **Objects** — `TYPE`: `"mesh"` with `FILE` (mesh path relative to the scene file; `.obj` via tinyobjloader, `.gltf`/`.glb` via cgltf), `MATERIAL`, `TRANS`, `ROTAT`, `SCALE`. Models live in `scenes/models/` (cube.obj, sphere.obj, sphere_inv.obj, light.obj, pyramid.obj, diamond.obj, cube.gltf, cube.glb).
 - **Winding / normals** — the renderer **trusts the model's winding and normal direction**. The intersection reports the true shading normal; `scatterRay` orients it toward the ray only for opaque materials, and refraction reads its sign (dot with the ray) to classify enter vs exit. For solid glass use an **outward-wound** mesh (`sphere.obj` — smooth `vn`, CCW). `sphere_inv.obj` is **inward-wound and flat-shaded** (no `vn`): it renders as inside-out glass — Fresnel wall reflections still visible, but the entry ray is misclassified as "exit", so there is **no lensing/caustics** (that's the correct winding-respecting behavior, not a bug).
 

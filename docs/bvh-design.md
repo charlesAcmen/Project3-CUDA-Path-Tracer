@@ -1,37 +1,37 @@
 # BVH Acceleration Design
 
-> Status: **implemented** — CPU build + GPU iterative traversal wired into the renderer.
-> `src/bvh/` (build + host test) landed first; this document's remaining items
-> (GPU kernel, renderer wiring, config, ImGui) are now in place.  The only open
-> item is the GPU A/B byte-identical render check (see Verification).
+> Status: **implemented** — single world-space BVH, CPU build + GPU iterative
+> traversal, wired into the renderer as the **only** intersection path.
+>
+> History: the first implementation was a **per-mesh, object-space** BVH (each
+> `Geom` got its own subtree, the kernel looped over geoms, transformed each ray
+> to object space, and per-hit transformed the normal back with
+> `recordWorldNormal`).  That design and its `BvhMeta` table are gone.  This
+> document describes the current single-tree design; see the git log
+> (`f1cbd69` "overhaul bvh") for the removed one.
 
-## Scope & Requirements
+## Design Overview
 
-`INSTRUCTION.md` (Part 2, Performance, :six:) requires a hierarchical spatial data
-structure (BVH/Octree) with:
+**One BVH over ALL mesh triangles, in world space.**  At build time every mesh's
+triangles are **baked** from object space to world space (vertices via the geom
+`transform`, vertex normals via `invTranspose`, each tagged with its
+`materialId`), and a single tree is built over the combined array.  The GPU
+kernel therefore runs **one closest-hit traversal per ray** with no per-mesh
+loop and no ray or normal transformation — the transform cost moved from
+per-ray-per-bounce to once-per-triangle-at-build.
 
-- **CPU-side construction is sufficient** — "GPU-side construction was a final project".
-- **GPU traversal must be iterative** ("Note that traversal on the GPU must be coded iteratively!").
-- **Toggleable** for performance comparisons ("Make sure this is toggleable").
-- **Maximum tree depth configurable from the start**.
+Key decisions:
 
-Decisions locked with the user:
+| Decision | Choice | Why |
+|----------|--------|-----|
+| Granularity | Single tree over all meshes | Ray does 1 traversal, not G; far-plane pruning is scene-global. Win scales with mesh count (glTF models). |
+| Space | World space, baked at build | Runtime needs zero transforms; normals get one `invTranspose` per triangle instead of per hit. |
+| Build | Exhaustive SAH, pure host | Scenes ≤ ~1248 triangles → build is a few ms; no binning needed. |
+| Traversal | Iterative, explicit stack, near-child-first | GPU has no recursion; near-first + far-plane pruning tightens `result.t` early. |
+| Depth / leaf | Compile-time `kBvhMaxDepth`/`kBvhLeafSize` | Not runtime-configurable (see Configuration). |
+| Toggle | None — BVH is the only path | The O(N) fallback (`computeIntersections`) was deleted with the refactor. |
 
-| Decision | Choice |
-|----------|--------|
-| Scope | CPU build + GPU iterative traversal, wired into the renderer |
-| Granularity | **Per-mesh BVH in object space** (reuse the existing per-geom ray transform) |
-| Baseline | **Existing O(N) kernel (`computeIntersections`) is kept untouched as the default/toggle-off path** |
-| Toggle | `--bvh=0/1` (default OFF), `--bvh-depth=N`, `--bvh-leaf=N` |
-
-Current state: the only intersection path is the GPU `computeIntersections` kernel
-(`src/kernels/intersection.cuh:49`) — per-path thread, outer loop over all Geoms,
-inner linear scan over `meshTriangleOffset..+count`. Triangles live in one flat
-device array `g_dev.deviceTriangles`. There is no AABB/BVH code anywhere.
-
----
-
-## Data Structures (new `src/bvh/`)
+## Data Structures
 
 ### `src/bvh/aabb.h` (header-only, `__host__ __device__`)
 
@@ -39,208 +39,184 @@ device array `g_dev.deviceTriangles`. There is no AABB/BVH code anywhere.
 struct AABB {
     glm::vec3 min{ FLT_MAX }; glm::vec3 max{ -FLT_MAX };
     void expand(const glm::vec3& p);
-    void expand(const Triangle& t);        // v0,v1,v2
+    void expand(const Triangle& t);   // v0, v1, v2
     void expand(const AABB& b);
-    float surfaceArea() const;             // degenerate -> 1.0 (SAH divide-by-zero guard)
+    float surfaceArea() const;        // degenerate/NaN -> 1.0 (SAH divide guard)
 };
 __host__ __device__ bool intersectRayAABB(const glm::vec3& o, const glm::vec3& invDir,
     const AABB& box, float tNear, float tFar);
+__host__ __device__ bool intersectRayAABBEntry(const glm::vec3& o, const glm::vec3& invDir,
+    const AABB& box, float tNear, float tFar, float& tEntry);
 ```
 
-`intersectRayAABB` = sign-based slab test (min/max swapped by `invDir < 0`, immune to
-`0·inf = NaN` on zero direction components). Hit iff the ray interval `[tmin, tmax]`
-**overlaps** `[tNear, tFar]` — must correctly handle a ray origin *inside* the box
-(`tmin < 0` but `tmax >= tNear` still hits). Caller passes `tNear = RAY_EPSILON`,
-`tFar = current best closestT` (far-plane pruning).
+- Sign-based slab test: min/max swapped per negative `invDir` component; zero
+  direction → ±inf slab (immune to `0·inf = NaN`).
+- `intersectRayAABBEntry` also reports `tEntry` = the near clip (`max(RAY_EPSILON, near)`),
+  the **near-first ordering metric** (see Traversal).
+- `intersectRayAABB` is a thin wrapper that discards `tEntry` — one slab-test
+  implementation.
 
-### `src/bvh/bvh.h` (header-only)
+### `src/bvh/bvh.h` (header-only, shared host/device)
 
 ```cpp
-inline constexpr int kMaxBvhStackDepth = 64;   // explicit-stack capacity (compile-time)
-
 struct BvhNode {
-    AABB bounds;      // object space
-    int  left;        // internal: left child node index; leaf: absolute triangle offset
-    int  right;       // internal: right child node index; leaf: triangle count
-    int  isLeaf;
+    AABB bounds;
+    int  left;          // internal: left child index;  leaf: triangle-run offset
+    int  right;         // internal: right child index; leaf: triangle count
+    bool isLeaf = false;
+    // accessors: childL()/childR() (internal), leafTriOffset()/leafTriCount() (leaf)
 };
-struct BvhMeta { int rootNodeIndex = -1; int nodeCount = 0; };  // -1 = empty mesh
-
-// Tree buffers + dedicated GPU memory management (INSTRUCTION.md).
 struct BvhBuffers {
-    BvhNode* deviceNodes = nullptr;  int numNodes = 0;
-    BvhMeta* deviceBvhMeta = nullptr; int numGeoms = 0;
-    std::vector<BvhNode>  hostNodes;      // construction output
-    std::vector<BvhMeta>  hostBvhMeta;
-    std::vector<Triangle> hostTriangles;  // REORDERED flat triangles (uploaded as deviceTriangles)
+    BvhNode*              deviceNodes   = nullptr;   // uploadToDevice/freeDevice
+    std::vector<BvhNode>  hostNodes;                 // construction output
+    std::vector<Triangle> hostTriangles;             // REORDERED world-space triangles
 };
+struct BvhHit { bool hit = false; float t = LARGE_T; glm::vec3 normal; int triIndex = -1; };
 
-// Shared iterative closest-hit traversal — the EXACT algorithm the GPU kernel and the
-// host test both use, so correctness is validated once.
-__host__ __device__ bool traverseBvhClosest(const Ray& objRay, const BvhNode* nodes,
-    int rootNodeIndex, const Triangle* tris, float& closestT, glm::vec3& objNormal);
+__host__ __device__ inline BvhHit traverseBvhClosest(
+    const Ray& objRay, const BvhNode* nodes, const Triangle* tris, float maxT);
 ```
 
-`traverseBvhClosest` (explicit stack `int stack[kMaxBvhStackDepth]`):
-1. Pop node; AABB test against `[RAY_EPSILON, closestT]`; miss -> skip subtree.
-2. Leaf -> test `tris[node.left + j]` (`j < node.right`) with the **same**
-   `triangleIntersectionTest`, update on `t < closestT` (strict).
-3. Internal -> push children (with `sp < kMaxBvhStackDepth` guard).
+`traverseBvhClosest` — the **exact** algorithm the GPU kernel and the host test
+run, validated once:
 
-`bvhMaxDepth` is clamped to `[1, 63]` so tree height can never overflow the stack.
+1. Loop over an explicit stack (`int stack[kMaxBvhStackDepth]`); root is always
+   node 0 (`nodes == nullptr` → clean miss).
+2. AABB test clipped to `[RAY_EPSILON, result.t]` — near bound skips self-hits,
+   far bound is the current best distance (**far-plane pruning**).
+3. Leaf → sequential scan `tris[triBase + j]` over the leaf's contiguous run
+   (see Flatten); update `result` on `t < result.t` (strict).
+4. Internal → compute both children's entry distance (`intersectRayAABBEntry`);
+   if both hit, **push the farther child, descend the nearer immediately**.
+   Near-first finds close hits early so `result.t` shrinks sooner and popped
+   subtrees are pruned against it.
 
 ### `src/bvh/bvh.cu` (compiled TU — pure host build + GPU memory management)
 
 ```cpp
 namespace bvh {
-int  buildMeshBvh(std::vector<BvhNode>& out, const std::vector<Triangle>& hostTris,
-                  int triOffset, int triCount, int maxDepth, int leafSize);
-void buildSceneBvh(BvhBuffers& out, const std::vector<Triangle>& hostTris,
-                   const std::vector<Geom>& geoms, int maxDepth, int leafSize);
-void uploadToDevice(BvhBuffers& b);   // cudaMalloc node+meta, H2D
+void buildMeshBvh(BvhBuffers& out, const std::vector<Triangle>& hostTris);
+void buildSceneBvh(BvhBuffers& out,
+                   const std::vector<Triangle>& hostTris,
+                   const std::vector<Geom>& geoms);
+void uploadToDevice(BvhBuffers& b);   // cudaMalloc + H2D copy of hostNodes
 void freeDevice(BvhBuffers& b);
 }
 ```
 
----
-
 ## Build Algorithm (CPU, pure host)
 
-**Exhaustive SAH** (Surface Area Heuristic) — scenes are ≤ ~1248 triangles, build is
-a few ms. Recursive:
+**World-space bake** (`buildSceneBvh`):
+
+- Vertices: `bakePoint(transform, p)` = `transform * vec4(p, 1)`.
+- Normals: `bakeNormal(invTranspose, n)` = `invTranspose * vec4(n, 0)` —
+  **deliberately NOT re-normalized**.  `triangleIntersectionTest` interpolates the
+  baked normals and normalizes the result; by linearity of the matrix
+  (`invTranspose * lerp(n0,n1,n2) == lerp(invTranspose*n0, ...)`), this reproduces
+  the old per-hit `recordWorldNormal` (invTranspose + normalize) exactly, with one
+  transform per triangle instead of one per hit.
+- Each triangle is tagged with the geom's `materialId` → **per-triangle materials**
+  (a mesh can carry several, e.g. glTF).
+
+**Exhaustive SAH build** (`buildMeshBvh`) — a few ms at ≤1248 triangles:
 
 ```
-build(bounds, primIdx, depth):
-  if primIdx.size() <= leafSize or depth >= maxDepth:  -> leaf
-  for each axis (longest first):
-      sort primIdx by triangle centroid along axis
+build(begin, end, depth):                       # over a per-mesh index array
+  if n <= kBvhLeafSize or depth >= kBvhMaxDepth: -> leaf
+  for each axis (longest extent first):
+      sort the range by triangle centroid along the axis
       build prefix/suffix AABBs
-      for each split k: cost = 1 + (areaL*leftCost + areaR*rightCost)/areaNode
-  keep best (axis, split);  if bestCost >= leafCost (= primIdx.size()): -> leaf
-  else partition and recurse left/right
+      for each split k: cost = 1 + (areaL*k + areaR*(n-k)) / areaNode
+  keep best (axis, split); if bestCost >= leafCost (= n): -> leaf
+  else re-sort along the winning axis, partition, recurse
 ```
 
-- `surfaceArea()` is the probability weight (a random ray is more likely to hit a
-  larger box, so that subtree deserves finer splits).
-- Depth capped at `maxDepth` (the INSTRUCTION-tunable knob; also bounds GPU stack).
-- Degenerate/planar AABBs guarded by `surfaceArea() == 1.0`.
+The recursion **permutes an index array in place** so a leaf's triangles always
+occupy a contiguous run of it.
 
-**Flattening pass** (inside `buildSceneBvh`): after building each mesh's tree, a
-post-order DFS writes each leaf's triangles into a contiguous chunk of the per-mesh
-reordered copy and sets `triOffset = meshBaseOffset + chunkStart`, `triCount =
-chunkSize`. Meshes concatenated -> `BvhBuffers::hostTriangles`, uploaded as
-`deviceTriangles`.
+**Flatten pass** (post-order DFS, `flattenRecursive`): writes each leaf's
+triangles into a contiguous chunk of `hostTriangles` and rewrites the leaf's
+`left` to that chunk's offset.  Leaves are visited exactly once and their counts
+sum to the total, so the chunks **tile `[0, N)` with no overlap and no gap** —
+each leaf's triangles are a sequential memory run (cache-friendly reads).
+Verified by `testBuildStructure`.
 
-The reorder is **within each mesh only**, so `Geom::meshTriangleOffset/Count` still
-slice the same triangle set. The O(N) kernel computes closest-hit independently of
-order, so it stays 100% correct on the reordered array — both paths share one
-`deviceTriangles`.
-
----
-
-## GPU Traversal Kernel (new `src/kernels/bvh_traversal.cuh`)
+## GPU Traversal Kernel (`src/kernels/bvh_traversal.cuh` / `.cu`)
 
 ```cpp
 __global__ void bvhTraverse(
-    int depth, int num_paths,
-    PathSegment* pathSegments, Geom* geoms, int geoms_size,
+    int num_paths,
+    PathSegment* pathSegments,
     ShadeableIntersection* intersections,
     Triangle* deviceTriangles,
-    BvhNode* deviceBvhNodes, BvhMeta* deviceBvhMeta);
+    BvhNode* deviceBvhNodes);
 ```
 
-Structure mirrors `computeIntersections`: per-path thread; outer `for i in geoms`;
-skip `deviceBvhMeta[i].rootNodeIndex < 0`; transform ray to object space; call
-`traverseBvhClosest`; on hit nearer than current best record `hit_geom_index` and the
-world-space normal. Write-out identical (miss `t = -1`; else `t`, `materialId =
-geoms[i].materialid`, `surfaceNormal`).
-
-Shared helpers (added to `src/intersection/intersections.h`, `__device__ inline`):
-`transformRayToObjectSpace` and `recordWorldNormal` — the latter replicates the O(N)
-normal path exactly: `multiplyMV(geom.invTranspose, vec4(objNormal,0))`, normalize,
-fallback `(0,1,0)` if NaN / `len2 < RAY_EPSILON`.
-
-**Invariant for bit-identical `--bvh=0` vs `--bvh=1` renders**: same object-space
-transform, same `triangleIntersectionTest`, same `t` (object-space parameter, no
-renormalization), same closest-hit bookkeeping (a new geom must be *strictly* nearer),
-same normal fallback. AABB pruning never changes the set of hit triangles — the only
-possible difference is an exact-tie on a shared edge (measure-zero, invisible).
-
----
+One thread per active path.  Guard: null nodes/triangles (empty scene) → miss.
+Otherwise a single `traverseBvhClosest(ray, deviceBvhNodes, deviceTriangles,
+LARGE_T)` over the whole tree — no `Geom*`, no `BvhMeta*`, no per-mesh loop.
+On hit, writes world-space `t`, `surfaceNormal` (baked), and the **hit
+triangle's** `materialId` (`deviceTriangles[hit.triIndex].materialId`).
 
 ## Wiring (`src/pathtrace.h/.cu`)
 
-- `DeviceBuffers` gains `BvhBuffers bvh;`.
-- `pathtraceInit` (inside the triangle-upload block, `pathtrace.cu:139-147`): always
-  `bvh::buildSceneBvh(...)` (cheap), upload `g_dev.bvh.hostTriangles` as
-  `deviceTriangles`, then `bvh::uploadToDevice(g_dev.bvh)`.
-- `pathtraceFree`: `bvh::freeDevice(g_dev.bvh)`.
-- Bounce loop (`pathtrace.cu:292-297`):
+- `DeviceBuffers` holds `BvhBuffers bvh` plus a separate `deviceTriangles`.
+- `pathtraceInit`:
   ```cpp
-  const bool useBvh = g_opts.bvh.enabled && g_dev.bvh.deviceNodes != nullptr;
-  if (useBvh) { LAUNCH_KERNEL_AUTO(bvhTraverse, ...); }
-  else        { LAUNCH_KERNEL_AUTO(computeIntersections, ...); }
+  bvh::buildSceneBvh(g_dev.bvh, scene->hostTriangles, scene->geoms);   // bake + build + flatten
+  cudaMemcpy(g_dev.deviceTriangles, g_dev.bvh.hostTriangles.data(),
+             n * sizeof(Triangle), cudaMemcpyHostToDevice);            // reordered world tris
+  bvh::uploadToDevice(g_dev.bvh);                                      // nodes only
   ```
-  Both share `ProfilerOp::ComputeIntersections` so the benchmark CSV column is
-  unchanged and A/B compares directly.
+  `deviceTriangles` is allocated/copied once, freed only at shutdown — the leaf
+  chunk offsets stay valid across the whole render.
+- Bounce loop: `bvhTraverse` is the **only** intersection path (there is no O(N)
+  fallback anymore).
+- `pathtraceFree`: `bvh::freeDevice(g_dev.bvh)`.
 
----
+## Configuration
 
-## Configuration (`src/config/config.h/.cpp`)
-
-`BvhConfig` (pattern of `BloomConfig`: `clamp()` + kMin/kMax, `#include "bvh/bvh.h"`
-for `kMaxBvhStackDepth`):
-
-```cpp
-struct BvhConfig {
-    bool enabled = false;    // default OFF -> O(N) baseline
-    int  maxDepth = 24;      // clamp [1, 63]
-    int  leafSize = 4;       // clamp [1, 64]
-    void clamp();
-};
-```
-
-CLI: `--bvh=0/1`, `--bvh-depth=N`, `--bvh-leaf=N`. JSON: nested `"bvh": {...}`.
-Runtime setters/getters `setBvhEnabled/getBvhEnabled` etc. in `pathtrace.h/.cu`
-(mutate `g_opts`, live kernel-switch). ImGui section: `Enable BVH traversal` checkbox
-(live); `Max depth / Leaf size` shown as read-only (build-time, restart to change).
-
----
+`kBvhMaxDepth = 24`, `kBvhLeafSize = 4`, `kMaxBvhStackDepth = 64` are
+compile-time constants in `src/constants.h`.  They are **not** runtime-tunable:
+tree height ≤ 24 < 64 is safely below the stack capacity, so the push guard never
+silently drops a node.
 
 ## Files
 
-**New**: `src/bvh/aabb.h`, `src/bvh/bvh.h`, `src/bvh/bvh.cu`,
-`src/kernels/bvh_traversal.cuh`, `tests/bvh_test/` (host build+traverse vs brute-force),
-`docs/bvh-design.md` (this file).
+- `src/bvh/aabb.h`, `src/bvh/bvh.h`, `src/bvh/bvh.cu` — the acceleration structure.
+- `src/kernels/bvh_traversal.cuh` / `.cu` — the only intersection kernel.
+- `tests/bvh_test/` — host validation (compiles the production `bvh.cu`).
 
-**Modified**: `src/intersection/triangle.h` (`__device__` -> `__host__ __device__`),
-`src/intersection/intersections.h` (two helpers), `src/kernels/intersection.cuh`
-(minimal refactor to call the helpers — extraction, not deletion),
-`src/pathtrace.h/.cu`, `src/config/config.h/.cpp`, `src/main.cpp` (ImGui),
-`CMakeLists.txt` (`sources` += `src/bvh/bvh.cu`; `headers` += the two bvh headers).
+## Verification (`tests/bvh_test`)
 
----
+1. **World-space bake** (`testWorldBake`, `testMultiGeomBake`) — baked vertices /
+   normals / materialId match per-geom transform math.
+2. **Build structure + flatten tiling** (`testBuildStructure`) — root is node 0,
+   DFS reaches every node once (no cycles/orphans), and leaf chunks **partition**
+   the triangle array exactly: contiguous, non-overlapping, gap-free.
+3. **Traversal vs brute force** (`testTraversalVsBrute`) — `traverseBvhClosest`
+   matches a brute-force O(N) scan on the baked array for hit flag, `t`, normal,
+   and `materialId`, across mesh kinds and transforms (incl. non-uniform scale).
+4. **AABB entry + near-first metric** (`testAabbEntry`) — entry-distance
+   correctness, two-box ordering under +x/−x, origin-inside-box → `RAY_EPSILON`.
+5. **Empty scene** (`testEmptyScene`) — no triangles → no tree; traversal with
+   null buffers misses without touching memory.
 
-## Verification
+```
+bvh_test: ALL PASS
+```
 
-1. `tests/bvh_test` (host): build BVH for synthetic meshes (axis-aligned cube, random
-   cloud, degenerate set) over `maxDepth ∈ {8,24} × leafSize ∈ {1,4}`; deterministic ray
-   batch; assert `traverseBvhClosest` == brute-force O(N) `t`/normal per ray.
-2. **GPU A/B**: `--rng=0 --sort=0 --compact=0 --bvh=0` vs `--bvh=1` on the same scene
-   must produce byte-identical saved PNGs (intersection is bit-identical).
-3. `--benchmark --warmup=2` with/without `--bvh`; compare `ComputeIntersections` column.
-   **Honest expectation**: at ≤1248 triangles the O(N) scan may already be fast enough;
-   the win appears on large meshes. That is a legitimate analysis result.
-
----
+The main renderer build (CUDA + GL) is validated by visual inspection, per the
+project's convention (no test suite in the main build).
 
 ## Edge Cases
 
-- Empty mesh / no triangles: `rootNodeIndex = -1`, kernel skips; null node buffer falls
-  back to O(N).
-- Degenerate AABBs (planar/zero-volume): `surfaceArea()==1.0` SAH guard.
-- Zero direction components: sign-based slab test.
-- Double-sided triangles: no back-face culling added; AABBs are orientation-free.
-- Normal output: exact copy of O(N) fallback path.
-- Exact ties: measure-zero, not constructed in tests.
-- Stack overflow: build-time depth clamp `<= 63`; runtime push guard.
+- Empty scene / no triangles → `hostNodes` empty → `nodes == nullptr` → miss.
+- Degenerate / planar AABBs → `surfaceArea() == 1.0` SAH guard (no divide-by-zero).
+- Zero direction components → sign-based slab test (no NaN poison).
+- Degenerate triangles → the triangle test's barycentric / normal fallbacks.
+- Double-sided triangles → no back-face culling; AABBs are orientation-free.
+- World-space normal = `invTranspose` at bake, normalized at hit — matches the old
+  per-hit transform exactly by linearity (winding preserved for refraction).
+- Near-first tie (`entryL == entryR`, e.g. ray inside both children) →
+  deterministic: right child descended, left pushed.
