@@ -17,6 +17,7 @@ ctrl shift p select variant
 .\build\bin\Release\cis565_path_tracer.exe scenes/coffee-table.json
 .\build\bin\Release\cis565_path_tracer.exe scenes/water_bottle.json
 .\build\bin\Release\cis565_path_tracer.exe scenes/john_marston.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/john_marston_scattered.json
 
 .\build\bin\Debug\cis565_path_tracer.exe scenes/cornell.json
 .\build\bin\RelWithDebInfo\cis565_path_tracer.exe scenes/cornellGlossy.json
