@@ -7,8 +7,9 @@ set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # Host-only CUDA program — no device kernels launched, no separable
-# compilation.  bvh_test.cu #includes src/bvh/bvh.cu so the build code
-# (SAH construction + flatten) compiles once together with the test.
+# compilation.  bvh_test.cu #includes src/bvh/bvh.cu so the PRODUCTION
+# build code (world-space bake + SAH construction + flatten) compiles once
+# together with the test — the test exercises exactly what the renderer runs.
 
 add_executable(bvh_test bvh_test.cu)
 

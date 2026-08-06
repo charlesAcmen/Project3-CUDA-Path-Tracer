@@ -1,57 +1,41 @@
 // ====================================================================
-// bvh_test — host-side BVH build + traverse validation, with an optional
-// interactive TRACE of the build / traversal intermediate state.
+// bvh_test — host-side validation of the single world-space BVH.
 //
-// Builds per-mesh BVHs for synthetic meshes (axis-aligned cube, random
-// triangle cloud, degenerate soup) across maxDepth × leafSize
-// configurations and asserts traverseBvhClosest matches a brute-force
-// O(N) linear scan ray-for-ray (hit flag, t, shading normal).
+// Compiles the PRODUCTION code (src/bvh/bvh.h + src/bvh/bvh.cu) into the
+// test TU, so the tests exercise exactly what the renderer runs.  There
+// are no traced duplicates anymore — the traced/ copies that mirrored the
+// OLD per-mesh, object-space build were deleted when the build switched to
+// a single world-space tree.
 //
-// Also exercises buildSceneBvh's flatten pass: the reordered per-mesh
-// slice is the same triangle set (no cross-mesh contamination), and
-// traversal on the reordered buffer still matches brute force on both
-// the reordered and the original buffers.
+// Validates:
+//   1. World-space bake: buildSceneBvh transforms each geom's triangles to
+//      world space (vertices via transform, normals via invTranspose),
+//      tags materialId, and flattens leaves into contiguous runs.
+//   2. Single-tree build: root is node 0, every node reachable, leaf
+//      chunks within the triangle array.
+//   3. traverseBvhClosest (near-child-first) matches a brute-force O(N)
+//      scan on the baked array — hit flag, t, normal, materialId.
+//   4. intersectRayAABBEntry entry-distance correctness.
+//   5. Empty scene: no nodes, traversal misses.
 //
-// TRACING: the production BVH code stays clean — instead, bvh_test uses
-// TRACED COPIES under traced/ (aabb_traced.h / bvh_traced.h /
-// bvh_traced.cu) that print the intermediate state of AABB / BvhNode /
-// the order permutation / the SAH split search / the stack walk.  Set
-// trace::level (or run `bvh_test --quiet` to skip the demo) to see it.
-//
-// Host-only: the CUDA build/traverse functions are compiled for host
-// execution (no kernels launched, no GPU required).
+// Host-only: no kernels launched, no GPU required.
 // ====================================================================
 
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
-#include <cstring>
 #include <vector>
 
-#include "traced/trace.h"       // TRACE macro + trace::level (+ trace::indent/vec)
-#include "traced/bvh_traced.h"  // TRACED AABB, BvhNode, traverseBvhClosest
+#include "bvh/bvh.h"             // production: AABB, BvhNode, BvhBuffers, traverseBvhClosest
+#include "bvh/aabb.h"            // production: intersectRayAABBEntry
 #include "constants.h"
 
-// Traced build code (SAH construction + flatten).  Compiled once here; do
-// NOT add src/bvh/bvh.cu to this test's CMake sources.
-#include "traced/bvh_traced.cu"
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 
-// ---------------------------------------------------------------------
-// trace facility definitions (host-only; declared in traced/trace.h)
-// ---------------------------------------------------------------------
-
-namespace trace {
-    void indent(int depth)
-    {
-        if (level <= 0) return;
-        for (int i = 0; i < depth; i++) std::printf("  ");
-    }
-    void vec(const char* label, const glm::vec3& v)
-    {
-        if (level <= 0) return;
-        std::printf("%s=(%.4g,%.4g,%.4g)", label, v.x, v.y, v.z);
-    }
-}
+// Production build code (world-space bake + SAH + flatten).  Compiled once
+// here; do NOT add src/bvh/bvh.cu to the test's CMake sources.
+#include "bvh/bvh.cu"
 
 namespace {
 
@@ -72,14 +56,32 @@ struct Lcg
 Triangle makeTriangle(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c)
 {
     glm::vec3 n = glm::normalize(glm::cross(b - a, c - a));
-    return Triangle{ a, b, c, n, n, n };
+    return Triangle{ a, b, c, n, n, n };   // materialId stays -1 (source geometry)
 }
 
-// Box centroid — production AABB no longer provides this (it was
-// test-only, used solely to aim rays here), so the harness computes it.
-glm::vec3 centroidOf(const AABB& bounds)
+// World-space transform builder (translation → rotation XYZ → scale).
+glm::mat4 makeTransform(const glm::vec3& trans, const glm::vec3& rotRad, const glm::vec3& scale)
 {
-    return 0.5f * (bounds.min + bounds.max);
+    glm::mat4 m(1.0f);
+    m = glm::translate(m, trans);
+    m = glm::rotate(m, rotRad.x, glm::vec3(1, 0, 0));
+    m = glm::rotate(m, rotRad.y, glm::vec3(0, 1, 0));
+    m = glm::rotate(m, rotRad.z, glm::vec3(0, 0, 1));
+    m = glm::scale(m, scale);
+    return m;
+}
+
+// Geom referencing a contiguous triangle slice [triOffset, triOffset+triCount).
+Geom makeGeom(int materialId, int triOffset, int triCount, const glm::mat4& T)
+{
+    Geom g;
+    g.materialid          = materialId;
+    g.transform           = T;
+    g.inverseTransform    = glm::inverse(T);
+    g.invTranspose        = glm::inverseTranspose(T);
+    g.meshTriangleOffset  = triOffset;
+    g.meshTriangleCount   = triCount;
+    return g;
 }
 
 // ---------------------------------------------------------------------
@@ -148,12 +150,14 @@ std::vector<Triangle> makeDegenerate(int n)
 // Brute force reference
 // ---------------------------------------------------------------------
 
-// Closest-hit linear scan over a triangle slice — the reference both
-// the BVH traversal and the O(N) GPU kernel are defined against.
+// Closest-hit linear scan over a triangle slice — the reference the BVH
+// traversal is validated against.  Also returns the hit triangle index so
+// the test can compare materialId with the BVH's triIndex.
 bool bruteForceClosest(const Ray& ray, const std::vector<Triangle>& tris,
-                       int offset, int count, float& t, glm::vec3& nrm)
+                       int offset, int count, float& t, glm::vec3& nrm, int& idx)
 {
     t = LARGE_T;
+    idx = -1;
     bool hit = false;
     for (int j = 0; j < count; j++)
     {
@@ -161,7 +165,7 @@ bool bruteForceClosest(const Ray& ray, const std::vector<Triangle>& tris,
         glm::vec3 nn;
         if (triangleIntersectionTest(ray, tris[offset + j], tt, nn))
         {
-            if (tt < t) { t = tt; nrm = nn; hit = true; }
+            if (tt < t) { t = tt; nrm = nn; idx = offset + j; hit = true; }
         }
     }
     return hit;
@@ -175,7 +179,7 @@ std::vector<Ray> makeRayBatch(const std::vector<Triangle>& tris, unsigned int se
     AABB bounds;
     for (const auto& t : tris)
         bounds.expand(t);
-    const glm::vec3 center = centroidOf(bounds);
+    const glm::vec3 center = 0.5f * (bounds.min + bounds.max);
     const float radius = glm::length(bounds.max - bounds.min) * 0.5f + 1.0f;
 
     Lcg rng(seed);
@@ -204,130 +208,222 @@ std::vector<Ray> makeRayBatch(const std::vector<Triangle>& tris, unsigned int se
 }
 
 // ---------------------------------------------------------------------
-// Trace demo — build + traverse a small cube with trace::level = 2 so
-// every intermediate struct state is printed.  `--quiet` skips this.
+// World-space bake reference + comparison
 // ---------------------------------------------------------------------
 
-void traceDemo()
+// Expected bake of one source triangle under a geom's transform:
+// vertices via transform (w=1), normals via invTranspose (w=0, deliberately
+// NOT re-normalized — triangleIntersectionTest normalizes the interpolated
+// result), materialId tagged.  Mirrors buildSceneBvh's bake.
+Triangle bakeExpected(const Geom& g, const Triangle& src)
 {
-    const std::vector<Triangle> cube = makeCube(1.0f);   // 12 tris, spans [-1,1]^3
+    Triangle d;
+    d.v0         = glm::vec3(g.transform * glm::vec4(src.v0, 1.0f));
+    d.v1         = glm::vec3(g.transform * glm::vec4(src.v1, 1.0f));
+    d.v2         = glm::vec3(g.transform * glm::vec4(src.v2, 1.0f));
+    d.n0         = glm::vec3(g.invTranspose * glm::vec4(src.n0, 0.0f));
+    d.n1         = glm::vec3(g.invTranspose * glm::vec4(src.n1, 0.0f));
+    d.n2         = glm::vec3(g.invTranspose * glm::vec4(src.n2, 0.0f));
+    d.materialId = g.materialid;
+    return d;
+}
 
-    std::vector<Geom> geoms(1);
-    geoms[0].meshTriangleOffset = 0;
-    geoms[0].meshTriangleCount  = (int)cube.size();
+bool nearVec(const glm::vec3& a, const glm::vec3& b, float eps)
+{
+    return glm::length(a - b) < eps;
+}
 
-    BvhBuffers bufs;
-    trace::level = 1;
-
-    std::printf("\n================ BUILD TRACE — cube, 12 tris, leafSize=4 maxDepth=24 ================\n");
-    bvh::buildSceneBvh(bufs, cube, geoms, 24, 4);
-    const int root = bufs.hostBvhMeta[0].rootNodeIndex;
-
-    std::printf("\n================ TRAVERSE TRACE ================\n");
-    const glm::vec3 oA(2.0f, 1.5f, 0.5f);            // outside, aimed at centroid -> HIT
-    const glm::vec3 oB(0.0f, 0.0f, 2.0f);            // above cube, moving +x -> MISS (pruned at root)
-    const glm::vec3 oC(0.0f, 0.0f, 3.0f);            // axis-aligned onto +z face -> HIT (zero dir comps)
-    const Ray rays[] = {
-        Ray{ oA, glm::normalize(glm::vec3(0.0f) - oA) },
-        Ray{ oB, glm::vec3(1.0f, 0.0f, 0.0f) },
-        Ray{ oC, glm::vec3(0.0f, 0.0f, -1.0f) },
+// Two triangles are equal iff materialId matches, vertices match, and the
+// baked normals are parallel (they may be scaled by invTranspose).
+bool triEqual(const Triangle& a, const Triangle& b, float eps)
+{
+    if (a.materialId != b.materialId) return false;
+    if (!nearVec(a.v0, b.v0, eps) || !nearVec(a.v1, b.v1, eps) || !nearVec(a.v2, b.v2, eps))
+        return false;
+    auto normalEq = [](const glm::vec3& x, const glm::vec3& y) {
+        const float lx = glm::length(x), ly = glm::length(y);
+        if (lx < 1e-6f && ly < 1e-6f) return true;
+        if (lx < 1e-6f || ly < 1e-6f) return false;
+        return glm::dot(x / lx, y / ly) > 1.0f - 1e-5f;
     };
-    const char* names[] = {
-        "A: aimed at centroid",
-        "B: outside moving +x (root AABB prune)",
-        "C: axis-aligned -z, zero direction components",
-    };
-    for (int i = 0; i < 3; i++)
+    return normalEq(a.n0, b.n0) && normalEq(a.n1, b.n1) && normalEq(a.n2, b.n2);
+}
+
+// Whether `got` is a permutation of `expected` (flatten reorders but must
+// never drop, duplicate, or alter a baked triangle).
+bool sameMultiset(const std::vector<Triangle>& expected, const std::vector<Triangle>& got, float eps)
+{
+    if (expected.size() != got.size()) return false;
+    std::vector<char> used(got.size(), 0);
+    for (const Triangle& e : expected)
     {
-        std::printf("\n--- Traverse ray %s ---\n", names[i]);
-        float t = LARGE_T;
-        glm::vec3 n;
-        const bool hit = traverseBvhClosest(rays[i], bufs.hostNodes.data(), root,
-                                            bufs.hostTriangles.data(), t, n);
-        std::printf("--- Result: %s  t=%.4g  normal=(%.4g,%.4g,%.4g) ---\n\n",
-                    hit ? "HIT" : "MISS", t, n.x, n.y, n.z);
+        bool found = false;
+        for (size_t j = 0; j < got.size() && !found; j++)
+        {
+            if (!used[j] && triEqual(e, got[j], eps)) { used[j] = 1; found = true; }
+        }
+        if (!found) return false;
     }
-
-    trace::level = 0;
+    return true;
 }
 
 // ---------------------------------------------------------------------
-// Assertions
+// Tests
 // ---------------------------------------------------------------------
 
-// Build one mesh END-TO-END (tree + flatten via buildSceneBvh, the real
-// production path) and verify traverseBvhClosest == brute force for every
-// ray in a deterministic batch.  The brute force scans the REORDERED
-// buffer — the triangle set is order-preserved, so this is equivalent to
-// scanning the original slice.
-bool testMeshTraversal(const char* name, const std::vector<Triangle>& tris,
-                       int maxDepth, int leafSize)
+// Test 1: world-space bake.  A cube under a NON-UNIFORM scale (exercises
+// the invTranspose normal path) must come out exactly as transform(source),
+// with materialId tagged.
+bool testWorldBake()
 {
-    std::vector<Geom> geoms(1);
-    geoms[0].meshTriangleOffset = 0;
-    geoms[0].meshTriangleCount  = (int)tris.size();
+    const std::vector<Triangle> cube = makeCube(1.0f);
+    const glm::mat4 T = makeTransform({ 1, 2, 3 }, { 0.4f, 0.2f, 0.3f }, { 2, 1, 3 });
+    const Geom g = makeGeom(7, 0, (int)cube.size(), T);
 
-    BvhBuffers bufs;
-    bvh::buildSceneBvh(bufs, tris, geoms, maxDepth, leafSize);
+    std::vector<Geom> geoms{ g };
+    BvhBuffers out;
+    bvh::buildSceneBvh(out, cube, geoms);
 
-    const int root = bufs.hostBvhMeta[0].rootNodeIndex;
-    if (root < 0)
+    if (out.hostTriangles.size() != cube.size())
     {
-        printf("FAIL %s: no root (depth=%d leaf=%d)\n", name, maxDepth, leafSize);
+        printf("FAIL bake: baked size %zu != source %zu\n", out.hostTriangles.size(), cube.size());
         return false;
     }
 
-    const std::vector<Ray> rays = makeRayBatch(tris, 0x1234567u);
+    std::vector<Triangle> expected;
+    for (const Triangle& t : cube) expected.push_back(bakeExpected(g, t));
+
+    if (!sameMultiset(expected, out.hostTriangles, 1e-3f))
+    {
+        printf("FAIL bake: baked triangles do not match transform(source)\n");
+        return false;
+    }
+    return true;
+}
+
+// Test 2: multi-geom bake.  Two meshes with DIFFERENT transforms and
+// materials are concatenated (the loader's layout).  The bake must keep
+// both sets intact, tagged with their own materialId; an empty geom is
+// ignored.
+bool testMultiGeomBake()
+{
+    const std::vector<Triangle> cube  = makeCube(1.0f);
+    const std::vector<Triangle> cloud = makeRandomCloud(120, 0xABCDEFu);
+
+    std::vector<Triangle> hostTris = cube;
+    hostTris.insert(hostTris.end(), cloud.begin(), cloud.end());
+
+    const glm::mat4 T0 = makeTransform({ -4, 0, 0 }, { 0, 0.5f, 0 }, { 1, 2, 1 });
+    const glm::mat4 T1 = makeTransform({  3, 1, 2 }, { 0.3f, 0, 0.7f }, { 0.5f, 0.5f, 2 });
+
+    std::vector<Geom> geoms(3);
+    geoms[0] = makeGeom(3, 0,            (int)cube.size(),  T0);
+    geoms[1] = makeGeom(9, (int)cube.size(), (int)cloud.size(), T1);
+    // geoms[2] stays default (offset -1, count 0) → empty mesh, ignored.
+
+    BvhBuffers out;
+    bvh::buildSceneBvh(out, hostTris, geoms);
+
+    if (out.hostTriangles.size() != hostTris.size())
+    {
+        printf("FAIL multi-geom: baked size %zu != source %zu\n", out.hostTriangles.size(), hostTris.size());
+        return false;
+    }
+
+    std::vector<Triangle> expected;
+    for (const Triangle& t : cube)  expected.push_back(bakeExpected(geoms[0], t));
+    for (const Triangle& t : cloud) expected.push_back(bakeExpected(geoms[1], t));
+
+    if (!sameMultiset(expected, out.hostTriangles, 1e-3f))
+    {
+        printf("FAIL multi-geom: baked triangles do not match per-geom transforms\n");
+        return false;
+    }
+    return true;
+}
+
+// Test 3: traverseBvhClosest (near-child-first) must equal a brute-force
+// O(N) scan on the baked array — hit flag, t, normal, and the materialId
+// of the hit triangle (triIndex).  Runs over several mesh kinds ×
+// transforms, including a non-uniform scale (invTranspose normals).
+bool testTraversalVsBrute(const char* name, const std::vector<Triangle>& tris,
+                          const glm::mat4& T, int materialId)
+{
+    std::vector<Geom> geoms(1);
+    geoms[0] = makeGeom(materialId, 0, (int)tris.size(), T);
+
+    BvhBuffers out;
+    bvh::buildSceneBvh(out, tris, geoms);
+    if (out.hostNodes.empty())
+    {
+        printf("FAIL %s: no tree built\n", name);
+        return false;
+    }
+    const int root = 0;   // single tree → root is node 0
+
+    // Rays aim at the BAKED geometry (world space), like the renderer.
+    const std::vector<Ray> rays = makeRayBatch(out.hostTriangles, 0x1234567u);
     for (const Ray& ray : rays)
     {
-        float bt = LARGE_T; glm::vec3 bn;
-        const bool bhit = bruteForceClosest(ray, bufs.hostTriangles, 0, (int)tris.size(), bt, bn);
+        float bt = LARGE_T; glm::vec3 bn; int bidx = -1;
+        const bool bhit = bruteForceClosest(ray, out.hostTriangles, 0, (int)out.hostTriangles.size(), bt, bn, bidx);
 
-        float vt = LARGE_T; glm::vec3 vn;
-        const bool vhit = traverseBvhClosest(ray, bufs.hostNodes.data(), root,
-                                             bufs.hostTriangles.data(), vt, vn);
+        const BvhHit vhit = traverseBvhClosest(ray, out.hostNodes.data(), root,
+                                               out.hostTriangles.data(), LARGE_T);
 
-        if (bhit != vhit)
+        if (bhit != vhit.hit)
         {
-            printf("FAIL %s(depth=%d leaf=%d): hit flag brute=%d bvh=%d\n",
-                   name, maxDepth, leafSize, bhit, vhit);
+            printf("FAIL %s: hit flag brute=%d bvh=%d\n", name, bhit, vhit.hit);
             return false;
         }
-        if (bhit && (fabsf(bt - vt) > 1e-3f || glm::dot(bn, vn) < 0.9999f))
+        if (!bhit) continue;
+
+        if (fabsf(bt - vhit.t) > 1e-3f || glm::dot(bn, vhit.normal) < 0.9999f)
         {
-            printf("FAIL %s(depth=%d leaf=%d): t brute=%.6f bvh=%.6f dot=%.6f\n",
-                   name, maxDepth, leafSize, bt, vt, glm::dot(bn, vn));
+            printf("FAIL %s: t brute=%.6f bvh=%.6f dot=%.6f\n", name, bt, vhit.t, glm::dot(bn, vhit.normal));
+            return false;
+        }
+        if (vhit.triIndex < 0 || vhit.triIndex >= (int)out.hostTriangles.size())
+        {
+            printf("FAIL %s: triIndex %d out of range\n", name, vhit.triIndex);
+            return false;
+        }
+        if (out.hostTriangles[vhit.triIndex].materialId != out.hostTriangles[bidx].materialId)
+        {
+            printf("FAIL %s: BVH materialId %d != brute %d\n", name,
+                   out.hostTriangles[vhit.triIndex].materialId, out.hostTriangles[bidx].materialId);
             return false;
         }
     }
     return true;
 }
 
-// Structural validation of buildMeshBvh output: DFS from the root, every
-// child index in range, no node revisited (a cycle would make traversal
-// hang), every leaf's triangle chunk inside the slice, and all nodes
-// reachable.  Catches malformed trees directly, independent of traversal.
-bool testBuildStructure(const std::vector<Triangle>& tris, int maxDepth, int leafSize)
+// Test 4: tree structure.  Root is node 0; DFS reaches every node exactly
+// once (no cycles, no orphans), and every leaf chunk lies inside the baked
+// triangle array.
+bool testBuildStructure(const std::vector<Triangle>& tris, const glm::mat4& T, int materialId)
 {
-    std::vector<BvhNode> nodes;
-    std::vector<Triangle> dummy;   // reordered output is not this test's concern
-    const int root = bvh::buildMeshBvh(nodes, dummy, tris, 0, (int)tris.size(), maxDepth, leafSize);
-    if (root < 0)
+    std::vector<Geom> geoms(1);
+    geoms[0] = makeGeom(materialId, 0, (int)tris.size(), T);
+
+    BvhBuffers out;
+    bvh::buildSceneBvh(out, tris, geoms);
+    if (out.hostNodes.empty())
     {
-        printf("FAIL structure: buildMeshBvh returned no root\n");
+        printf("FAIL structure: no nodes built\n");
         return false;
     }
 
-    std::vector<int> visited(nodes.size(), 0);
-    std::vector<int> stack{ root };
+    std::vector<int> visited(out.hostNodes.size(), 0);
+    std::vector<int> stack{ 0 };
     int reached = 0;
     while (!stack.empty())
     {
         const int idx = stack.back();
         stack.pop_back();
-        if (idx < 0 || idx >= (int)nodes.size())
+        if (idx < 0 || idx >= (int)out.hostNodes.size())
         {
-            printf("FAIL structure: child index %d out of range (nodes=%zu)\n", idx, nodes.size());
+            printf("FAIL structure: child index %d out of range (nodes=%zu)\n", idx, out.hostNodes.size());
             return false;
         }
         if (visited[idx])
@@ -338,187 +434,161 @@ bool testBuildStructure(const std::vector<Triangle>& tris, int maxDepth, int lea
         visited[idx] = 1;
         reached++;
 
-        const BvhNode& n = nodes[idx];
+        const BvhNode& n = out.hostNodes[idx];
         if (n.isLeaf)
         {
-            if (n.right < 0 || n.left < 0 || n.left + n.right > (int)tris.size())
+            const int off = n.leafTriOffset();
+            const int cnt = n.leafTriCount();
+            if (off < 0 || cnt < 0 || off + cnt > (int)out.hostTriangles.size())
             {
                 printf("FAIL structure: leaf chunk [%d,+%d) out of triangle range (%zu)\n",
-                       n.left, n.right, tris.size());
+                       off, cnt, out.hostTriangles.size());
                 return false;
             }
         }
         else
         {
-            stack.push_back(n.left);
-            stack.push_back(n.right);
+            stack.push_back(n.childL());
+            stack.push_back(n.childR());
         }
     }
-    if (reached != (int)nodes.size())
+    if (reached != (int)out.hostNodes.size())
     {
-        printf("FAIL structure: reached %d of %zu nodes\n", reached, nodes.size());
+        printf("FAIL structure: reached %d of %zu nodes\n", reached, out.hostNodes.size());
         return false;
     }
     return true;
 }
 
-// Build a two-mesh scene through buildSceneBvh and verify the flatten
-// pass: per-mesh reordered slices contain the same triangles, an empty
-// geom gets rootNodeIndex = -1, and traversal on the reordered buffer
-// matches brute force.
-bool testSceneFlatten()
+// Test 5: intersectRayAABBEntry entry-distance correctness.  The near-first
+// traversal orders children by this value, so it must report the ray-box
+// entry distance exactly.
+bool testAabbEntry()
 {
-    const std::vector<Triangle> cube  = makeCube(1.0f);
-    const std::vector<Triangle> cloud = makeRandomCloud(120, 0xABCDEFu);
+    AABB box;
+    box.min = glm::vec3(0, 0, 0);
+    box.max = glm::vec3(2, 1, 1);
 
-    // Two meshes concatenated — the loader's layout (per-mesh slices).
-    std::vector<Triangle> hostTris = cube;
-    hostTris.insert(hostTris.end(), cloud.begin(), cloud.end());
+    // invDir must be the true 1/dir (as traverseBvhClosest computes it):
+    // a zero direction component yields ±inf slabs, which the slab test
+    // leaves unrestricted.  Passing a literal 0 here would zero the slab and
+    // wrongly reject the ray.
+    const glm::vec3 dirPX(1.0f, 0.0f, 0.0f);
+    const glm::vec3 invDirPX = glm::vec3(1.0f) / dirPX;   // (1, inf, inf)
+    const glm::vec3 dirNX(-1.0f, 0.0f, 0.0f);
+    const glm::vec3 invDirNX = glm::vec3(1.0f) / dirNX;   // (-1, inf, inf)
 
-    std::vector<Geom> geoms(3);
-    geoms[0].meshTriangleOffset = 0;
-    geoms[0].meshTriangleCount  = (int)cube.size();
-    geoms[1].meshTriangleOffset = (int)cube.size();
-    geoms[1].meshTriangleCount  = (int)cloud.size();
-    // geoms[2] stays default (offset -1, count 0) → empty mesh.
-
-    BvhBuffers out;
-    bvh::buildSceneBvh(out, hostTris, geoms, 24, 4);
-
-    if (out.hostTriangles.size() != hostTris.size())
+    // Ray from (-5, 0.5, 0.5) along +x enters at x=0 → t = 5.
     {
-        printf("FAIL flatten: reordered size %zu != original %zu\n",
-               out.hostTriangles.size(), hostTris.size());
-        return false;
-    }
-    if (out.hostBvhMeta.size() != geoms.size())
-    {
-        printf("FAIL flatten: meta size %zu != geoms %zu\n",
-               out.hostBvhMeta.size(), geoms.size());
-        return false;
-    }
-    if (out.hostBvhMeta[2].rootNodeIndex != -1)
-    {
-        printf("FAIL flatten: empty geom expected root -1, got %d\n",
-               out.hostBvhMeta[2].rootNodeIndex);
-        return false;
-    }
-
-    for (int m = 0; m < 2; m++)
-    {
-        const int off = geoms[m].meshTriangleOffset;
-        const int cnt = geoms[m].meshTriangleCount;
-        const int root = out.hostBvhMeta[m].rootNodeIndex;
-        if (root < 0)
+        const glm::vec3 o(-5.0f, 0.5f, 0.5f);
+        float entry = -1.0f;
+        if (!intersectRayAABBEntry(o, invDirPX, box, RAY_EPSILON, LARGE_T, entry))
         {
-            printf("FAIL flatten: mesh %d expected a root, got %d\n", m, root);
+            printf("FAIL aabb-entry: expected hit, got miss\n");
             return false;
         }
-
-        // Every reordered triangle's vertices must belong to the mesh's
-        // original slice — catches cross-mesh contamination / drops.
-        std::vector<glm::vec3> orig;
-        for (int j = 0; j < cnt; j++)
+        if (fabsf(entry - 5.0f) > 1e-4f)
         {
-            orig.push_back(hostTris[off + j].v0);
-            orig.push_back(hostTris[off + j].v1);
-            orig.push_back(hostTris[off + j].v2);
+            printf("FAIL aabb-entry: entry=%.6f, expected 5.0\n", entry);
+            return false;
         }
-        for (int j = 0; j < cnt; j++)
-        {
-            const Triangle& rt = out.hostTriangles[off + j];
-            const glm::vec3 p[3] = { rt.v0, rt.v1, rt.v2 };
-            for (int k = 0; k < 3; k++)
-            {
-                bool found = false;
-                for (const glm::vec3& q : orig)
-                    if (glm::length(p[k] - q) < 1e-4f) { found = true; break; }
-                if (!found)
-                {
-                    printf("FAIL flatten: mesh %d tri %d vert %d not in original slice\n",
-                           m, j, k);
-                    return false;
-                }
-            }
-        }
+    }
 
-        // Traversal on the reordered buffer must match brute force on
-        // BOTH the reordered and the original slices.
-        const std::vector<Ray> rays = makeRayBatch(hostTris, 0x1234u + (unsigned)m);
-        for (const Ray& ray : rays)
+    // Ray from (5, 0.5, 0.5) along -x enters at x=2 → t = 3.
+    {
+        const glm::vec3 o(5.0f, 0.5f, 0.5f);
+        float entry = -1.0f;
+        if (!intersectRayAABBEntry(o, invDirNX, box, RAY_EPSILON, LARGE_T, entry))
         {
-            float bt; glm::vec3 bn;
-            const bool bhit = bruteForceClosest(ray, out.hostTriangles, off, cnt, bt, bn);
-            float bo; glm::vec3 no;
-            const bool borig = bruteForceClosest(ray, hostTris, off, cnt, bo, no);
-            if (bhit != borig)
-            {
-                printf("FAIL flatten: brute-force differs after reorder (mesh %d)\n", m);
-                return false;
-            }
-
-            float vt = LARGE_T; glm::vec3 vn;
-            const bool vhit = traverseBvhClosest(ray, out.hostNodes.data(), root,
-                                                 out.hostTriangles.data(), vt, vn);
-            if (vhit != bhit)
-            {
-                printf("FAIL flatten: BVH hit %d != brute %d (mesh %d)\n", vhit, bhit, m);
-                return false;
-            }
-            if (vhit && (fabsf(vt - bt) > 1e-3f || glm::dot(vn, bn) < 0.9999f))
-            {
-                printf("FAIL flatten: BVH t=%.6f brute t=%.6f dot=%.6f (mesh %d)\n",
-                       vt, bt, glm::dot(vn, bn), m);
-                return false;
-            }
+            printf("FAIL aabb-entry: expected hit, got miss (neg dir)\n");
+            return false;
         }
+        if (fabsf(entry - 3.0f) > 1e-4f)
+        {
+            printf("FAIL aabb-entry: entry=%.6f, expected 3.0\n", entry);
+            return false;
+        }
+    }
+
+    // Ray from (-5, 5, 0.5) along +x: y = 5 outside [0,1] → miss.
+    {
+        const glm::vec3 o(-5.0f, 5.0f, 0.5f);
+        float entry = -1.0f;
+        if (intersectRayAABBEntry(o, invDirPX, box, RAY_EPSILON, LARGE_T, entry))
+        {
+            printf("FAIL aabb-entry: expected miss, got hit entry=%.6f\n", entry);
+            return false;
+        }
+    }
+
+    // Far-plane pruning: box starts at t=5 but the far plane is 2 → miss.
+    {
+        const glm::vec3 o(-5.0f, 0.5f, 0.5f);
+        float entry = -1.0f;
+        if (intersectRayAABBEntry(o, invDirPX, box, RAY_EPSILON, 2.0f, entry))
+        {
+            printf("FAIL aabb-entry: expected miss (far plane 2 < entry 5)\n");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Test 6: empty scene.  No triangles → no tree; traversal with root -1 must
+// miss without touching any buffers.
+bool testEmptyScene()
+{
+    std::vector<Triangle> none;
+    std::vector<Geom> geoms(1);   // default: offset -1, count 0
+    BvhBuffers out;
+    bvh::buildSceneBvh(out, none, geoms);
+
+    if (!out.hostNodes.empty() || !out.hostTriangles.empty())
+    {
+        printf("FAIL empty: expected empty tree\n");
+        return false;
+    }
+
+    const Ray ray{ glm::vec3(0, 0, 0), glm::vec3(1, 0, 0) };
+    const BvhHit h = traverseBvhClosest(ray, nullptr, -1, nullptr, LARGE_T);
+    if (h.hit)
+    {
+        printf("FAIL empty: traversal with root -1 reported a hit\n");
+        return false;
     }
     return true;
 }
 
 } // namespace
 
-int main(int argc, char** argv)
+int main()
 {
-    const bool quiet = (argc > 1 && std::strcmp(argv[1], "--quiet") == 0);
+    int failures = 0;
 
-    if (!quiet)
-        traceDemo();
-    else
-        std::printf("--quiet: skipping the trace demo, running validation only\n");
+    if (!testWorldBake()) failures++;
+    if (!testMultiGeomBake()) failures++;
+    if (!testAabbEntry()) failures++;
+    if (!testEmptyScene()) failures++;
 
+    // Traversal + structure across mesh kinds and transforms.
     const std::vector<Triangle> cube  = makeCube(1.0f);
     const std::vector<Triangle> cloud = makeRandomCloud(120, 0xDEADBEEFu);
     const std::vector<Triangle> degen = makeDegenerate(40);
 
-    struct Case { const char* name; const std::vector<Triangle>& tris; };
+    struct Case { const char* name; const std::vector<Triangle>& tris; glm::mat4 T; int mat; };
     const Case cases[] = {
-        { "cube",         cube  },
-        { "random_cloud", cloud },
-        { "degenerate",   degen },
+        { "cube_identity",   cube,  makeTransform({ 0, 0, 0 }, { 0, 0, 0 }, { 1, 1, 1 }),      5 },
+        { "cube_transform",  cube,  makeTransform({ 1, 2, 3 }, { 0.4f, 0.2f, 0.3f }, { 2, 1, 3 }), 6 },
+        { "cloud_identity",  cloud, makeTransform({ 0, 0, 0 }, { 0, 0, 0 }, { 1, 1, 1 }),      7 },
+        { "cloud_transform", cloud, makeTransform({ -3, 1, 0 }, { 0.1f, 0.9f, 0.2f }, { 0.5f, 2, 1 }), 8 },
+        { "degenerate",      degen, makeTransform({ 0, 0, 0 }, { 0, 0, 0 }, { 1, 1, 1 }),      9 },
     };
-    const int depths[] = { 8, 24 };
-    const int leaves[] = { 1, 4 };
-
-    int failures = 0;
-
-    // Empty mesh → no root.
-    {
-        std::vector<BvhNode> nodes;
-        std::vector<Triangle> dummy;
-        const int r = bvh::buildMeshBvh(nodes, dummy, cube, 0, 0, 8, 4);
-        if (r != -1) { printf("FAIL: empty mesh expected root -1, got %d\n", r); failures++; }
-    }
-
     for (const Case& c : cases)
-        for (int d : depths)
-            for (int l : leaves)
-            {
-                if (!testBuildStructure(c.tris, d, l)) failures++;
-                if (!testMeshTraversal(c.name, c.tris, d, l)) failures++;
-            }
-
-    if (!testSceneFlatten()) failures++;
+    {
+        if (!testBuildStructure(c.tris, c.T, c.mat)) failures++;
+        if (!testTraversalVsBrute(c.name, c.tris, c.T, c.mat)) failures++;
+    }
 
     if (failures == 0)
     {
