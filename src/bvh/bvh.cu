@@ -224,24 +224,36 @@ void flattenRecursive(BvhBuildContext& ctx,
 
 } // anonymous namespace (translation-unit private)
 
-int buildMeshBvh(BvhBuffers& out,
-                 const std::vector<Triangle>& hostTris,
-                 const Geom& geom)
+// Transform a triangle vertex from object to world space (point, w = 1).
+glm::vec3 bakePoint(const glm::mat4& transform, const glm::vec3& p)
 {
+    return glm::vec3(transform * glm::vec4(p, 1.0f));
+}
 
-    const int triOffset = geom.meshTriangleOffset;
-    const int triCount  = geom.meshTriangleCount;
-    if (triCount <= 0) return -1;   // empty mesh → no root
+// Transform a vertex normal from object to world space via the
+// inverse-transpose (the correct normal transform under non-uniform scale).
+// Deliberately NOT re-normalized here: triangleIntersectionTest normalizes
+// the interpolated result, which reproduces the old per-hit
+// inverse-transpose + normalize (recordWorldNormal) exactly by linearity.
+glm::vec3 bakeNormal(const glm::mat4& invTranspose, const glm::vec3& n){
+    return glm::vec3(invTranspose * glm::vec4(n, 0.0f));
+}
+
+void buildMeshBvh(BvhBuffers& out,
+                  const std::vector<Triangle>& hostTris)
+{
+    const int triCount = (int)hostTris.size();
+    if (triCount <= 0) return;   // no triangles → no nodes
 
     BvhBuildContext ctx;
     ctx.nodes     = &out.hostNodes;
     ctx.tris      = &hostTris;
     ctx.dstTris   = &out.hostTriangles;
-    ctx.triOffset = triOffset;
+    ctx.triOffset = 0;   // single tree over the whole array
 
     std::vector<int> order(triCount);
     for (int i = 0; i < triCount; i++)
-        order[i] = triOffset + i;   // store indices, not triangle structs
+        order[i] = i;   // store indices, not triangle structs
     ctx.order = &order;
 
     const int root = buildRecursive(ctx, 0, triCount, 0);
@@ -252,8 +264,6 @@ int buildMeshBvh(BvhBuffers& out,
     out.hostTriangles.resize(dstBase + triCount);
     int cursor = 0;
     flattenRecursive(ctx, root, dstBase, cursor);
-
-    return root;
 }
 
 void buildSceneBvh(BvhBuffers& out,
