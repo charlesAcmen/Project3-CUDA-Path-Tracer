@@ -3,9 +3,10 @@
 // ====================================================================
 // BVH Traversal Kernel Implementation
 //
-// Per-mesh BVH closest-hit traversal: one thread per active path, an outer
-// loop over all geoms, writing the same ShadeableIntersection layout the
-// shading kernels read.
+// Single world-space BVH closest-hit traversal: one thread per active
+// path, one traverseBvhClosest over the whole tree.  The ray is already
+// in world space and the triangles were baked to world space by
+// buildSceneBvh, so no transform and no per-geom loop.
 // ====================================================================
 
 __global__ void bvhTraverse(
@@ -13,8 +14,7 @@ __global__ void bvhTraverse(
     PathSegment* pathSegments,
     ShadeableIntersection* intersections,
     Triangle* deviceTriangles,
-    BvhNode* deviceBvhNodes,
-    BvhMeta* deviceBvhMeta)
+    BvhNode* deviceBvhNodes)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (path_index >= num_paths) return;

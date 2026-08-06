@@ -7,6 +7,14 @@
 // SAH（穷举SAH扫描） sweep is a few milliseconds and there is no need for a binning
 // approximation（分桶近似）.
 //
+// World-space bake: buildSceneBvh transforms every mesh's triangles from
+// object space to world space (vertices via the geom's `transform`, vertex
+// normals via `invTranspose` — the same normal transform the old kernel
+// applied per hit) and tags each with its materialId.  One tree is then
+// built over the COMBINED world-space array, so the GPU kernel runs a
+// single closest-hit traversal per ray with no per-mesh loop or ray
+// transformation.
+//
 // Triangle layout: the build permutes a per-mesh `order`（三角形的索引而非三角形结构体本身）
 // array in place so each leaf's triangles occupy a CONTIGUOUS range of it.  
 // buildMeshBvh then runs a FLATTEN pass (post-order DFS，把真正的三角形数据写入连续的内存块) 
@@ -14,10 +22,6 @@
 // and rewrites the leaf to point at that chunk.  Leaves therefore reference
 // sequential memory runs — cache-friendly GPU access, and exactly what
 // traverseBvhClosest's `tris[node.left + j]` expects.
-//
-// The reorder stays within each mesh (counts and concatenation order are
-// unchanged), so Geom::meshTriangleOffset / meshTriangleCount still slice
-// the same triangle set for the BVH traversal kernel.
 // ====================================================================
 
 #include "bvh/bvh.h"
@@ -39,26 +43,26 @@ float centroidComponent(const Triangle& t, int axis)
     return axis == 0 ? c.x : (axis == 1 ? c.y : c.z);
 }
 
-// Everything the recursive build needs that does NOT change during one
-// mesh's recursion: the shared buffers plus the per-mesh build settings.
-// Bundling them collapses the build-time params that were threaded
-// through buildRecursive / flattenRecursive into a single context object.
+// Everything the recursive build needs that does NOT change during the
+// recursion: the shared buffers plus the build settings.  Bundling them
+// collapses the build-time params that were threaded through
+// buildRecursive / flattenRecursive into a single context object.
 struct BvhBuildContext
 {
     std::vector<BvhNode>*         nodes;     // construction output (hostNodes)
-    const std::vector<Triangle>*  tris;      // source triangles (hostTris, read-only)
-    std::vector<int>*             order;     // permutable triangle indices (per-mesh)
+    const std::vector<Triangle>*  tris;      // source triangles (world-space bake, read-only)
+    std::vector<int>*             order;     // permutable triangle indices
     std::vector<Triangle>*        dstTris;   // reordered output (hostTriangles)
-    int triOffset;   // this mesh's triangle base index
+    int triOffset = 0;   // base index into the triangle array (0: single tree over all triangles)
 };
 
 /**
  * Recursive SAH build over the contiguous range [begin, end) of the
- * mesh's `order` array (which holds absolute triangle indices).  The
+ * `order` array (which holds absolute triangle indices).  The
  * recursion PERMUTES `order` in place, so after a node becomes a leaf,
  * its triangles occupy exactly order[begin .. begin+n) — a contiguous
  * run.  A leaf therefore stores left = triOffset + begin (offset of the
- * run into the mesh's order array) and right = count.
+ * run into the triangle array) and right = count.
  *
  * Exhaustive split search: for each axis (longest extent first) sort the
  * range by centroid, compute prefix/suffix child AABBs, and score every
@@ -188,7 +192,7 @@ int buildRecursive(BvhBuildContext& ctx,
  * start.  A leaf's triangles are order[orderStart .. orderStart+count)
  * — contiguous by construction of the build — so the copy is exact, not
  * a "front + count" guess.  `cursor` is the running write offset within
- * this mesh's output region [dstBase, dstBase + triCount).
+ * the output region [dstBase, dstBase + triCount).
  */
 void flattenRecursive(BvhBuildContext& ctx,
                       int nodeIndex,
@@ -242,8 +246,8 @@ int buildMeshBvh(BvhBuffers& out,
 
     const int root = buildRecursive(ctx, 0, triCount, 0);
 
-    // Flatten: append this mesh's reordered triangles to out.hostTriangles
-    // and fix the leaves to reference the contiguous chunks.
+    // Flatten: write the reordered triangles and fix the leaves to reference
+    // the contiguous chunks.
     const int dstBase = (int)out.hostTriangles.size();
     out.hostTriangles.resize(dstBase + triCount);
     int cursor = 0;
@@ -257,7 +261,6 @@ void buildSceneBvh(BvhBuffers& out,
                    const std::vector<Geom>& geoms)
 {
     out.hostNodes.clear();
-    out.hostBvhMeta.assign(geoms.size(), BvhMeta{});   // default root = -1 (empty)
     out.hostTriangles.clear();
     out.hostTriangles.reserve(hostTris.size());   // preallocate for the reordered output
 
@@ -278,19 +281,11 @@ void uploadToDevice(BvhBuffers& b)
                    b.hostNodes.size() * sizeof(BvhNode), cudaMemcpyHostToDevice);
         checkCUDAError("bvh upload nodes");
     }
-    if (!b.hostBvhMeta.empty())
-    {
-        cudaMalloc(&b.deviceBvhMeta, b.hostBvhMeta.size() * sizeof(BvhMeta));
-        cudaMemcpy(b.deviceBvhMeta, b.hostBvhMeta.data(),
-                   b.hostBvhMeta.size() * sizeof(BvhMeta), cudaMemcpyHostToDevice);
-        checkCUDAError("bvh upload meta");
-    }
 }
 
 void freeDevice(BvhBuffers& b)
 {
     if (b.deviceNodes)    { cudaFree(b.deviceNodes);    b.deviceNodes = nullptr; }
-    if (b.deviceBvhMeta)  { cudaFree(b.deviceBvhMeta);  b.deviceBvhMeta = nullptr; }
 }
 
 } // namespace bvh

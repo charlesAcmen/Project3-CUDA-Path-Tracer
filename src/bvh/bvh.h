@@ -45,34 +45,29 @@ struct BvhNode
     __host__ __device__ int leafTriCount() const  { return right; } // leaf: triangle count
 };
 
-// Per-geom BVH metadata.  rootNodeIndex = -1 → empty mesh (kernel skips).
-struct BvhMeta
-{
-    int rootNodeIndex = -1;
-};
-
-// Host build output + device upload for the per-mesh BVHs.
-// hostTriangles holds the REORDERED flat triangle array (per-mesh
-// flatten) — uploaded to the renderer as deviceTriangles.
+// Host build output + device upload for the single scene-wide BVH.
+// hostTriangles holds the REORDERED, WORLD-space flat triangle array
+// (baked + flattened) — uploaded to the renderer as deviceTriangles.
 struct BvhBuffers
 {
     // Device-side buffers (allocated in uploadToDevice, freed in freeDevice)
     BvhNode*  deviceNodes   = nullptr;
-    BvhMeta*  deviceBvhMeta = nullptr;
     std::vector<BvhNode>  hostNodes;      // construction output
-    std::vector<BvhMeta>  hostBvhMeta;    // per-geom metadata
-    std::vector<Triangle> hostTriangles;  // reordered flat triangles
+    std::vector<Triangle> hostTriangles;  // reordered world-space triangles
 };
 
 // Result of a closest-hit BVH traversal.
 // `hit` is true only when a triangle was found with t < the caller's far
-// plane (maxT); `t` is that closest distance and `normal` its object-space
-// shading normal.  On a miss `hit` stays false and `t` keeps maxT.
+// plane (maxT); `t` is that closest distance and `normal` its shading
+// normal (world space — triangles are baked).  `triIndex` is the index of
+// the hit triangle into `tris`, so the caller can resolve per-triangle
+// data (e.g. materialId).  On a miss `hit` stays false and `t` keeps maxT.
 struct BvhHit
 {
     bool      hit   = false;
     float     t     = LARGE_T;
     glm::vec3 normal;
+    int       triIndex = -1;
 };
 
 /**
@@ -165,20 +160,20 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
 // Host-side construction + GPU memory management, implemented in bvh.cu.
 namespace bvh
 {
-    // Build one mesh's BVH, appending its nodes to out.hostNodes and its
-    // reordered triangles to out.hostTriangles.  The mesh's triangle slice
-    // is read from geom.meshTriangleOffset/count.  Returns the root node
-    // index, or -1 for an empty mesh.
-    int  buildMeshBvh(BvhBuffers& out,
+    // Build ONE BVH over the whole triangle array, appending nodes to
+    // out.hostNodes and the flattened (leaf-contiguous) world-space
+    // triangles to out.hostTriangles.  The tree's root is always node 0;
+    // an empty array produces no nodes at all.
+    void buildMeshBvh(BvhBuffers& out,
                       const std::vector<Triangle>& hostTris);
 
-    // Build every mesh's BVH into out.hostNodes/out.hostTriangles and fill
-    // out.hostBvhMeta.  Empty meshes keep rootNodeIndex = -1.
+    // Bake every mesh's triangles to world space (tagging materialId), build
+    // the single scene-wide BVH, and fill out.hostNodes/hostTriangles.
     void buildSceneBvh(BvhBuffers& out,
                        const std::vector<Triangle>& hostTris,
                        const std::vector<Geom>& geoms);
 
-    // Upload the host node + meta buffers to device memory.
+    // Upload the host node buffer to device memory.
     void uploadToDevice(BvhBuffers& b);
     void freeDevice(BvhBuffers& b);
 } // namespace bvh

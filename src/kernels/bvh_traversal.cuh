@@ -27,12 +27,10 @@
  * \param intersections     [out] Closest-hit result per path
  * \param deviceTriangles   World-space flat triangle array (REORDERED by the BVH build)
  * \param deviceBvhNodes    Node array (device, built on host)
- * \param deviceBvhMeta     Per-geom BVH metadata (rootNodeIndex = -1 → skip)
  */
 __global__ void bvhTraverse(
     int num_paths,
     PathSegment* pathSegments,
     ShadeableIntersection* intersections,
     Triangle* deviceTriangles,
-    BvhNode* deviceBvhNodes,
-    BvhMeta* deviceBvhMeta);
+    BvhNode* deviceBvhNodes);
