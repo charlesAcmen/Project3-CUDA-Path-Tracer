@@ -20,6 +20,22 @@ ctrl shift p select variant
 .\build\bin\Release\cis565_path_tracer.exe scenes/john_marston_scattered.json
 .\build\bin\Release\cis565_path_tracer.exe scenes/john_marston_compare.json
 
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_white_furnace.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_white_furnace_v2.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_energy_debug.json
+
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_glass_inversion.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_dof.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_self_intersection.json
+
+.\build\bin\Release\cis565_path_tracer.exe scenes/debug_black_1_diffuse_control.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/debug_black_2_tessellation.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/debug_black_3_room_closed.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/debug_black_3_room_open.json
+
+
+
+
 .\build\bin\Debug\cis565_path_tracer.exe scenes/cornell.json
 .\build\bin\RelWithDebInfo\cis565_path_tracer.exe scenes/cornellGlossy.json
 

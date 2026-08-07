@@ -107,14 +107,15 @@ src/
 
 ### Intersection Testing
 
-Mesh-only. Every `Geom` is a triangulated mesh; non-mesh geoms silently miss. Triangles are baked to world space at BVH build time, so the traversal kernel works directly in world space (no per-mesh ray transform). Triangle test in `intersection/triangle.h` is **double-sided** (accepts back faces — required for rays inside refractive objects) and reports the model's **true** shading normal (winding preserved — the bake's `invTranspose` normal transform preserves it). Opaque materials orient it toward the ray in `scatterRay`; refraction uses its sign (dot with the ray) to classify enter vs exit. `t` is the world-space distance along the normalized world ray.
+Mesh-only. Every `Geom` is a triangulated mesh; non-mesh geoms silently miss. Triangles are baked to world space at BVH build time, so the traversal kernel works directly in world space (no per-mesh ray transform). Triangle test in `intersection/triangle.h` is **double-sided** (accepts back faces — required for rays inside refractive objects) and reports the model's **true** shading normal (winding preserved — the bake's `invTranspose` normal transform preserves it) plus an `outFrontFace` flag (the Möller–Trumbore determinant's sign). Opaque materials orient the normal toward the ray in `scatterRay` off that stable flag; refraction keys enter vs exit off it too (never `dot(normal, ray)`, which degenerates at grazing angles). `t` is the world-space distance along the normalized world ray.
 
 ### Scattering (`interactions/interactions.cu`)
 
 - **Diffuse** — cosine-weighted hemisphere sampling; `color *= albedo` (the `cosθ/pdf` factor cancels the `1/π` in the Lambert BRDF).
 - **Reflective** — `exponent < 0` → perfect mirror (`glm::reflect`); `exponent ≥ 0` → glossy Phong lobe around the reflected direction.
-- **Refractive** — `classifyRefraction` (enter/exit), Fresnel via Schlick or Accurate (`fresnelMode`), Russian-roulette split between reflection and refraction with probability-compensated throughput; ray origin offset into the correct side of the surface by `EPSILON`.
+- **Refractive** — enter/exit keyed off the intersection's `frontFace` flag, Fresnel via Schlick or Accurate (`fresnelMode`), Russian-roulette split between reflection and refraction with probability-compensated throughput; ray origin offset into the correct side of the surface by a per-hit `rayOffset`.
 - **Russian roulette** (`shading.cuh`) — after `rrMinBounces`, survival probability = clamp(max RGB, `RR_P_MIN`, `RR_P_MAX`); survivors divide color by p.
+- **Ray-origin offset** (`shading.cu`) — every scatter pushes the new origin off the surface by `rayOffset = EPSILON·(1+t) + 2·sagitta`. The first term covers hit-point FP error (grows with travel distance); the second covers the hit facet's **sagitta** — how far the facet plane dips below the smooth surface on a tessellated sphere (≈ `L²/8R`, stored per triangle by the `buildSceneBvh` bake). Without it, silhouette rays start inside the mesh, re-intersect, and ping-pong to a black rim. Flat facets have sagitta ≈ 0, restoring the old `EPSILON` behavior.
 
 ### Post-Processing
 

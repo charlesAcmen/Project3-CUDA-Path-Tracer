@@ -1,0 +1,134 @@
+{
+    "Materials":
+    {
+        "light":
+        {
+            "TYPE":"Emitting",
+            "RGB":[1.0, 1.0, 1.0],
+            "EMITTANCE":20.0
+        },
+        "diffuse_white":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.73, 0.73, 0.73]
+        },
+        "diffuse_red":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.63, 0.07, 0.05]
+        },
+        "diffuse_green":
+        {
+            "TYPE":"Diffuse",
+            "RGB":[0.14, 0.45, 0.09]
+        },
+        "glass":
+        {
+            "TYPE":"Refractive",
+            "RGB":[0.98, 0.98, 0.98],
+            "IOR":1.5
+        },
+        "mirror":
+        {
+            "TYPE":"Specular",
+            "RGB":[0.98, 0.98, 0.98],
+            "ROUGHNESS":0.0
+        }
+    },
+    "Camera":
+    {
+        "RES":[800,800],
+        "FOVY":45.0,
+        "ITERATIONS":2000,
+        "DEPTH":8,
+        "RR_DEPTH":3,
+        "FILE":"self_intersection_test",
+        "EYE":[0.0,5.0,10.5],
+        "LOOKAT":[0.0,5.0,0.0],
+        "UP":[0.0,1.0,0.0]
+    },
+    "Objects":
+    [
+        {
+            "COMMENT":"顶部光源",
+            "TYPE":"mesh",
+            "MATERIAL":"light",
+            "FILE":"models/light.obj",
+            "TRANS":[0.0,10.0,0.0],
+            "ROTAT":[0.0,0.0,0.0],
+            "SCALE":[3.0,0.3,3.0]
+        },
+        {
+            "COMMENT":"地板 - 观察是否有 shadow acne（黑色噪点）",
+            "TYPE":"mesh",
+            "MATERIAL":"diffuse_white",
+            "FILE":"models/cube.obj",
+            "TRANS":[0.0,0.0,4.0],
+            "ROTAT":[0.0,0.0,0.0],
+            "SCALE":[10.0,0.01,18.0]
+        },
+        {
+            "COMMENT":"天花板",
+            "TYPE":"mesh",
+            "MATERIAL":"diffuse_white",
+            "FILE":"models/cube.obj",
+            "TRANS":[0.0,10.0,4.0],
+            "ROTAT":[0.0,0.0,90.0],
+            "SCALE":[0.01,10.0,18.0]
+        },
+        {
+            "COMMENT":"背景墙",
+            "TYPE":"mesh",
+            "MATERIAL":"diffuse_white",
+            "FILE":"models/cube.obj",
+            "TRANS":[0.0,5.0,-5.0],
+            "ROTAT":[0.0,90.0,0.0],
+            "SCALE":[0.01,10.0,10.0]
+        },
+        {
+            "COMMENT":"左墙 - 近距离观察表面是否平滑",
+            "TYPE":"mesh",
+            "MATERIAL":"diffuse_red",
+            "FILE":"models/cube.obj",
+            "TRANS":[-5.0,5.0,4.0],
+            "ROTAT":[0.0,0.0,0.0],
+            "SCALE":[0.01,10.0,18.0]
+        },
+        {
+            "COMMENT":"右墙",
+            "TYPE":"mesh",
+            "MATERIAL":"diffuse_green",
+            "FILE":"models/cube.obj",
+            "TRANS":[5.0,5.0,4.0],
+            "ROTAT":[0.0,0.0,0.0],
+            "SCALE":[0.01,10.0,18.0]
+        },
+        {
+            "COMMENT":"玻璃球 - 检查内部是否有黑色伪影",
+            "TYPE":"mesh",
+            "MATERIAL":"glass",
+            "FILE":"models/sphere.obj",
+            "TRANS":[-2.0,4.0,0.0],
+            "ROTAT":[0.0,0.0,0.0],
+            "SCALE":[3.0,3.0,3.0]
+        },
+        {
+            "COMMENT":"镜面球 - 检查反射是否清晰无黑点",
+            "TYPE":"mesh",
+            "MATERIAL":"mirror",
+            "FILE":"models/sphere.obj",
+            "TRANS":[2.0,2.0,0.0],
+            "ROTAT":[0.0,0.0,0.0],
+            "SCALE":[1.5,1.5,1.5]
+        },
+        {
+            "COMMENT":"前墙 - 封闭房间（z=13, 相机背后）, 观察黑边是否来自反射空场景",
+            "TYPE":"mesh",
+            "MATERIAL":"diffuse_white",
+            "FILE":"models/cube.obj",
+            "TRANS":[0.0,5.0,13.0],
+            "ROTAT":[0.0,-90.0,0.0],
+            "SCALE":[0.01,10.0,10.0]
+        }
+    ]
+}
