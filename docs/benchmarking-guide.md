@@ -10,8 +10,9 @@ plotted with the companion Python scripts.  When you use
 `profiler_output/runs/<run-id>/` so old runs do not get overwritten.
 
 Only user-authored or user-modified code and the post-processing pipeline are
-measured.  `computeIntersections` is measured (it is user-written, mesh-based
-intersection).  Primary ray generation (`generateRayFromCamera`) is the only
+measured.  `ComputeIntersections` is measured — it now times the user-written
+BVH closest-hit traversal kernel `bvhTraverse` (single world-space tree, no
+per-mesh loop).  Primary ray generation (`generateRayFromCamera`) is the only
 starter-code kernel excluded from per-operation timing, though it is included
 in the frame-level wall-clock time recorded by `beginFrame` / `endFrame`.
 
@@ -86,14 +87,14 @@ Two independent toggles define the experiment space:
 Removes terminated paths from the active pool between bounces via
 `gatherTerminatedPaths` + `compactActivePaths`.  Because path count shrinks
 each bounce, **all downstream operations benefit** — most notably
-`sortPathsByMaterial` (sorting fewer elements) and `computeIntersections`
-(fewer ray-geometry tests, not measured by the profiler).  `shadeMaterial`
+`sortPathsByMaterial` (sorting fewer elements) and `ComputeIntersections`
+(fewer ray-geometry tests — the BVH traversal).  `shadeMaterial`
 shows a smaller benefit because terminated paths early-return at the top of
 the kernel anyway.
 
 The net benefit is the sum of: reduced `sortPathsByMaterial` + reduced
 `shadeMaterial` − `gatherTerminatedPaths` overhead − `compactPaths` overhead.
-The unmeasured `computeIntersections` saving is additional.
+The `ComputeIntersections` saving is additional.
 
 When compaction is **disabled** (`--compact=0`), `compactPaths` is not
 launched and `gatherTerminatedPaths` only runs as a single untimed tail call
@@ -165,7 +166,7 @@ operations process fewer elements. The benefit is spread across:
 
 | Operation | Measured? | Why it benefits |
 |-----------|-----------|-----------------|
-| `computeIntersections` | ❌ No (starter code) | Fewer ray-geometry tests — likely the largest absolute saving |
+| `ComputeIntersections` | ✅ Yes (BVH traversal) | Fewer ray-geometry tests — likely the largest absolute saving |
 | `sortPathsByMaterial` | ✅ Yes | Sorting fewer elements — **largest measured benefit** |
 | `shadeMaterial` | ✅ Yes | Fewer threads launched; terminated paths early-return anyway, so the per-path saving is modest |
 
@@ -175,7 +176,7 @@ The cost of compaction is:
 | `gatherTerminatedPaths` | Banks dead-path colors before they are discarded |
 | `compactPaths` | Thrust `copy_if` (or custom scan) to squeeze out terminated entries |
 
-**Net benefit** = reduced `sortPathsByMaterial` + reduced `shadeMaterial` − `gatherTerminatedPaths` − `compactPaths`.  The unmeasured `computeIntersections` saving comes on top.
+**Net benefit** = reduced `sortPathsByMaterial` + reduced `shadeMaterial` − `gatherTerminatedPaths` − `compactPaths`.  The `ComputeIntersections` (BVH traversal) saving comes on top.
 
 **When `--compact=0`:** `gatherTerminatedPaths` (per-bounce) and `compactPaths`
 are **absent from the CSV entirely** (not zero — the kernels are never
@@ -344,7 +345,7 @@ Per-operation aggregate statistics (warmup iterations excluded).
 | `gatherTerminatedPaths` | GPU | Every bounce (inside `compactActivePaths`) | Banking dead-path colors into the accumulation buffer. **Absent from CSV when `--compact=0`** (kernel never launched). |
 | `sortPathsByMaterial` | GPU | Every bounce | Thrust `sort_by_key` + double `gather`. Time is near-0 when `--sort=0` (early return). **This is typically the largest measured beneficiary of compaction** — fewer active paths → fewer elements to sort. |
 | `compactActivePaths` | CPU | Every bounce | Thrust `copy_if` (or custom scan). Includes `cudaDeviceSynchronize` cost from internal Thrust calls. **Absent from CSV when `--compact=0`.** |
-| `computeIntersections` | GPU | Every bounce | Ray-geometry intersection test (linear scene scan). Benefits from compaction (fewer active paths → fewer tests). |
+| `ComputeIntersections` | GPU | Every bounce | BVH closest-hit traversal (`bvhTraverse`) over the single world-space tree. Benefits from compaction (fewer active paths → fewer traversals). |
 | `BloomPass` | GPU | Once per frame (after bounce loop) | Full bloom pipeline: `thresholdExtract` + separable Gaussian blur (horizontal + vertical). Only recorded when bloom is enabled (`intensity > 0`). |
 | `PostProcessTail` | GPU | Once per frame (after bounce loop) | Remaining display pipeline: `prepareDisplayKernel` + `tonemapKernel` + (optional) chromatic aberration + (optional) vignette + `sendImageToPBO`. Always recorded. |
 

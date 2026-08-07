@@ -21,7 +21,7 @@ enum class ProfilerOp : int {
     CompactPaths,              // Thrust copy_if/scan -- CPU timer (user-written)
                                //   copy_if returns a host-visible iterator, forcing
                                //   an internal sync; CPU timer naturally captures it.
-    ComputeIntersections,      // GPU kernel -- GPU timer (starter code)
+    ComputeIntersections,      // GPU kernel -- GPU timer (user-written BVH traversal bvhTraverse)
 
     // Post-processing pipeline — GPU timers (all use cudaEvent on the
     // default stream, so each section is measured independently while

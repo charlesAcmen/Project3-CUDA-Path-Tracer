@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Linux/WSL (Make):** `make` or `make Release` builds with CMake into `build/`.
 - **Run:** `build/bin/cis565_path_tracer <scenefile.json>` — e.g. `build/bin/cis565_path_tracer scenes/cornell.json`. In VS, set `Debugging > Command Arguments` to `../scenes/cornell.json`.
 - **Clean:** `make clean`
-- **No test suite in the main build** — validation is visual inspection of the rendered output. Standalone tests live under `tests/` (`bvh_test`, `config_test`, `rng_test`, `refraction_test`) but are NOT wired into the root CMakeLists. Each has its own CMake project; build with `cmake -G "Visual Studio 17 2022" -A x64 -B <test>/build <test>` then `cmake --build <test>/build --config Release`. `bvh_test` compiles the production `src/bvh/bvh.cu` directly (no duplicate copies) and validates the world-space bake, single-tree structure, near-first `traverseBvhClosest` vs brute force, and `intersectRayAABBEntry`.
+- **No test suite in the main build** — validation is visual inspection of the rendered output. Standalone tests live under `tests/` (`bvh_test`, `config_test`, `loader_test`, `rng_test`, `refraction_test`) but are NOT wired into the root CMakeLists. Each has its own CMake project; build with `cmake -G "Visual Studio 17 2022" -A x64 -B <test>/build <test>` then `cmake --build <test>/build --config Release`. `bvh_test` compiles the production `src/bvh/bvh.cu` directly (no duplicate copies) and validates the world-space bake, single-tree structure, near-first `traverseBvhClosest` vs brute force, and `intersectRayAABBEntry`.
 
 ## Runtime Configuration (three-layer priority)
 
@@ -41,13 +41,13 @@ src/
 ├── main.cpp                  # GLFW/GL window, camera controls, ImGui, render loop → pathtrace()
 ├── pathtrace.cu / .h         # GPU pipeline + runtime getters/setters; includes kernels/ + pipeline/
 ├── config/config.cpp / .h    # AppConfig singleton, JSON + CLI merge, startup help/summary
-├── scene_loader.cpp / .h     # JSON scene + OBJ/glTF mesh loading (tinyobjloader + cgltf, vertex normals)
-├── scene.cpp / scene.h       # Scene container + computeSceneStats
+├── scene/scene_loader.cpp / .h  # JSON scene + OBJ/glTF mesh loading (tinyobjloader + cgltf, vertex normals)
+├── scene/scene.cpp / .h         # Scene container + computeSceneStats
 ├── sceneStructs.h            # All shared data structures (Ray, Geom, Material, PathSegment, …)
 ├── constants.h               # PI, EPSILON, RAY_EPSILON, RR_P_MIN/MAX, LARGE_T, …
-├── utilities.h / .cu         # buildTransformationMatrix, checkCUDAErrorFn
-├── logger.h                  # tagged stdout/stderr logging (Log::info/warn/error/raw)
-├── kernel_config.h           # LAUNCH_KERNEL_AUTO macros, KernelConfig / OccupancyConfig / DeviceInfo
+├── utils/utilities.h / .cu   # buildTransformationMatrix, checkCUDAErrorFn
+├── utils/logger.h            # tagged stdout/stderr logging (Log::info/warn/error/raw)
+├── kernels/kernel_config.h   # LAUNCH_KERNEL_AUTO macros, KernelConfig / OccupancyConfig / DeviceInfo
 ├── image.h / .cpp            # PNG/HDR output (stb_image)
 ├── glslUtility.* / window_setup.h   # GLFW/GL/CUDA-interop init, PBO registration & per-frame mapping
 ├── bvh/                      # single world-space BVH: AABB + node structs + host SAH build + flatten
@@ -124,7 +124,8 @@ Bloom runs in linear HDR space (threshold → separable Gaussian blur with share
 
 - **Materials** — `TYPE`: `Diffuse` / `Emitting` / `Specular` / `Refractive`. `Specular` supports `SPECULAR_COLOR` and `ROUGHNESS` (0 → mirror; higher → glossier via `exponent = 2/r² − 2`). `Refractive` uses `IOR`.
 - **Camera** — `RES`, `FOVY`, `ITERATIONS`, `DEPTH`, `RR_DEPTH`, `FILE`, `EYE`, `LOOKAT`, `UP`; optional `LENS_RADIUS` / `FOCAL_DISTANCE` (DoF). (Fresnel mode is a renderer setting — set via config.local.json `fresnelMode` or CLI `--fresnel`, not the scene file.)
-- **Objects** — `TYPE`: `"mesh"` with `FILE` (mesh path relative to the scene file; `.obj` via tinyobjloader, `.gltf`/`.glb` via cgltf), `MATERIAL`, `TRANS`, `ROTAT`, `SCALE`. Models live in `scenes/models/` (cube.obj, sphere.obj, sphere_inv.obj, light.obj, pyramid.obj, diamond.obj, cube.gltf, cube.glb).
+- **Objects** — `TYPE`: `"mesh"` with `FILE` (mesh path relative to the scene file; `.obj` via tinyobjloader, `.gltf`/`.glb` via cgltf), `MATERIAL`, `TRANS`, `ROTAT`, `SCALE`. Models live in `scenes/models/` (cube.obj, sphere.obj, sphere_inv.obj, light.obj, pyramid.obj, diamond.obj, plus `gen_shapes.py` outputs and downloaded glTF under `glTF-Sample-Assets/`).
+- **glTF node transforms are applied** — `scene_loader.cpp` walks the scene graph and emits each `(node, mesh)` instance under the accumulated TRS/matrix transform (`nodeLocalMatrix` → `walkNode`), so multi-part models assemble exactly as the file specifies. Caveat: some Sketchfab/asset exports are **baked** — the vertices already carry the world-space transform and the node matrices are redundant. Applying both double-transforms the model. For such files, zero out the redundant node matrices (see `scenes/models/glTF-Sample-Assets/johnmarston.gltf` — nodes 0/1/3 set to identity — vs `johnmarston_original.gltf`, the untouched copy), or compensate with the scene `TRANS`/`ROTAT`/`SCALE`. The loader reads POSITION/NORMAL; glTF materials/textures/skinning are ignored — the scene JSON's `MATERIAL` governs shading.
 - **Winding / normals** — the renderer **trusts the model's winding and normal direction**. The intersection reports the true shading normal; `scatterRay` orients it toward the ray only for opaque materials, and refraction reads its sign (dot with the ray) to classify enter vs exit. For solid glass use an **outward-wound** mesh (`sphere.obj` — smooth `vn`, CCW). `sphere_inv.obj` is **inward-wound and flat-shaded** (no `vn`): it renders as inside-out glass — Fresnel wall reflections still visible, but the entry ray is misclassified as "exit", so there is **no lensing/caustics** (that's the correct winding-respecting behavior, not a bug).
 
 ### Known Performance Notes
@@ -133,7 +134,7 @@ Bloom runs in linear HDR space (threshold → separable Gaussian blur with share
 - `LAUNCH_KERNEL_AUTO` calls `cudaGetDeviceProperties` on every launch (`kernel_config.h`).
 - Intersection is always the single world-space BVH closest-hit traversal (`bvhTraverse` + `traverseBvhClosest`). One traversal per ray (no per-mesh loop or transform) with near-child-first ordering; the win over a linear scan appears on large meshes. The exhaustive SAH build + world-space bake is a few ms at a few thousand triangles.
 - **Fast math** — `CMakeLists.txt` compiles CUDA with `-use_fast_math` (rcp.approx division, fast sqrt/trig/pow). Errors are ~2 ulp, invisible in a path tracer, and it makes the hot `1.0f / a` in `intersection/triangle.h` cheap. Consequence: **results differ from a precise-math build in the last few bits** — use the same flags when diffing renders or benchmarking.
-- **GPU division avoidance** — reciprocals and ratios that are constant per frame / per material are precomputed on the host: per-pixel `÷iter` became `*invIter` (`postprocess.cuh` → `tonemap.cuh`/`bloom.cuh`), Fresnel takes precomputed `eta` = n1/n2 (`interactions.cu`, from `invIndexOfRefraction`/`indexOfRefraction`), Phong takes precomputed `invExponentPlusOne` (`scene_loader.cpp` → `Material`), and `sendImageToPBO` no longer divides (display buffer is pre-averaged).
+- **GPU division avoidance** — reciprocals and ratios that are constant per frame / per material are precomputed on the host: per-pixel `÷iter` became `*invIter` (`postprocess.cuh` → `tonemap.cuh`/`bloom.cuh`), Fresnel takes precomputed `eta` = n1/n2 (`interactions.cu`, from `invIndexOfRefraction`/`indexOfRefraction`), Phong takes precomputed `invExponentPlusOne` (`scene/scene_loader.cpp` → `Material`), and `sendImageToPBO` no longer divides (display buffer is pre-averaged).
 
 ## Controls (Runtime)
 
