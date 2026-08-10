@@ -108,24 +108,6 @@ static RngMode parseRngMode(const json& v, RngMode fallback)
     return fallback;
 }
 
-static FresnelMode parseFresnelMode(const json& v, FresnelMode fallback)
-{
-    if (v.is_number_integer())
-        return static_cast<FresnelMode>(v.get<int>());
-    if (!v.is_string())
-    {
-        Log::warn("Config", "fresnelMode must be a name or int — keeping %s",
-                  toString(fallback));
-        return fallback;
-    }
-    const std::string s = toLower(v.get<std::string>());
-    if (s == "schlick")  return FresnelMode::Schlick;
-    if (s == "accurate") return FresnelMode::Accurate;
-    Log::warn("Config", "unknown fresnelMode '%s' — keeping %s",
-              v.get<std::string>().c_str(), toString(fallback));
-    return fallback;
-}
-
 // ====================================================================
 // JSON → AppConfig merge (lowest priority)
 // ====================================================================
@@ -142,9 +124,6 @@ void mergeConfigJson(AppConfig& cfg, const json& data)
 
     if (data.contains("rngMode"))
         cfg.rngMode = parseRngMode(data["rngMode"], cfg.rngMode);
-
-    if (data.contains("fresnelMode"))
-        cfg.fresnelMode = parseFresnelMode(data["fresnelMode"], cfg.fresnelMode);
 
     // Bloom
     if (data.contains("bloom"))
@@ -260,11 +239,6 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
         {
             cfg.sortByMaterial = (std::stoi(arg.substr(7)) != 0);
         }
-        else if (arg.rfind("--fresnel=", 0) == 0)
-        {
-            int v = std::stoi(arg.substr(10));
-            cfg.fresnelMode = (v == 1) ? FresnelMode::Accurate : FresnelMode::Schlick;
-        }
         else if (arg.rfind("--rng=", 0) == 0)
         {
             int v = std::stoi(arg.substr(6));
@@ -295,11 +269,10 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
         cfg.profCfg.sceneName = s;
     }
 
-    Log::info("Config", "compactMethod=%s  sortByMaterial=%s  rngMode=%s  fresnelMode=%s",
+    Log::info("Config", "compactMethod=%s  sortByMaterial=%s  rngMode=%s",
            toString(cfg.compactMethod),
            cfg.sortByMaterial ? "yes" : "no",
-           toString(cfg.rngMode),
-           toString(cfg.fresnelMode));
+           toString(cfg.rngMode));
 }
 
 // ====================================================================
@@ -336,7 +309,6 @@ void printStartupHelp(const char* exeName)
     Log::raw("    --compact=N    Compaction mode: 0=off, 1=global scan, 2=Thrust copy_if,\n");
     Log::raw("                   3=shared-memory scan (default).\n");
     Log::raw("    --sort=N       Material sorting: 0=off, nonzero=on (default on).\n");
-    Log::raw("    --fresnel=N    Fresnel mode: 0=Schlick, 1=Accurate (default).\n");
     Log::raw("    --rng=N        RNG mode: 0=LCG (default), 1=scrambled Halton.\n");
     Log::raw("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
     Log::raw("    --save         Save the final rendered image on exit.\n");
@@ -391,9 +363,6 @@ void printStartupSummary(const AppConfig& cfg)
     }
     Log::raw("  Compact method: %s\n", compactName);
     Log::raw("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
-    const char* fresnelName = (cfg.fresnelMode == FresnelMode::Accurate
-                               ? "Accurate" : "Schlick");
-    Log::raw("  Fresnel mode: %s\n", fresnelName);
     const char* rngName = (rngMode == RngMode::HALTON ? "Scrambled Halton" : "LCG");
     Log::raw("  RNG mode: %s\n", rngName);
     Log::raw("  BVH traversal: enabled  (max depth %d, leaf size %d)\n",

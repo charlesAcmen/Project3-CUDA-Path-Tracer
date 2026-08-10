@@ -5,7 +5,7 @@
 #include <vector>
 #include <cuda_runtime.h>
 
-#include "sceneStructs.h"   // CompactMethod, FresnelMode, RngMode
+#include "sceneStructs.h"   // CompactMethod, RngMode
 
 // ---------------------------------------------------------------------------
 // Enumeration of every measurable operation.

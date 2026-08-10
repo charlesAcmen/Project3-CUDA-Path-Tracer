@@ -13,7 +13,7 @@
 // ====================================================================
 
 #include "profiler/profiler.h"    // ProfilerConfig
-#include "sceneStructs.h"         // CompactMethod, RngMode, FresnelMode
+#include "sceneStructs.h"         // CompactMethod, RngMode
 #include "constants.h"            // MAX_BLOOM_RADIUS (BloomConfig::kRadiusMax)
 
 #include <algorithm>              // std::min / std::max (config clamping)
@@ -93,7 +93,6 @@ struct AppConfig {
     CompactMethod    compactMethod    = CompactMethod::SharedMem;
     bool             sortByMaterial   = false;
     RngMode          rngMode          = RngMode::LCG;
-    FresnelMode      fresnelMode      = FresnelMode::Accurate;
 
     // Post-processing
     BloomConfig              bloom;

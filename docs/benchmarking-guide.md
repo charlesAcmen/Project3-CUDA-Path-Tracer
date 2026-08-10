@@ -42,7 +42,6 @@ python ../scripts/benchmark_runner.py bin/Release/cis565_path_tracer.exe ../scen
 | `--verbose` | (none) | off | Enables per-bounce path-count `printf` debug output to console. Can be used with or without `--benchmark`. |
 | `--compact=N` | `0`, `1`, `2`, `3` | `3` | **Stream compaction method.** `0`=disabled, `1`=global-mem scan, `2`=Thrust `copy_if`, `3`=shared-mem scan. Other integers are accepted by the parser, but only these values have defined behavior. |
 | `--sort=N` | `0`, `1` | `0` | **Material sorting.** `0`=disabled, `1`=enabled. Nonzero values are treated as enabled. |
-| `--fresnel=N` | `0`, `1` | `0` | `0`=Schlick, `1`=accurate Fresnel (affects refractive materials). |
 | `--rng=N` | `0`, `1` | `0` | `0`=LCG, `1`=scrambled Halton. |
 | `--warmup=N` | any int | `3` | Warmup iterations excluded from summary statistics. |
 | `--save` | (none) | off | Saves the rendered image when the app exits. Can be used with or without `--benchmark`. |
@@ -51,7 +50,7 @@ python ../scripts/benchmark_runner.py bin/Release/cis565_path_tracer.exe ../scen
 
 Flags are order-independent.  `--benchmark` must be present for CSV output;
 `--warmup` only affects the profiler summary statistics (`--compact`, `--sort`,
-`--fresnel`, `--rng` change rendering regardless of profiling).  Without
+`--rng` change rendering regardless of profiling).  Without
 `--benchmark`, profiling overhead is zero — all `gpuStart` / `gpuStop` /
 `cpuStart` / `cpuStop` calls are no-ops.
 
