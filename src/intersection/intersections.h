@@ -18,7 +18,12 @@
  */
 __host__ __device__ inline glm::vec3 getExactPointOnRay(Ray r, float t)
 {
-    return r.origin + t * glm::normalize(r.direction);
+    // Ray directions are guaranteed unit-length by construction:
+    //   generateRayFromCamera — pinhole / DoF rays are glm::normalize(...)
+    //   scatterRay            — reflect / refract / sampled dirs are unit
+    // triangleIntersectionTest already interprets t as world distance, so
+    // re-normalizing here is a redundant dot + rsqrt + 3 muls per hit.
+    return r.origin + t * r.direction;
 }
 
 /**
