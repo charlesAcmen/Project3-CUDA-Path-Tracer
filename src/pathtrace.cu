@@ -156,12 +156,13 @@ void pathtraceInit(Scene* scene)
         }
         if (!pixels.empty())
         {
-            cudaMalloc(&g_dev.deviceTexturePixels, pixels.size() * sizeof(glm::vec3));
-            cudaMemcpy(g_dev.deviceTexturePixels, pixels.data(),
+            cudaMalloc(&g_dev.textures.pixels, pixels.size() * sizeof(glm::vec3));
+            cudaMemcpy(g_dev.textures.pixels, pixels.data(),
                        pixels.size() * sizeof(glm::vec3), cudaMemcpyHostToDevice);
-            cudaMalloc(&g_dev.deviceTextureInfos, infos.size() * sizeof(TextureInfo));
-            cudaMemcpy(g_dev.deviceTextureInfos, infos.data(),
+            cudaMalloc(&g_dev.textures.infos, infos.size() * sizeof(TextureInfo));
+            cudaMemcpy(g_dev.textures.infos, infos.data(),
                        infos.size() * sizeof(TextureInfo), cudaMemcpyHostToDevice);
+            g_dev.textures.count = (int)infos.size();
         }
     }
 
@@ -217,10 +218,11 @@ void pathtraceFree()
     cudaFree(g_dev.bloomWeights);  // bloom Gaussian weight buffer
     cudaFree(g_dev.deviceTriangles);
     g_dev.deviceTriangles = nullptr;
-    cudaFree(g_dev.deviceTexturePixels);
-    g_dev.deviceTexturePixels = nullptr;
-    cudaFree(g_dev.deviceTextureInfos);
-    g_dev.deviceTextureInfos = nullptr;
+    cudaFree(g_dev.textures.pixels);
+    g_dev.textures.pixels = nullptr;
+    cudaFree(g_dev.textures.infos);
+    g_dev.textures.infos = nullptr;
+    g_dev.textures.count  = 0;
     bvh::freeDevice(g_dev.bvh);   // BVH node + meta device buffers
     StreamCompaction::Efficient::freeCompactionWorkspace();
 
@@ -334,6 +336,7 @@ void pathtrace(uchar4* pbo, int iter)
         LAUNCH_KERNEL_AUTO(shadeMaterial, num_paths,
             iter, num_paths,
             g_dev.intersections, g_dev.paths, g_dev.materials,
+            g_dev.textures,
             shadingCfg);
         prof.gpuStop(ProfilerOp::ShadeMaterial);
 

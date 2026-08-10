@@ -72,5 +72,6 @@ __global__ void shadeMaterial(
     ShadeableIntersection* shadeableIntersections,
     PathSegment* pathSegments,
     Material* materials,
+    TextureTable textures,        // scene texture assets (pixels + slice table)
     ShadingConfig config);
 

@@ -103,6 +103,24 @@ struct TextureInfo
     int height      = 0;   // texel height
 };
 
+// The scene's texture assets, uploaded once at init and read-only afterward.
+// `pixels` holds every image's texels concatenated into one flat LINEAR-RGB
+// buffer; `infos[count]` describes each image's slice of it.  Shading code
+// indexes it through a TextureBinding slot (>= 0), never directly.
+//
+// Bundled as one struct rather than passing pixels+infos as separate kernel
+// parameters so the sampler signatures stay stable as texture roles are
+// added — a future feature (normal map, emissive map) reads its slot through
+// the same table without touching any function signature.
+struct TextureTable
+{
+    // Owned device pointers (cudaMalloc/cudaFree) — non-const here; samplers
+    // take them as `const` parameters.
+    glm::vec3*   pixels = nullptr;   // concatenated texel buffer (linear RGB)
+    TextureInfo* infos  = nullptr;   // per-image slice descriptors
+    int          count  = 0;         // number of images in the table
+};
+
 // Fresnel evaluation mode used by refractive materials.
 enum class FresnelMode : int
 {
