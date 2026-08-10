@@ -11,7 +11,7 @@
  * Covers extreme cases: face-normal fallback (no NORMAL / zero NORMAL / NaN),
  * degenerate triangles, non-triangle primitives, missing POSITION, indexed vs
  * non-indexed, multiple meshes, out-of-range indices, index counts not a
- * multiple of 3, external .bin buffers, node-transform-ignored geometry,
+ * multiple of 3, external .bin buffers, node-transform application,
  * normalized int8 POSITION, and JSON dispatch (missing mesh / unsupported ext).
  *
  * Build (from tests/loader_test/):
@@ -340,9 +340,11 @@ static void testLoadGLTF(const std::string& exeDir)
         auto tris = loadGLTFTris(exeDir, "node_transform.gltf");
         check(tris.size() == 1, "node_transform.gltf -> 1 triangle");
         if (tris.size() == 1)
-            check(tris[0].v0 == glm::vec3(0, 0, 0) && tris[0].v1 == glm::vec3(1, 0, 0) &&
-                  tris[0].v2 == glm::vec3(0, 1, 0),
-                  "node_transform.gltf -> node transform ignored, verts stay raw");
+            // Node carries a translation matrix of (5,5,5), which the loader
+            // applies: raw verts (0,0,0)/(1,0,0)/(0,1,0) become (5,5,5)/(6,5,5)/(5,6,5).
+            check(tris[0].v0 == glm::vec3(5, 5, 5) && tris[0].v1 == glm::vec3(6, 5, 5) &&
+                  tris[0].v2 == glm::vec3(5, 6, 5),
+                  "node_transform.gltf -> node translation (5,5,5) applied to verts");
     }
     {
         auto tris = loadGLTFTris(exeDir, "norm_i8.gltf");
