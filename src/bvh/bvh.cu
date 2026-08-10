@@ -298,6 +298,9 @@ void buildSceneBvh(BvhBuffers& out,
             dst.uv0 = src.uv0;
             dst.uv1 = src.uv1;
             dst.uv2 = src.uv2;
+            // Texture slot bindings are per-triangle and transform-free; copy
+            // through unchanged (the device triangles are flattened copies).
+            dst.tex = src.tex;
             worldTris.push_back(dst);
         }
     }

@@ -7,6 +7,23 @@
 #include <string>
 #include <vector>
 
+// Per-triangle texture binding: which image in the texture table serves each
+// role.  A value >= 0 indexes the concatenated texture array; -1 = no
+// texture for that role (use the material's own color / fall back).
+//
+// The roles mirror glTF material slots (base / normal / metallic-roughness
+// ORM / occlusion / emissive).  Only baseColor is sampled by the current
+// Lambert/Phong shading; the rest are stored so future features (normal
+// mapping, PBR, emissive maps) just sample the slot that is already bound.
+struct TextureBinding
+{
+    int baseColor        = -1;
+    int normal           = -1;
+    int metallicRoughness = -1;   // ORM: metallic (B) + roughness (G) packed
+    int occlusion        = -1;
+    int emissive         = -1;
+};
+
 // Triangle backed by an OBJ mesh.
 //
 // Triangles are stored in object space in the Scene's hostTriangles, then
@@ -19,6 +36,7 @@ struct Triangle {
     glm::vec3 n0, n1, n2;  // vertex normals (smooth shading interpolation)
     glm::vec2 uv0{ 0.0f }, uv1{ 0.0f }, uv2{ 0.0f };  // per-vertex texture coordinates (UVs)
     int materialId = -1;   // material index; set during the world-space bake
+    TextureBinding tex;    // per-triangle glTF texture slots (all -1 unless glTF-assigned)
 };
 
 struct Ray
@@ -209,4 +227,5 @@ struct ShadeableIntersection
   glm::vec3 surfaceNormal;
   int materialId;
   glm::vec2 uv;   // interpolated texture coordinate at the hit point
+  TextureBinding tex;   // per-triangle texture slots (copied from the hit triangle)
 };
