@@ -12,8 +12,6 @@
  *   4. JSON + CLI combined priority (CLI wins)
  *   5. Real config file → loadConfigFile → mergeConfigJson overrides defaults
  *      (the exact chain config.local.json takes in the app)
- *   6. Fresnel: a renderer setting like rngMode — config JSON and CLI both
- *      set it, CLI wins
  */
 
 #include "config.h"
@@ -73,7 +71,6 @@ static int testDefaults()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::SharedMem)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, false)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::LCG)) return 1;
-    if (checkEq("fresnelMode", (int)cfg.fresnelMode, (int)FresnelMode::Accurate)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, false)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, false)) return 1;
     if (checkBool("autoSave", cfg.autoSave, true)) return 1;
@@ -91,7 +88,6 @@ static int testJsonMerge()
         "compactMethod": "Off",
         "sortByMaterial": true,
         "rngMode": "Halton",
-        "fresnelMode": "Schlick",
         "bloom": { "enabled": true, "threshold": 0.5, "intensity": 0.3, "radius": 5 },
         "chromaticAberration": { "enabled": true },
         "vignette": { "enabled": true, "intensity": 0.8, "exponent": 4.0 },
@@ -102,7 +98,6 @@ static int testJsonMerge()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Off)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
-    if (checkEq("fresnelMode", (int)cfg.fresnelMode, (int)FresnelMode::Schlick)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
     if (checkBool("profCfg.verbose", cfg.profCfg.verbose, true)) return 1;
@@ -119,7 +114,7 @@ static int testCliOverride()
     AppConfig cfg;
     const char* argv[] = {
         "prog", "--compact=1", "--sort=1", "--rng=1",
-        "--fresnel=1", "--save", "--warmup=5", "--benchmark", "test.json"
+        "--save", "--warmup=5", "--benchmark", "test.json"
     };
     int argc = sizeof(argv) / sizeof(argv[0]);
     parseCliFlags(cfg, argc, (char**)argv);
@@ -127,7 +122,6 @@ static int testCliOverride()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::GlobalScan)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
-    if (checkEq("fresnelMode", (int)cfg.fresnelMode, (int)FresnelMode::Accurate)) return 1;
     if (checkBool("autoSave", cfg.autoSave, true)) return 1;
     if (checkEq("profCfg.warmupIters", cfg.profCfg.warmupIters, 5)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
@@ -152,23 +146,6 @@ static int testPriority()
 
     if (checkEq("final compactMethod", (int)base.compactMethod, (int)CompactMethod::Thrust)) return 1;
     if (checkBool("final sortByMaterial", base.sortByMaterial, true)) return 1;
-    PASS();
-    return 0;
-}
-
-// ---- Test: fresnelMode priority (CLI wins over JSON, like rngMode) -------
-
-static int testFresnelPriority()
-{
-    TEST("CLI --fresnel overrides JSON fresnelMode");
-    AppConfig base;
-    mergeConfigJson(base, json::parse(R"({ "fresnelMode": "Schlick" })"));
-    if (checkEq("after JSON fresnelMode", (int)base.fresnelMode, (int)FresnelMode::Schlick)) return 1;
-
-    const char* argv[] = { "prog", "--fresnel=1" };
-    int argc = 2;
-    parseCliFlags(base, argc, (char**)argv);
-    if (checkEq("after CLI fresnelMode", (int)base.fresnelMode, (int)FresnelMode::Accurate)) return 1;
     PASS();
     return 0;
 }
@@ -217,7 +194,6 @@ static int testConfigFileLoad()
     {
         std::ofstream f(path);
         f << R"({ "compactMethod": "Thrust", "sortByMaterial": true, "rngMode": "Halton",
-                  "fresnelMode": "Accurate",
                   "bloom": { "enabled": true, "threshold": 0.7 },
                   "profiler": { "enabled": true, "warmup": 7 } })";
     }
@@ -231,7 +207,6 @@ static int testConfigFileLoad()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Thrust)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
-    if (checkEq("fresnelMode", (int)cfg.fresnelMode, (int)FresnelMode::Accurate)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
     if (checkBool("bloom.threshold", cfg.bloom.threshold == 0.7f, true)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
@@ -266,12 +241,6 @@ static int testEnumStringParsing()
     if (checkEq("rngMode 'Halton'", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
     mergeConfigJson(cfg, json::parse(R"({ "rngMode": "lcg" })"));
     if (checkEq("rngMode 'lcg'", (int)cfg.rngMode, (int)RngMode::LCG)) return 1;
-
-    // fresnelMode names + case + legacy number
-    mergeConfigJson(cfg, json::parse(R"({ "fresnelMode": "accurate" })"));
-    if (checkEq("fresnelMode 'accurate'", (int)cfg.fresnelMode, (int)FresnelMode::Accurate)) return 1;
-    mergeConfigJson(cfg, json::parse(R"({ "fresnelMode": 0 })"));
-    if (checkEq("fresnelMode 0 (legacy)", (int)cfg.fresnelMode, (int)FresnelMode::Schlick)) return 1;
 
     // Unknown name keeps the current value (falls back, does not throw)
     cfg.compactMethod = CompactMethod::Thrust;
@@ -344,7 +313,6 @@ int main()
     failures += testJsonMerge();
     failures += testCliOverride();
     failures += testPriority();
-    failures += testFresnelPriority();
     failures += testPartialJson();
     failures += testEmptyJson();
     failures += testConfigFileLoad();

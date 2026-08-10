@@ -128,7 +128,7 @@ static bool testGuardInvariant()
 // ---------------------------------------------------------------------------
 // L3: behavior — scatterRay never emits NaN; TIR deterministically reflects
 // ---------------------------------------------------------------------------
-static bool testScatterRayNeverNaN(FresnelMode mode)
+static bool testScatterRayNeverNaN()
 {
     // Glass slab.  Surface normal +z faces outward.  Exiting rays have
     // dot(I, normal) > 0 → HitSide::Inside → scatterRay refract branch.
@@ -139,8 +139,6 @@ static bool testScatterRayNeverNaN(FresnelMode mode)
     glass.invIndexOfRefraction = 1.0f / 1.5f;
 
     const glm::vec3 normal(0.0f, 0.0f, 1.0f);   // geometric / shading normal
-    const glm::vec3 intersect(0.0f, 0.0f, 0.0f);
-    const char* modeName = (mode == FresnelMode::Accurate) ? "accurate" : "schlick";
 
     int tirSeen = 0;
     int refractSeen = 0;
@@ -166,16 +164,19 @@ static bool testScatterRayNeverNaN(FresnelMode mode)
         p.remainingBounces = 8;
         RngState rng = makeRngState(0, 0, 0, RngMode::LCG);   // fixed seed
 
-        // Glass (refractive) never samples textures — pass empty defaults.
-        scatterRay(p, intersect, normal, glass, TextureBinding{}, rng, mode,
-                   TextureTable{}, glm::vec2(0.0f));
+        // Glass (refractive) never samples textures — empty hit record.
+        // Ray origin is (0,0,0), so t = 0 reproduces intersect = (0,0,0).
+        ShadeableIntersection hit{};
+        hit.t = 0.0f;
+        hit.surfaceNormal = normal;
+        scatterRay(p, hit, glass, rng, TextureTable{});
 
         CHECK(isFinite(p.ray.direction),
-              "mode=%s cosT=%g: NaN direction out of scatterRay", modeName, cosT);
+              "cosT=%g: NaN direction out of scatterRay", cosT);
 
         const float len = glm::length(p.ray.direction);
         CHECK(fabsf(len - 1.0f) < 1e-3f,
-              "mode=%s cosT=%g: direction not unit (len=%g)", modeName, cosT, len);
+              "cosT=%g: direction not unit (len=%g)", cosT, len);
 
         if (tir)
         {
@@ -185,17 +186,17 @@ static bool testScatterRayNeverNaN(FresnelMode mode)
             const glm::vec3 expectedReflect = glm::reflect(I, normal);
             const float aligned = glm::dot(p.ray.direction, expectedReflect);
             CHECK(aligned > 0.999f,
-                  "mode=%s cosT=%g (TIR): expected reflection of (%g,%g,%g), "
+                  "cosT=%g (TIR): expected reflection of (%g,%g,%g), "
                   "got (%g,%g,%g) dot=%g",
-                  modeName, cosT, I.x, I.y, I.z,
+                  cosT, I.x, I.y, I.z,
                   p.ray.direction.x, p.ray.direction.y, p.ray.direction.z,
                   aligned);
         }
     }
 
     // Sanity: the sweep must have covered both regimes.
-    CHECK(tirSeen > 0, "mode=%s: sweep never hit TIR — test geometry broken", modeName);
-    CHECK(refractSeen > 0, "mode=%s: sweep never refracted — test geometry broken", modeName);
+    CHECK(tirSeen > 0, "sweep never hit TIR — test geometry broken");
+    CHECK(refractSeen > 0, "sweep never refracted — test geometry broken");
 
     return true;
 }
@@ -218,15 +219,10 @@ int main()
             r2 ? "PASS" : "FAIL");
     allOk = allOk && r2;
 
-    bool r3a = testScatterRayNeverNaN(FresnelMode::Schlick);
-    fprintf(stdout, "[%s] L3 behavior: scatterRay never NaN — Schlick\n",
-            r3a ? "PASS" : "FAIL");
-    allOk = allOk && r3a;
-
-    bool r3b = testScatterRayNeverNaN(FresnelMode::Accurate);
-    fprintf(stdout, "[%s] L3 behavior: scatterRay never NaN — Accurate\n",
-            r3b ? "PASS" : "FAIL");
-    allOk = allOk && r3b;
+    bool r3 = testScatterRayNeverNaN();
+    fprintf(stdout, "[%s] L3 behavior: scatterRay never NaN (hardcoded Accurate Fresnel)\n",
+            r3 ? "PASS" : "FAIL");
+    allOk = allOk && r3;
 
     fprintf(stdout, "%s\n", allOk ? "ALL PASSED" : "FAILURES PRESENT");
     return allOk ? 0 : 1;
