@@ -13,7 +13,10 @@
 //      tags materialId, and flattens leaves into contiguous runs.
 //   2. Single-tree build: root is node 0, every node reachable, leaf
 //      chunks tile the triangle array exactly (contiguous, non-overlapping,
-//      gap-free — the per-leaf sequential-read property).
+//      gap-free — the per-leaf sequential-read property), AND each chunk's
+//      content is provably that leaf's own: every triangle in a leaf's
+//      contiguous run lies fully inside the leaf's AABB, and the flattened
+//      output is a bijection of the baked source (no drop/dup/alter).
 //   3. traverseBvhClosest (near-child-first) matches a brute-force O(N)
 //      scan on the baked array — hit flag, t, normal, materialId.
 //   4. intersectRayAABBEntry entry-distance correctness + the near-first
@@ -405,6 +408,13 @@ bool testTraversalVsBrute(const char* name, const std::vector<Triangle>& tris,
 // the runs partition [0, N) with no overlap and no gap.  That tiling is
 // exactly the property that makes the traversal's per-leaf sequential read
 // `tris[triBase + j]` cache-friendly.
+//
+// Two content assertions close the loop that tiling alone leaves open:
+//   (a) every triangle in a leaf's contiguous chunk is fully inside that
+//       leaf's AABB (the build expanded `bounds` over exactly these
+//       triangles), so the chunk really holds that leaf's triangles and
+//   (b) the flattened output is a bijection of the baked source, so the
+//       flatten never dropped, duplicated, or altered a triangle.
 bool testBuildStructure(const std::vector<Triangle>& tris, const glm::mat4& T, int materialId)
 {
     std::vector<Geom> geoms(1);
@@ -415,6 +425,21 @@ bool testBuildStructure(const std::vector<Triangle>& tris, const glm::mat4& T, i
     if (out.hostNodes.empty())
     {
         printf("FAIL structure: no nodes built\n");
+        return false;
+    }
+
+    // (b) Per-case content-completeness: the flattened output must be a
+    // bijection of the baked source — no triangle dropped, duplicated, or
+    // altered by the flatten.  testTraversalVsBrute scans the SAME baked
+    // array on both sides, so it cannot see flatten bugs; the standalone
+    // bake tests only cover their own inputs.  This closes that gap for
+    // every structure case.
+    std::vector<Triangle> expected;
+    for (const Triangle& t : tris)
+        expected.push_back(bakeExpected(geoms[0], t));
+    if (!sameMultiset(expected, out.hostTriangles, 1e-3f))
+    {
+        printf("FAIL structure: flattened output is not a bijection of the baked source\n");
         return false;
     }
 
@@ -458,6 +483,29 @@ bool testBuildStructure(const std::vector<Triangle>& tris, const glm::mat4& T, i
                     printf("FAIL structure: leaf chunks overlap at triangle %d\n", off + j);
                     return false;
                 }
+
+            // (a) Memory-contiguity content check: every triangle in this
+            // leaf's CONTIGUOUS chunk must lie fully inside the leaf's AABB.
+            // The build expanded `bounds` over exactly these triangles
+            // (their union — min/max is commutative, so this is bit-exact),
+            // hence containment holds by construction.  A flatten bug that
+            // wrote a DIFFERENT leaf's triangles into this chunk breaks it
+            // immediately.  The coverage/tiling loop above only proves the
+            // array is partitioned into contiguous runs, not that each run
+            // holds its own leaf's triangles.
+            for (int j = 0; j < cnt; j++)
+            {
+                AABB tb;
+                tb.expand(out.hostTriangles[off + j]);
+                if (tb.min.x < n.bounds.min.x - 1e-4f || tb.max.x > n.bounds.max.x + 1e-4f ||
+                    tb.min.y < n.bounds.min.y - 1e-4f || tb.max.y > n.bounds.max.y + 1e-4f ||
+                    tb.min.z < n.bounds.min.z - 1e-4f || tb.max.z > n.bounds.max.z + 1e-4f)
+                {
+                    printf("FAIL structure: leaf %d chunk [%d,+%d) triangle %d outside leaf AABB\n",
+                           idx, off, cnt, off + j);
+                    return false;
+                }
+            }
         }
         else
         {
