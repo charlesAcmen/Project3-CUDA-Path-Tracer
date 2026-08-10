@@ -228,6 +228,62 @@ __host__ __device__ HitSide classifyRefraction(
     }
 }
 
+// ---- Texture sampling ---------------------------------------------------
+__host__ __device__ glm::vec3 sampleTexture(
+    const glm::vec3* pixels,
+    const TextureInfo& ti,
+    glm::vec2 uv)
+{
+    // Repeat-wrap: fold uv into [0,1) per axis.  floorf handles negative
+    // coordinates: uv.x = -0.3 → floor(-0.3) = -1 → u = 0.7, which is the
+    // correct wrap.  After this u,v are strictly < 1 (u = x - floor(x) can
+    // never equal 1.0), so the texel indices below are always in range.
+    const float u = uv.x - floorf(uv.x);
+    const float v = uv.y - floorf(uv.y);
+
+    // Texture space → texel space.  u = 0 lands on texel column 0's left
+    // edge, u = 1 − ε on the last column's — a "texel-corner" convention,
+    // which makes exact corners collapse to that texel (fx = 0).
+    const float x = u * (float)ti.width;
+    const float y = v * (float)ti.height;
+
+    const int   x0 = (int)x;
+    const int   y0 = (int)y;
+    const float fx = x - (float)x0;
+    const float fy = y - (float)y0;
+
+    // x0 ∈ [0, width-1] (u < 1 guarantees it).  x0+1 is the next texel; it
+    // only equals `width` when u → 1, which never happens post-wrap — the
+    // clamp is defense-in-depth so the index is never out of range.
+    const int x1 = (x0 + 1 < ti.width)  ? x0 + 1 : x0;
+    const int y1 = (y0 + 1 < ti.height) ? y0 + 1 : y0;
+
+    const int base = ti.pixelOffset;
+    const glm::vec3& p00 = pixels[base + (y0 * ti.width + x0)];
+    const glm::vec3& p10 = pixels[base + (y0 * ti.width + x1)];
+    const glm::vec3& p01 = pixels[base + (y1 * ti.width + x0)];
+    const glm::vec3& p11 = pixels[base + (y1 * ti.width + x1)];
+
+    // Two horizontal interpolations, then one vertical — the standard
+    // bilinear blend.
+    const glm::vec3 top = p00 + fx * (p10 - p00);
+    const glm::vec3 bot = p01 + fx * (p11 - p01);
+    return top + fy * (bot - top);
+}
+
+__host__ __device__ glm::vec3 sampleCheckerboard(
+    glm::vec2 uv,
+    const glm::vec3& base)
+{
+    // 8×8 grid: which cell are we in?
+    const int u = (int)floorf(uv.x * 8.0f);
+    const int v = (int)floorf(uv.y * 8.0f);
+    // Checker parity: (u+v) even → bright, odd → dark.  % 2 preserves parity
+    // under C++'s truncate-toward-zero even for negative (u+v), so negative
+    // uv stays a consistent checker too.
+    return (((u + v) % 2) == 0) ? base : base * 0.25f;
+}
+
 __host__ __device__ void scatterRay(
     PathSegment & pathSegment,
     glm::vec3 intersect,

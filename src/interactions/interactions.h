@@ -24,6 +24,43 @@ __host__ __device__ HitSide classifyRefraction(
     float& outCosThetaI);
 
 /**
+ * Sample a file-loaded texture at a UV coordinate.
+ *
+ * Repeat-wrap: uv folds into [0,1) per axis (negative coordinates wrap too).
+ * Bilinear: the four texels surrounding the wrapped position are blended by
+ * the fractional texel offset.  At an exact texel corner (uv mapping to an
+ * integer texel position) the sample collapses to that texel's color.
+ *
+ * The returned color is expected to be linear (the loader converts sRGB
+ * texels to linear on upload), so it feeds the existing linear pipeline
+ * directly.
+ *
+ * @param pixels   Concatenated linear-RGB texel buffer
+ * @param ti       Which texture inside `pixels` (pixelOffset/width/height)
+ * @param uv       Texture coordinate; any real values are valid (wrapped)
+ * @return         Sampled linear color
+ */
+__host__ __device__ glm::vec3 sampleTexture(
+    const glm::vec3* pixels,
+    const TextureInfo& ti,
+    glm::vec2 uv);
+
+/**
+ * Sample a procedural checkerboard texture at a UV coordinate.
+ *
+ * An 8×8 grid of alternating squares: bright squares use `base`, dark
+ * squares use `base * 0.25f` — the pattern reads clearly while keeping the
+ * material's hue.  The grid repeats every 1.0 in uv (period 8 cells).
+ *
+ * @param uv    Texture coordinate
+ * @param base  Material albedo the checker is derived from
+ * @return      base (bright cell) or base * 0.25f (dark cell)
+ */
+__host__ __device__ glm::vec3 sampleCheckerboard(
+    glm::vec2 uv,
+    const glm::vec3& base);
+
+/**
  * Scatter a ray with some probabilities according to the material properties.
  * For example, a diffuse surface scatters in a cosine-weighted hemisphere.
  * A perfect specular surface scatters in the reflected ray direction.
