@@ -17,6 +17,7 @@
 struct Triangle {
     glm::vec3 v0, v1, v2;  // three vertex positions
     glm::vec3 n0, n1, n2;  // vertex normals (smooth shading interpolation)
+    glm::vec2 uv0{ 0.0f }, uv1{ 0.0f }, uv2{ 0.0f };  // per-vertex texture coordinates (UVs)
     int materialId = -1;   // material index; set during the world-space bake
 };
 
@@ -66,6 +67,22 @@ struct Material
     float indexOfRefraction;      // IOR of the refractive material, e.g. 1.5 for glass
     float invIndexOfRefraction;   // Precomputed inverse IOR to avoid GPU division
     float emittance;              // Emission strength for light sources (nonzero = emissive)
+
+    // Texture mapping.  textureId selects the image to sample in the
+    // shading step; -1 = no texture (use `color`), -2 = procedural
+    // checkerboard, >= 0 = index into the scene's texture array.
+    int   textureId = -1;
+    float uvScale   = 1.0f;       // UV repeat scale (1 = one tile over [0,1])
+};
+
+// One image in the scene's texture array, referenced by Material::textureId
+// (>= 0).  On the GPU all images' texels live concatenated in one flat
+// buffer; TextureInfo describes this image's slice of it.
+struct TextureInfo
+{
+    int pixelOffset = 0;   // texel offset into the concatenated pixel buffer
+    int width       = 0;   // texel width
+    int height      = 0;   // texel height
 };
 
 // Fresnel evaluation mode used by refractive materials.
@@ -191,4 +208,5 @@ struct ShadeableIntersection
   //t < 0.0f: no intersection with an object(initial value)
   glm::vec3 surfaceNormal;
   int materialId;
+  glm::vec2 uv;   // interpolated texture coordinate at the hit point
 };

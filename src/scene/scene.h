@@ -15,10 +15,23 @@
 #include "sceneStructs.h"
 #include <vector>
 
+// A texture image loaded from disk (host side).  `pixels` holds width*height
+// LINEAR-RGB texels, row-major.  Referenced by Material::textureId (>= 0).
+struct TextureData
+{
+    std::vector<glm::vec3> pixels;   // w*h linear-RGB texels
+    int width  = 0;
+    int height = 0;
+};
+
 struct Scene {
     std::vector<Geom>     geoms;
     std::vector<Material> materials;
     RenderState state;
+
+    // Texture images referenced by Material::textureId (>= 0).  Empty for
+    // scenes with no textures.
+    std::vector<TextureData> textures;
 
     // Flat array of all mesh triangles (object-space).  Each mesh
     // geometry references a contiguous slice via
