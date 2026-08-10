@@ -82,12 +82,24 @@ __host__ __device__ glm::vec3 sampleCheckerboard(
  * This method applies its changes to the Ray parameter `ray` in place.
  * It also modifies the color `color` of the ray in place.
  *
+ * Texture input: the hit record carries the per-triangle TextureBinding
+ * (`hit.tex`) and a UV; the diffuse branch resolves the albedo from the
+ * baseColor slot (glTF binding wins over the JSON-declared
+ * Material::textureId) and samples the scene's texture table (`textures`)
+ * if one is bound.  Mirror-like and refractive materials keep their material
+ * color and ignore textures.
+ *
+ * The hit geometry (point, normal, UV, texture slots) is passed as the
+ * ShadeableIntersection record rather than as loose scalars: it is exactly
+ * the surface state the traversal produced, so the caller hands over the
+ * whole hit.  The exact hit point is derived inside from
+ * `pathSegment.ray.origin + hit.t * direction` (the ray is unit length).
+ *
  * You may need to change the parameter list for your purposes!
  */
 __host__ __device__ void scatterRay(
     PathSegment& pathSegment,
-    glm::vec3 intersect,
-    glm::vec3 normal,
+    const ShadeableIntersection& hit,
     const Material& m,
     RngState& rng,
     const TextureTable& textures);

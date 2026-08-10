@@ -175,7 +175,7 @@ __host__ __device__ float fresnelSchlick(float cosThetaI, float eta)
     return r0 + (1.0f - r0) * oneMinusCos5;
 }
 
-//returns the fraction of non-polarized light reflected at the interface between two materials with indices of refraction n1 and n2, 
+//returns the fraction of non-polarized light reflected at the interface between two materials with indices of refraction n1 and n2,
 //given the cosine of the incident angle cosThetaI.  eta = n1/n2 (precomputed).
 __host__ __device__ float fresnelAccurate(float cosThetaI, float eta)
 {
@@ -279,8 +279,7 @@ __host__ __device__ glm::vec3 sampleCheckerboard(
 
 __host__ __device__ void scatterRay(
     PathSegment & pathSegment,
-    glm::vec3 intersect,
-    glm::vec3 normal,
+    const ShadeableIntersection &hit,
     const Material &m,
     RngState &rng,
     const TextureTable &textures)
@@ -290,6 +289,16 @@ __host__ __device__ void scatterRay(
     // Reflective: perfect specular reflection (glm::reflect).
     // Refractive: Fresnel-weighted Russian roulette between reflection and
     //             refraction (glm::refract), with normal flipped for exit rays.
+
+    // The hit record carries everything the scatter needs; unpack it here so
+    // the branch bodies below stay compact.  The exact hit point is derived
+    // from the path ray (unit length) and hit.t — identical to what the
+    // caller's getExactPointOnRay would compute, so passing it separately
+    // would be redundant.
+    const glm::vec3        intersect = pathSegment.ray.origin + hit.t * pathSegment.ray.direction;
+    const glm::vec3        normal    = hit.surfaceNormal;
+    const glm::vec2&       uv        = hit.uv;
+    const TextureBinding&  tex       = hit.tex;
 
     // Generate new random direction for diffuse reflection (cosine-weighted hemisphere sampling)
     // Common mistake: offsetting along newDirection instead of normal
@@ -330,7 +339,11 @@ __host__ __device__ void scatterRay(
             // reflection (see fresnelSchlick / fresnelAccurate), so the roulette
             // below normally takes the reflection branch whenever refraction is
             // impossible.  The explicit `tir ||` below makes that unconditional.
-            const float reflectance = selectFresnelEvaluator(fresnelMode, cosThetaI, etaRatio);
+            //
+            // Fresnel evaluator is hardcoded to Accurate (the default renderer
+            // choice).  To switch to Schlick, change this one call — there is
+            // no runtime mode dispatch by design.
+            const float reflectance = fresnelAccurate(cosThetaI, etaRatio);
 
             // Russian roulette: reflect with prob R, refract with prob 1-R.
             // Throughput multiplier = (energy fraction) / (probability):
@@ -404,7 +417,18 @@ __host__ __device__ void scatterRay(
             // where pdf(omega) = cos theta / PI
             // BSDF of diffuse reflection: fr = R / PI
             pathSegment.ray.direction = newDirection;
-            pathSegment.color *= m.color;
+
+            // Resolve the diffuse albedo: a per-triangle glTF baseColor binding
+            // wins over the JSON-declared Material::textureId, then over the
+            // flat material color.  Only the diffuse branch samples textures —
+            // mirror/glass keep their material color (a texture on them is
+            // bound but unused this milestone).
+            int bid = tex.baseColor;
+            if (bid < 0) bid = m.textureId;
+            glm::vec3 albedo = m.color;
+            if (bid == kCheckerboardTextureId)             albedo = sampleCheckerboard(uv, m.color);
+            else if (bid >= 0)                             albedo = sampleTexture(textures.pixels, textures.infos[bid], uv * m.uvScale);
+            pathSegment.color *= albedo;
             break;
         }
     }
