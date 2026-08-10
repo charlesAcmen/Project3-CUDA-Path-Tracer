@@ -141,6 +141,30 @@ void pathtraceInit(Scene* scene)
         bvh::uploadToDevice(g_dev.bvh);   // node + meta buffers (null if no meshes)
     }
 
+    // ---- Texture table ----
+    // Concatenate every scene image into one flat pixel buffer; record each
+    // image's slice (pixelOffset/width/height).
+    {
+        std::vector<glm::vec3>    pixels;
+        std::vector<TextureInfo>  infos;
+        int offset = 0;
+        for (const TextureData& td : scene->textures)
+        {
+            infos.push_back({ offset, td.width, td.height });
+            pixels.insert(pixels.end(), td.pixels.begin(), td.pixels.end());
+            offset += (int)td.pixels.size();
+        }
+        if (!pixels.empty())
+        {
+            cudaMalloc(&g_dev.deviceTexturePixels, pixels.size() * sizeof(glm::vec3));
+            cudaMemcpy(g_dev.deviceTexturePixels, pixels.data(),
+                       pixels.size() * sizeof(glm::vec3), cudaMemcpyHostToDevice);
+            cudaMalloc(&g_dev.deviceTextureInfos, infos.size() * sizeof(TextureInfo));
+            cudaMemcpy(g_dev.deviceTextureInfos, infos.data(),
+                       infos.size() * sizeof(TextureInfo), cudaMemcpyHostToDevice);
+        }
+    }
+
     cudaMalloc(&g_dev.intersections, pixelcount * sizeof(ShadeableIntersection));
     cudaMemset(g_dev.intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
@@ -193,6 +217,10 @@ void pathtraceFree()
     cudaFree(g_dev.bloomWeights);  // bloom Gaussian weight buffer
     cudaFree(g_dev.deviceTriangles);
     g_dev.deviceTriangles = nullptr;
+    cudaFree(g_dev.deviceTexturePixels);
+    g_dev.deviceTexturePixels = nullptr;
+    cudaFree(g_dev.deviceTextureInfos);
+    g_dev.deviceTextureInfos = nullptr;
     bvh::freeDevice(g_dev.bvh);   // BVH node + meta device buffers
     StreamCompaction::Efficient::freeCompactionWorkspace();
 

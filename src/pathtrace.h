@@ -31,6 +31,12 @@ struct DeviceBuffers {
     // chunks by the BVH build), uploaded from BvhBuffers::hostTriangles.
     Triangle*               deviceTriangles     = nullptr;
 
+    // Texture table: every scene image concatenated into one flat texel
+    // buffer (deviceTexturePixels), with one TextureInfo per image telling
+    // the sampler where its slice starts.
+    glm::vec3*              deviceTexturePixels = nullptr;
+    TextureInfo*            deviceTextureInfos  = nullptr;
+
     // Single scene-wide BVH: host build output + device nodes.
     BvhBuffers              bvh;
 };
