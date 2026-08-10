@@ -439,31 +439,24 @@ static pair<int, int> loadGLTF(const string& gltfPath,
 }
 
 // -----------------------------------------------------------------------
-// JSON Scene Loading
+// JSON Section Parsing
 // -----------------------------------------------------------------------
 
-Scene loadFromJSON(const std::string& jsonName)
+/**
+ * Parse the "Materials" section into Scene::materials.
+ *
+ * @param data         Parsed scene JSON
+ * @param scene        Scene to append materials to
+ * @param MatNameToID  [out] Map from material name -> index into
+ *                     Scene::materials; parseObjects resolves each object's
+ *                     MATERIAL field through it.
+ */
+static void parseMaterials(
+    const json& data, Scene& scene,
+    unordered_map<string, uint32_t>& MatNameToID)
 {
-    Scene scene;
-
-    Log::info("Scene", "Reading: %s", jsonName.c_str());
-
-    auto ext = jsonName.substr(jsonName.find_last_of('.'));
-    if (ext != ".json")
-    {
-        Log::error("Scene", "Unsupported scene format: %s", ext.c_str());
-        exit(-1);
-    }
-
-    // Resolve the JSON file's directory so relative OBJ paths work.
-    filesystem::path jsonDir = filesystem::path(jsonName).parent_path();
-
-    ifstream f(jsonName);
-    json data = json::parse(f);
-
     // ---- Materials ----------------------------------------------------
     const auto& materialsData = data["Materials"];
-    unordered_map<string, uint32_t> MatNameToID;
     for (const auto& item : materialsData.items())
     {
         const auto& name = item.key();
@@ -538,14 +531,31 @@ Scene loadFromJSON(const std::string& jsonName)
         }
         else
         {
-            Log::warn("Scene", 
+            Log::warn("Scene",
                 "Unknown material TYPE '%s' for '%s' defaulting to Diffuse",
                       p["TYPE"].get<std::string>().c_str(), name.c_str());
         }
         MatNameToID[name] = scene.materials.size();
         scene.materials.emplace_back(newMaterial);
     }
+}
 
+/**
+ * Parse the "Objects" section into Scene::geoms, dispatching each mesh's
+ * FILE entry to the OBJ / glTF loader by file extension.
+ *
+ * @param data         Parsed scene JSON
+ * @param scene        Scene to append geoms to (also the triangle sink for
+ *                     mesh loading)
+ * @param jsonDir      Directory of the scene JSON — relative mesh paths
+ *                     resolve against it
+ * @param MatNameToID  Material-name -> index map built by parseMaterials
+ */
+static void parseObjects(
+    const json& data, Scene& scene,
+    const filesystem::path& jsonDir,
+    unordered_map<string, uint32_t>& MatNameToID)
+{
     // ---- Objects (geometries) -----------------------------------------
     const auto& objectsData = data["Objects"];
     for (const auto& p : objectsData)
@@ -614,7 +624,14 @@ Scene loadFromJSON(const std::string& jsonName)
 
         scene.geoms.push_back(newGeom);
     }
+}
 
+/**
+ * Parse the "Camera" section and derive the camera frame — fov, the
+ * view/right basis, pixel length — and the host image buffer.
+ */
+static void parseCamera(const json& data, Scene& scene)
+{
     // ---- Camera -------------------------------------------------------
     const auto& cameraData  = data["Camera"];
     Camera&      camera     = scene.state.camera;
@@ -651,6 +668,44 @@ Scene loadFromJSON(const std::string& jsonName)
     int arraylen = camera.resolution.x * camera.resolution.y;
     state.image.resize(arraylen);
     fill(state.image.begin(), state.image.end(), glm::vec3());
+}
+
+// -----------------------------------------------------------------------
+// JSON Scene Loading
+// -----------------------------------------------------------------------
+
+/**
+ * Load a complete scene from a JSON file.
+ *
+ * Parses materials, objects (mesh objects dispatch to the OBJ / glTF
+ * loaders), and camera settings from the JSON.  Mesh file paths are
+ * resolved relative to the JSON file's directory.
+ */
+Scene loadFromJSON(const std::string& jsonName)
+{
+    Scene scene;
+
+    Log::info("Scene", "Reading: %s", jsonName.c_str());
+
+    auto ext = jsonName.substr(jsonName.find_last_of('.'));
+    if (ext != ".json")
+    {
+        Log::error("Scene", "Unsupported scene format: %s", ext.c_str());
+        exit(-1);
+    }
+
+    // Resolve the JSON file's directory so relative mesh paths work.
+    filesystem::path jsonDir = filesystem::path(jsonName).parent_path();
+
+    ifstream f(jsonName);
+    json data = json::parse(f);
+
+    // Parse the sections in dependency order: materials first (objects
+    // reference them by name), then objects (geometries), then the camera.
+    unordered_map<string, uint32_t> MatNameToID;
+    parseMaterials(data, scene, MatNameToID);
+    parseObjects(data, scene, jsonDir, MatNameToID);
+    parseCamera(data, scene);
 
     return scene;
 }
