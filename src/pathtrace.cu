@@ -329,7 +329,6 @@ void pathtrace(uchar4* pbo, int iter)
 
         ShadingConfig shadingCfg = {
             traceDepth, hst_scene->state.rrMinBounces,
-            g_opts.fresnelMode,
             g_opts.rngMode, cam, hst_scene->state.debug
         };
         prof.gpuStart(ProfilerOp::ShadeMaterial);

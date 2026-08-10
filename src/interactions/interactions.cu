@@ -175,13 +175,6 @@ __host__ __device__ float fresnelSchlick(float cosThetaI, float eta)
     return r0 + (1.0f - r0) * oneMinusCos5;
 }
 
-__host__ __device__ float selectFresnelEvaluator(FresnelMode fresnelMode, float cosThetaI, float eta)
-{
-    return (fresnelMode == FresnelMode::Accurate)
-        ? fresnelAccurate(cosThetaI, eta)
-        : fresnelSchlick(cosThetaI, eta);
-}
-
 //returns the fraction of non-polarized light reflected at the interface between two materials with indices of refraction n1 and n2, 
 //given the cosine of the incident angle cosThetaI.  eta = n1/n2 (precomputed).
 __host__ __device__ float fresnelAccurate(float cosThetaI, float eta)
@@ -290,7 +283,7 @@ __host__ __device__ void scatterRay(
     glm::vec3 normal,
     const Material &m,
     RngState &rng,
-    FresnelMode fresnelMode)
+    const TextureTable &textures)
 {
     // Scatter a ray according to the material's BSDF.
     // Diffuse: cosine-weighted hemisphere sampling.

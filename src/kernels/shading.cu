@@ -88,9 +88,11 @@ __global__ void shadeMaterial(
             {
                 // ---- Indirect illumination (BSDF continuation ray) ----
                 // Surface hit: scatter the ray according to the material BSDF.
-                scatterRay(pathSegment, intersectionPoint,
-                    intersection.surfaceNormal, material,
-                    rngScatter, config.fresnelMode);
+                // The hit record carries the surface normal, UV and per-triangle
+                // texture binding, so the diffuse branch can sample the texture
+                // table; scatterRay derives the exact hit point from hit.t.
+                scatterRay(pathSegment, intersection, material,
+                    rngScatter, textures);
 
                 // ---- Russian roulette ----
                 // Probabilistically terminate low-throughput paths after

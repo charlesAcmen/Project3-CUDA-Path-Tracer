@@ -121,21 +121,6 @@ struct TextureTable
     int          count  = 0;         // number of images in the table
 };
 
-// Fresnel evaluation mode used by refractive materials.
-enum class FresnelMode : int
-{
-    Schlick = 0,
-    Accurate = 1
-};
-
-inline const char* toString(FresnelMode m) {
-    switch (m) {
-        case FresnelMode::Schlick:  return "Schlick";
-        case FresnelMode::Accurate: return "Accurate";
-    }
-    return "?";
-}
-
 // Whether a ray is entering or exiting a refractive medium.
 enum class HitSide : int
 {
@@ -209,7 +194,6 @@ struct ShadingConfig
 {
     int           traceDepth;
     int           rrMinBounces;    // guaranteed bounces before Russian roulette
-    FresnelMode   fresnelMode;     // Schlick / Accurate
     RngMode       rngMode;         // LCG / Halton
     Camera cam;
     DebugConfig debug;
