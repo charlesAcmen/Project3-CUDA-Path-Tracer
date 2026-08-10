@@ -14,6 +14,8 @@
 #include "utils/logger.h"
 #include "utils/utilities.h"
 
+#include <stb_image.h>   // stbi_load for PNG/JPG texture files
+
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/matrix_transform.hpp>   // glm::translate / glm::scale (node TRS)
 #include <glm/gtc/quaternion.hpp>         // glm::mat4_cast (node rotation)
@@ -22,6 +24,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -498,6 +501,56 @@ static pair<int, int> loadGLTF(const string& gltfPath,
 }
 
 // -----------------------------------------------------------------------
+// Texture Loading
+// -----------------------------------------------------------------------
+
+/**
+ * Load an image file (PNG/JPG via stb_image) into Scene::textures as
+ * LINEAR-RGB texels.
+ *
+ * The shading pipeline works in linear space, and PNG/JPG texels are sRGB,
+ * so the linearization happens here, once, at load time — the GPU sampler
+ * then returns linear colors that feed the accumulation buffer directly.
+ *
+ * @param scene  Scene to append the texture to
+ * @param path   Absolute path to the image file
+ * @return       Index into Scene::textures (>= 0), or -1 on failure
+ */
+static int loadTextureFile(Scene& scene, const string& path)
+{
+    int w = 0, h = 0, comp = 0;
+    // req_comp = 3 forces RGB (3 channels), so texels are always vec3.
+    stbi_uc* data = stbi_load(path.c_str(), &w, &h, &comp, 3);
+    if (data == nullptr)
+    {
+        Log::error("Scene", "Failed to load texture image: %s", path.c_str());
+        return -1;
+    }
+
+    TextureData td;
+    td.width  = w;
+    td.height = h;
+    td.pixels.resize((size_t)w * (size_t)h);
+
+    // sRGB → linear: c <= 0.04045 ? c/12.92 : ((c+0.055)/1.055)^2.4
+    const auto lin = [](float c) {
+        return (c <= 0.04045f) ? c / 12.92f
+                               : std::pow((c + 0.055f) / 1.055f, 2.4f);
+    };
+    for (int i = 0; i < w * h; i++)
+    {
+        td.pixels[i] = glm::vec3(lin(data[3 * i + 0] / 255.0f),
+                                 lin(data[3 * i + 1] / 255.0f),
+                                 lin(data[3 * i + 2] / 255.0f));
+    }
+    stbi_image_free(data);
+
+    const int id = (int)scene.textures.size();
+    scene.textures.push_back(std::move(td));
+    return id;
+}
+
+// -----------------------------------------------------------------------
 // JSON Section Parsing
 // -----------------------------------------------------------------------
 
@@ -505,16 +558,23 @@ static pair<int, int> loadGLTF(const string& gltfPath,
  * Parse the "Materials" section into Scene::materials.
  *
  * @param data         Parsed scene JSON
- * @param scene        Scene to append materials to
+ * @param scene        Scene to append materials to (also the texture sink)
+ * @param jsonDir      Directory of the scene JSON — relative TEXTURE paths
+ *                     resolve against it (same as mesh FILE paths)
  * @param MatNameToID  [out] Map from material name -> index into
  *                     Scene::materials; parseObjects resolves each object's
  *                     MATERIAL field through it.
  */
 static void parseMaterials(
     const json& data, Scene& scene,
+    const filesystem::path& jsonDir,
     unordered_map<string, uint32_t>& MatNameToID)
 {
     // ---- Materials ----------------------------------------------------
+    // Dedup texture files by resolved path: two materials referencing the
+    // same image share one TextureData (and one device slice).
+    unordered_map<string, int> textureCache;
+
     const auto& materialsData = data["Materials"];
     for (const auto& item : materialsData.items())
     {
@@ -594,6 +654,38 @@ static void parseMaterials(
                 "Unknown material TYPE '%s' for '%s' defaulting to Diffuse",
                       p["TYPE"].get<std::string>().c_str(), name.c_str());
         }
+
+        // ---- Texture mapping (optional) ----
+        // TEXTURE: image path relative to the scene JSON, OR the literal
+        // "checkerboard" for the procedural 8x8 pattern.  Resolves to
+        // Material::textureId: -1 = flat color (default), -2 = checkerboard,
+        // >= 0 = index into Scene::textures.  Only the diffuse albedo is
+        // sampled this milestone; other material types keep their color.
+        if (p.contains("TEXTURE"))
+        {
+            const string tex = p["TEXTURE"].get<string>();
+            if (tex == "checkerboard")
+            {
+                newMaterial.textureId = kCheckerboardTextureId;
+            }
+            else
+            {
+                const string texPath = (jsonDir / tex).generic_string();
+                const auto it = textureCache.find(texPath);
+                if (it != textureCache.end())
+                {
+                    newMaterial.textureId = it->second;
+                }
+                else
+                {
+                    newMaterial.textureId = loadTextureFile(scene, texPath);
+                    if (newMaterial.textureId >= 0)
+                        textureCache[texPath] = newMaterial.textureId;
+                }
+            }
+            newMaterial.uvScale = p.value("UV_SCALE", 1.0f);
+        }
+
         MatNameToID[name] = scene.materials.size();
         scene.materials.emplace_back(newMaterial);
     }
@@ -762,7 +854,7 @@ Scene loadFromJSON(const std::string& jsonName)
     // Parse the sections in dependency order: materials first (objects
     // reference them by name), then objects (geometries), then the camera.
     unordered_map<string, uint32_t> MatNameToID;
-    parseMaterials(data, scene, MatNameToID);
+    parseMaterials(data, scene, jsonDir, MatNameToID);
     parseObjects(data, scene, jsonDir, MatNameToID);
     parseCamera(data, scene);
 
