@@ -47,10 +47,15 @@ namespace SceneLoader {
  * @param v0,v1,v2  Vertex positions (object space)
  * @param n0,n1,n2  Vertex normals; NaN / zero-length entries fall back
  *                  to the face normal
+ * @param u0,u1,u2  Corner UVs (texture space); default (0,0) when the
+ *                  source file provides none
  */
 static Triangle makeTri(
     const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
-    const glm::vec3& n0, const glm::vec3& n1, const glm::vec3& n2)
+    const glm::vec3& n0, const glm::vec3& n1, const glm::vec3& n2,
+    const glm::vec2& u0 = glm::vec2(0.0f),
+    const glm::vec2& u1 = glm::vec2(0.0f),
+    const glm::vec2& u2 = glm::vec2(0.0f))
 {
     // ---- Face normal calculation (safe fallback) ----
     glm::vec3 e1 = v1 - v0;
@@ -66,7 +71,8 @@ static Triangle makeTri(
         return (std::isnan(len2) || len2 < RAY_EPSILON) ? fn : n;
     };
 
-    return Triangle{ v0, v1, v2, validOr(n0), validOr(n1), validOr(n2) };
+    return Triangle{ v0, v1, v2, validOr(n0), validOr(n1), validOr(n2),
+                     u0, u1, u2 };
 }
 
 // -----------------------------------------------------------------------
@@ -103,8 +109,10 @@ static pair<int, int> loadOBJ(const string& objPath,
     int offset = (int)triangles.size();
     int count  = 0;
 
-    // Determine if the OBJ provides vertex normals (vn entries).
+    // Determine if the OBJ provides vertex normals (vn entries) and UVs
+    // (vt entries).
     const bool hasNormals = (!attrib.normals.empty());
+    const bool hasUvs     = (!attrib.texcoords.empty());
 
     for (const auto& shape : shapes)
     {
@@ -163,7 +171,25 @@ static pair<int, int> loadOBJ(const string& objPath,
                 n0 = n1 = n2 = glm::vec3(0.0f);
             }
 
-            triangles.push_back(makeTri(v0, v1, v2, n0, n1, n2));
+            // ---- Texture coordinates (vt entries) ----
+            // OBJ UVs are PER-CORNER (indexed by the same face indices), so
+            // each corner is guarded individually — a face may mix corners
+            // with and without vt.  Missing UVs fall back to (0,0).
+            glm::vec2 uv0(0.0f), uv1(0.0f), uv2(0.0f);
+            if (hasUvs &&
+                idx0.texcoord_index >= 0 && (size_t)(2 * idx0.texcoord_index + 1) < attrib.texcoords.size() &&
+                idx1.texcoord_index >= 0 && (size_t)(2 * idx1.texcoord_index + 1) < attrib.texcoords.size() &&
+                idx2.texcoord_index >= 0 && (size_t)(2 * idx2.texcoord_index + 1) < attrib.texcoords.size())
+            {
+                uv0 = glm::vec2(attrib.texcoords[2 * (size_t)idx0.texcoord_index + 0],
+                                attrib.texcoords[2 * (size_t)idx0.texcoord_index + 1]);
+                uv1 = glm::vec2(attrib.texcoords[2 * (size_t)idx1.texcoord_index + 0],
+                                attrib.texcoords[2 * (size_t)idx1.texcoord_index + 1]);
+                uv2 = glm::vec2(attrib.texcoords[2 * (size_t)idx2.texcoord_index + 0],
+                                attrib.texcoords[2 * (size_t)idx2.texcoord_index + 1]);
+            }
+
+            triangles.push_back(makeTri(v0, v1, v2, n0, n1, n2, uv0, uv1, uv2));
             count++;
             index_offset += fv;
         }
@@ -217,9 +243,10 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
         return;
     }
 
-    // ---- Locate POSITION / NORMAL accessors ----
+    // ---- Locate POSITION / NORMAL / TEXCOORD_0 accessors ----
     const cgltf_accessor* posAcc = nullptr;
     const cgltf_accessor* nrmAcc = nullptr;
+    const cgltf_accessor* uvAcc  = nullptr;
     for (cgltf_size ai = 0; ai < prim->attributes_count; ++ai)
     {
         const cgltf_attribute* attr = &prim->attributes[ai];
@@ -227,6 +254,8 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
             posAcc = attr->data;
         else if (attr->type == cgltf_attribute_type_normal)
             nrmAcc = attr->data;
+        else if (attr->type == cgltf_attribute_type_texcoord && attr->index == 0)
+            uvAcc = attr->data;   // TEXCOORD_0 (we ignore higher sets)
     }
     if (posAcc == nullptr)
     {
@@ -264,6 +293,28 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
             cgltf_accessor_read_float(nrmAcc, i, &nrm[3 * (size_t)i], 3);
     }
 
+    // UVs (optional; default (0,0)).  glTF UVs are PER-VERTEX — shared by
+    // every face that references the vertex — so unlike OBJ there is no
+    // per-corner guard; a present TEXCOORD_0 accessor covers all vertices.
+    vector<float> uv;
+    if (uvAcc != nullptr)
+    {
+        if (uvAcc->count != vertCount)
+        {
+            Log::warn("Scene",
+                      "glTF primitive TEXCOORD_0 count (%zu) != POSITION "
+                      "count (%zu); ignoring UVs",
+                      (size_t)uvAcc->count, (size_t)vertCount);
+            uvAcc = nullptr;
+        }
+        else
+        {
+            uv.resize(2 * (size_t)vertCount);
+            for (cgltf_size i = 0; i < vertCount; ++i)
+                cgltf_accessor_read_float(uvAcc, i, &uv[2 * (size_t)i], 2);
+        }
+    }
+
     auto vert = [&](cgltf_size i) -> glm::vec3 {
         return glm::vec3(pos[3 * (size_t)i + 0],
                          pos[3 * (size_t)i + 1],
@@ -273,6 +324,12 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
         return glm::vec3(nrm[3 * (size_t)i + 0],
                          nrm[3 * (size_t)i + 1],
                          nrm[3 * (size_t)i + 2]);
+    };
+    // UVs are texture-space — NOT transformed by the node matrix.
+    auto uvAt = [&](cgltf_size i) -> glm::vec2 {
+        if (uvAcc == nullptr) return glm::vec2(0.0f);
+        return glm::vec2(uv[2 * (size_t)i + 0],
+                         uv[2 * (size_t)i + 1]);
     };
 
     // Node-transform the local vertex / normal into the scene frame.
@@ -321,7 +378,8 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
             }
 
             triangles.push_back(makeTri(vTrans(i0), vTrans(i1), vTrans(i2),
-                                        nTrans(i0), nTrans(i1), nTrans(i2)));
+                                        nTrans(i0), nTrans(i1), nTrans(i2),
+                                        uvAt(i0), uvAt(i1), uvAt(i2)));
             ++count;
         }
     }
@@ -336,7 +394,8 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
         for (cgltf_size t = 0; t < vertCount; t += 3)
         {
             triangles.push_back(makeTri(vTrans(t + 0), vTrans(t + 1), vTrans(t + 2),
-                                        nTrans(t + 0), nTrans(t + 1), nTrans(t + 2)));
+                                        nTrans(t + 0), nTrans(t + 1), nTrans(t + 2),
+                                        uvAt(t + 0), uvAt(t + 1), uvAt(t + 2)));
             ++count;
         }
     }
