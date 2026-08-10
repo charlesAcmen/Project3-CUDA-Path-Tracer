@@ -12,13 +12,12 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Runtime Configuration (three-layer priority)
 
-`CLI flags > config.local.json > code defaults`, handled by `src/config/config.cpp` / `config.h` through the `appConfig()` singleton. Defaults (in `AppConfig`): `compactMethod = SharedMem`, `sortByMaterial = false`, `rngMode = LCG`, `fresnelMode = Accurate`, `autoSave = true`. BVH depth/leaf size are **compile-time constants** `kBvhMaxDepth`/`kBvhLeafSize` in `src/constants.h` — not runtime-configurable.
+`CLI flags > config.local.json > code defaults`, handled by `src/config/config.cpp` / `config.h` through the `appConfig()` singleton. Defaults (in `AppConfig`): `compactMethod = SharedMem`, `sortByMaterial = false`, `rngMode = LCG`, `autoSave = true`. BVH depth/leaf size are **compile-time constants** `kBvhMaxDepth`/`kBvhLeafSize` in `src/constants.h` — not runtime-configurable.
 
 | Flag | Meaning |
 |------|---------|
 | `--compact=N` | Compaction: 0=off, 1=global-mem scan, 2=Thrust `copy_if`, 3=shared-mem scan (default) |
 | `--sort=N` | Material sorting 0/1 (default off) |
-| `--fresnel=N` | 0=Schlick, 1=Accurate Fresnel (default) |
 | `--rng=N` | 0=LCG (default), 1=scrambled Halton |
 | `--benchmark` | Enable profiler CSV output to `profiler_output/<scene>_<timestamp>/` |
 | `--warmup=N` | Profiler warmup iterations (default 3) |
@@ -92,7 +91,7 @@ src/
 - **`Camera`** — resolution, position/lookAt/view/up/right, fov, pixelLength, `lensRadius` (0 = pinhole), `focalDistance`.
 - **`PathSegment`** — ray + accumulated color + pixelIndex + remainingBounces.
 - **`ShadeableIntersection`** — `t` (<0 = miss), `surfaceNormal`, `materialId`.
-- **`RenderState`** — camera + iterations + traceDepth + rrMinBounces + host `image` buffer + `DebugConfig`. (Renderer settings like `fresnelMode`/`rngMode`/compaction live in `AppConfig`, not here.)
+- **`RenderState`** — camera + iterations + traceDepth + rrMinBounces + host `image` buffer + `DebugConfig`. (Renderer settings like `rngMode`/compaction live in `AppConfig`, not here.)
 - **`AppConfig`** — runtime config singleton (see above).
 
 ### Random Number Generation (`src/rng/rng.h`)
@@ -111,7 +110,7 @@ Mesh-only. Every `Geom` is a triangulated mesh; non-mesh geoms silently miss. Tr
 
 - **Diffuse** — cosine-weighted hemisphere sampling; `color *= albedo` (the `cosθ/pdf` factor cancels the `1/π` in the Lambert BRDF).
 - **Reflective** — `exponent < 0` → perfect mirror (`glm::reflect`); `exponent ≥ 0` → glossy Phong lobe around the reflected direction.
-- **Refractive** — enter/exit keyed off the intersection's `frontFace` flag, Fresnel via Schlick or Accurate (`fresnelMode`), Russian-roulette split between reflection and refraction with probability-compensated throughput; ray origin offset into the correct side of the surface by a per-hit `rayOffset`.
+- **Refractive** — enter/exit keyed off the intersection's `frontFace` flag, Fresnel hardcoded to **Accurate** (Schlick is kept in `interactions.cu` for a one-line switch — no runtime mode dispatch), Russian-roulette split between reflection and refraction with probability-compensated throughput; ray origin offset into the correct side of the surface by a per-hit `rayOffset`.
 - **Russian roulette** (`shading.cuh`) — after `rrMinBounces`, survival probability = clamp(max RGB, `RR_P_MIN`, `RR_P_MAX`); survivors divide color by p.
 - **Ray-origin offset** (`shading.cu`) — every scatter pushes the new origin off the surface by `rayOffset = EPSILON·(1+t) + 2·sagitta`. The first term covers hit-point FP error (grows with travel distance); the second covers the hit facet's **sagitta** — how far the facet plane dips below the smooth surface on a tessellated sphere (≈ `L²/8R`, stored per triangle by the `buildSceneBvh` bake). Without it, silhouette rays start inside the mesh, re-intersect, and ping-pong to a black rim. Flat facets have sagitta ≈ 0, restoring the old `EPSILON` behavior.
 
@@ -122,7 +121,7 @@ Bloom runs in linear HDR space (threshold → separable Gaussian blur with share
 ### Scene Files
 
 - **Materials** — `TYPE`: `Diffuse` / `Emitting` / `Specular` / `Refractive`. `Specular` supports `SPECULAR_COLOR` and `ROUGHNESS` (0 → mirror; higher → glossier via `exponent = 2/r² − 2`). `Refractive` uses `IOR`.
-- **Camera** — `RES`, `FOVY`, `ITERATIONS`, `DEPTH`, `RR_DEPTH`, `FILE`, `EYE`, `LOOKAT`, `UP`; optional `LENS_RADIUS` / `FOCAL_DISTANCE` (DoF). (Fresnel mode is a renderer setting — set via config.local.json `fresnelMode` or CLI `--fresnel`, not the scene file.)
+- **Camera** — `RES`, `FOVY`, `ITERATIONS`, `DEPTH`, `RR_DEPTH`, `FILE`, `EYE`, `LOOKAT`, `UP`; optional `LENS_RADIUS` / `FOCAL_DISTANCE` (DoF).
 - **Objects** — `TYPE`: `"mesh"` with `FILE` (mesh path relative to the scene file; `.obj` via tinyobjloader, `.gltf`/`.glb` via cgltf), `MATERIAL`, `TRANS`, `ROTAT`, `SCALE`. Models live in `scenes/models/` (cube.obj, sphere.obj, sphere_inv.obj, light.obj, pyramid.obj, diamond.obj, plus generated `gen_shapes.py` assets: sphere/cylinder/cone/torus/capsule as `.gltf` + `.glb`, plus downloaded glTF under `glTF-Sample-Assets/`).
 - **glTF node transforms are applied** — the scene graph is walked and each node's accumulated TRS/matrix transform places its mesh, so multi-part models assemble exactly as the file specifies. Caveat: some Sketchfab/asset exports bake the world-space transform into the vertices **and** carry a redundant node matrix; applying both double-transforms the model. For such files, zero out the redundant node matrices (see `scenes/models/glTF-Sample-Assets/johnmarston.gltf` — nodes 0/1/3 set to identity — vs `johnmarston_original.gltf`, the untouched copy).
 - **Winding / normals** — the renderer **trusts the model's winding and normal direction**. The intersection reports the true shading normal; `scatterRay` orients it toward the ray only for opaque materials, and refraction reads its sign (dot with the ray) to classify enter vs exit. For solid glass use an **outward-wound** mesh (`sphere.obj` — smooth `vn`, CCW). `sphere_inv.obj` is **inward-wound and flat-shaded** (no `vn`): it renders as inside-out glass — Fresnel wall reflections still visible, but the entry ray is misclassified as "exit", so there is **no lensing/caustics** (that's the correct winding-respecting behavior, not a bug).

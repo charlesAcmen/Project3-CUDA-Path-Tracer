@@ -10,14 +10,14 @@ All geometry is **triangulated at load time** — there are no sphere/cube primi
 
 - **Mesh-only rendering** — OBJ + glTF/GLB loading, glTF scene-graph transforms (multi-part models auto-assemble), double-sided Möller–Trumbore intersection, interpolated vertex normals
 - **BVH acceleration** — single world-space BVH over all baked triangles, near-child-first closest-hit traversal
-- **Materials** — diffuse, emissive, specular (perfect mirror + glossy Phong via `ROUGHNESS`), refractive (glass, IOR, Schlick or accurate Fresnel), Russian roulette path termination
+- **Materials** — diffuse, emissive, specular (perfect mirror + glossy Phong via `ROUGHNESS`), refractive (glass, IOR, accurate Fresnel), Russian roulette path termination
 - **Stream compaction** — 4 methods (off / global-mem scan / Thrust `copy_if` / shared-mem scan), toggleable at runtime
 - **Material sorting** — Thrust `sort_by_key` + gather so same-material paths are contiguous, toggleable
 - **RNG** — LCG (default) and true nested Owen-scrambled Halton (`--rng=1`) behind one `RngState::next(dim)` API
 - **Camera** — per-pixel AA jitter and thin-lens depth-of-field
 - **Post-processing** — HDR bloom, ACES filmic + sRGB tone mapping, chromatic aberration, vignette
 - **Profiler** — per-kernel `cudaEvent` / CPU `chrono` timing with CSV export and companion Python plot scripts
-- **ImGui overlay** — live toggles for compact method, sorting, RNG, Fresnel mode, bloom, and more
+- **ImGui overlay** — live toggles for compact method, sorting, RNG, bloom, and more
 
 ## Build & run
 
@@ -54,7 +54,6 @@ Settings are resolved with three-layer priority **CLI flags > `config.local.json
 |------|---------|
 | `--compact=N` | Compaction: `0` off, `1` global-mem scan, `2` Thrust `copy_if`, `3` shared-mem scan (default) |
 | `--sort=N` | Material sorting `0/1` (default off) |
-| `--fresnel=N` | `0` Schlick, `1` accurate Fresnel (default) |
 | `--rng=N` | `0` LCG (default), `1` scrambled Halton |
 | `--benchmark` | Enable profiler CSV output to `profiler_output/<scene>_<timestamp>/` |
 | `--warmup=N` | Profiler warmup iterations (default 3) |
