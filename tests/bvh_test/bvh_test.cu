@@ -249,6 +249,8 @@ Triangle bakeExpected(const Geom& g, const Triangle& src)
     d.uv0 = src.uv0;
     d.uv1 = src.uv1;
     d.uv2 = src.uv2;
+    // Texture slot bindings are per-triangle and transform-free; copy through.
+    d.tex = src.tex;
     return d;
 }
 
@@ -257,8 +259,9 @@ bool nearVec(const glm::vec3& a, const glm::vec3& b, float eps)
     return glm::length(a - b) < eps;
 }
 
-// Two triangles are equal iff materialId matches, vertices match, and the
-// baked normals are parallel (they may be scaled by invTranspose).
+// Two triangles are equal iff materialId matches, vertices match, the
+// baked normals are parallel (they may be scaled by invTranspose), and the
+// texture slots + UVs match (both are copied through the bake unchanged).
 bool triEqual(const Triangle& a, const Triangle& b, float eps)
 {
     if (a.materialId != b.materialId) return false;
@@ -270,7 +273,18 @@ bool triEqual(const Triangle& a, const Triangle& b, float eps)
         if (lx < 1e-6f || ly < 1e-6f) return false;
         return glm::dot(x / lx, y / ly) > 1.0f - 1e-5f;
     };
-    return normalEq(a.n0, b.n0) && normalEq(a.n1, b.n1) && normalEq(a.n2, b.n2);
+    if (!normalEq(a.n0, b.n0) || !normalEq(a.n1, b.n1) || !normalEq(a.n2, b.n2))
+        return false;
+    const auto uvEq = [](const glm::vec2& x, const glm::vec2& y) {
+        return glm::length(x - y) < 1e-4f;
+    };
+    if (!uvEq(a.uv0, b.uv0) || !uvEq(a.uv1, b.uv1) || !uvEq(a.uv2, b.uv2))
+        return false;
+    if (a.tex.baseColor != b.tex.baseColor || a.tex.normal != b.tex.normal ||
+        a.tex.metallicRoughness != b.tex.metallicRoughness ||
+        a.tex.occlusion != b.tex.occlusion || a.tex.emissive != b.tex.emissive)
+        return false;
+    return true;
 }
 
 // Whether `got` is a permutation of `expected` (flatten reorders but must
@@ -300,7 +314,12 @@ bool sameMultiset(const std::vector<Triangle>& expected, const std::vector<Trian
 // with materialId tagged.
 bool testWorldBake()
 {
-    const std::vector<Triangle> cube = makeCube(1.0f);
+    std::vector<Triangle> cube = makeCube(1.0f);
+    // Stamp non-default texture slots so the bake's tex copy-through is
+    // exercised (triEqual compares them); must survive bake + flatten.
+    cube[0].tex.baseColor = 3;
+    cube[0].tex.normal    = 4;
+    cube[1].tex.occlusion = 5;
     const glm::mat4 T = makeTransform({ 1, 2, 3 }, { 0.4f, 0.2f, 0.3f }, { 2, 1, 3 });
     const Geom g = makeGeom(7, 0, (int)cube.size(), T);
 

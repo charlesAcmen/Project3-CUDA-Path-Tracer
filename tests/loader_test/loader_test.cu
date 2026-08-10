@@ -20,7 +20,18 @@
  * Then run build/Release/loader_test.exe
  */
 
+// scene_loader.cpp calls stbi_load for TEXTURE images; this TU must supply
+// the implementation (the main app gets it from src/stb.cpp).
+//
+// ORDER MATTERS: stb_image v2.06 keeps the implementation block OUTSIDE the
+// include guard, so STB_IMAGE_IMPLEMENTATION must NOT be defined when
+// scene_loader.cpp's own `#include <stb_image.h>` runs (that would compile
+// the implementation a second time).  Include the loader first (declarations
+// only), then define the implementation in a second include.
 #include "scene/scene_loader.cpp"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 #include <filesystem>
 #include <cstdio>
@@ -448,6 +459,23 @@ static void testLoadFromJSON(const std::string& exeDir)
                   scene.geoms[1].meshTriangleOffset == 3 && scene.geoms[1].meshTriangleCount == 3,
                   "scene_multi: slices (0,3) and (3,3)");
         check(scene.hostTriangles.size() == 6, "scene_multi: 6 host triangles");
+    }
+    {
+        // Procedural checkerboard material: TEXTURE = "checkerboard" must map
+        // to the checkerboard sentinel, and UV_SCALE to uvScale (textureId
+        // stays -2 → no image loaded → Scene::textures empty).
+        Scene scene = SceneLoader::loadFromJSON(exeDir + "/scene_texture.json");
+        check(scene.materials.size() == 1, "scene_texture: 1 material");
+        if (scene.materials.size() == 1)
+        {
+            check(scene.materials[0].textureId == kCheckerboardTextureId,
+                  "scene_texture: TEXTURE \"checkerboard\" → kCheckerboardTextureId");
+            check(scene.materials[0].uvScale == 2.0f,
+                  "scene_texture: UV_SCALE 2.0 → uvScale");
+        }
+        check(scene.textures.empty(),
+              "scene_texture: no image texture loaded for checkerboard");
+        check(scene.hostTriangles.size() == 12, "scene_texture: 12 host triangles");
     }
 
     std::printf("\n");

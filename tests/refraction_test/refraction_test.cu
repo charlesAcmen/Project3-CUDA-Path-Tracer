@@ -166,7 +166,9 @@ static bool testScatterRayNeverNaN(FresnelMode mode)
         p.remainingBounces = 8;
         RngState rng = makeRngState(0, 0, 0, RngMode::LCG);   // fixed seed
 
-        scatterRay(p, intersect, normal, glass, rng, mode);
+        // Glass (refractive) never samples textures — pass empty defaults.
+        scatterRay(p, intersect, normal, glass, TextureBinding{}, rng, mode,
+                   TextureTable{}, glm::vec2(0.0f));
 
         CHECK(isFinite(p.ray.direction),
               "mode=%s cosT=%g: NaN direction out of scatterRay", modeName, cosT);
