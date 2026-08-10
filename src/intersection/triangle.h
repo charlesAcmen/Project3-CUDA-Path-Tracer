@@ -30,13 +30,15 @@
  * @param outT      [out] Distance along ray to hit
  * @param outNormal [out] Model's shading normal, TRUE orientation
  *                        (winding preserved, not oriented toward the ray)
+ * @param outUv     [out] Interpolated texture coordinate at the hit
  * @return          true on hit (either side)
  */
 __host__ __device__ inline bool triangleIntersectionTest(
     const Ray& ray,
     const Triangle& tri,
     float& outT,
-    glm::vec3& outNormal)
+    glm::vec3& outNormal,
+    glm::vec2& outUv)
 {
     // ---- Step 1: edge vectors ----
     // Translate triangle so v0 is at origin, then compute the two
@@ -115,5 +117,11 @@ __host__ __device__ inline bool triangleIntersectionTest(
     // toward the ray in scatterRay; refraction reads its sign (dot with the
     // ray) to classify entry vs exit.  Flipping it here would erase the
     // model's winding and make classifyRefraction's exit branch unreachable.
+
+    // ---- Step 7: interpolate the texture coordinate ----
+    // Same barycentric weights as the normal above.  UVs live in texture
+    // space, so unlike the normal there is no re-normalization step.
+    outUv = (1.0f - u - v) * tri.uv0 + u * tri.uv1 + v * tri.uv2;
+
     return true;
 }
