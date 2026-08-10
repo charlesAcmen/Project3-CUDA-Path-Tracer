@@ -59,13 +59,16 @@ struct BvhBuffers
 // plane (maxT); `t` is that closest distance and `normal` its shading
 // normal (world space — triangles are baked).  `triIndex` is the index of
 // the hit triangle into `tris`, so the caller can resolve per-triangle
-// data (e.g. materialId).  On a miss `hit` stays false and `t` keeps maxT.
+// data (e.g. materialId).  `uv` is the hit's interpolated texture
+// coordinate (barycentric-weighted from the triangle's corner UVs).  On a
+// miss `hit` stays false and `t` keeps maxT.
 struct BvhHit
 {
     bool      hit   = false;
     float     t     = LARGE_T;
     glm::vec3 normal;
     int       triIndex = -1;
+    glm::vec2 uv;   // interpolated texture coordinate at the hit
 };
 
 /**
@@ -135,12 +138,14 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
             {
                 float t;
                 glm::vec3 triNormal;
-                if (triangleIntersectionTest(objRay, tris[triBase + j], t, triNormal))
+                glm::vec2 triUv;
+                if (triangleIntersectionTest(objRay, tris[triBase + j], t, triNormal, triUv))
                 {
                     if (t < result.t)
                     {
                         result.t       = t;
                         result.normal  = triNormal;
+                        result.uv      = triUv;
                         result.hit     = true;
                         result.triIndex = triBase + j;
                     }

@@ -293,6 +293,11 @@ void buildSceneBvh(BvhBuffers& out,
             dst.n1         = bakeNormal(g.invTranspose, src.n1);
             dst.n2         = bakeNormal(g.invTranspose, src.n2);
             dst.materialId = g.materialid;
+            // UVs are texture-space coordinates — the geometry transform does
+            // NOT apply to them; copy through unchanged.
+            dst.uv0 = src.uv0;
+            dst.uv1 = src.uv1;
+            dst.uv2 = src.uv2;
             worldTris.push_back(dst);
         }
     }
