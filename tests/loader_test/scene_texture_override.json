@@ -1,0 +1,26 @@
+{
+  "Materials": {
+    "checker": { "TYPE": "Diffuse", "RGB": [0.8, 0.6, 0.4], "TEXTURE": "checkerboard", "UV_SCALE": 2.0 }
+  },
+  "Objects": [
+    {
+      "TYPE": "mesh",
+      "FILE": "assets/tex_cube.gltf",
+      "MATERIAL": "checker",
+      "TRANS": [0, 0, 0],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [1, 1, 1]
+    }
+  ],
+  "Camera": {
+    "RES": [64, 64],
+    "FOVY": 45,
+    "ITERATIONS": 1,
+    "DEPTH": 2,
+    "RR_DEPTH": 0,
+    "FILE": "out.png",
+    "EYE": [2.5, 2.5, 2.5],
+    "LOOKAT": [0, 0, 0],
+    "UP": [0, 1, 0]
+  }
+}

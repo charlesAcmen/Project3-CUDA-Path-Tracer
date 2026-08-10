@@ -92,9 +92,9 @@ static std::vector<Triangle> loadOBJTris(const std::string& exeDir,
 static std::vector<Triangle> loadGLTFTris(const std::string& exeDir,
                                           const std::string& asset)
 {
-    std::vector<Triangle> tris;
-    SceneLoader::loadGLTF(exeDir + "/assets/" + asset, tris);
-    return tris;
+    Scene scene;
+    SceneLoader::loadGLTF(scene, exeDir + "/assets/" + asset);
+    return scene.hostTriangles;
 }
 
 #if defined(_WIN32)
@@ -309,16 +309,16 @@ static void testLoadGLTF(const std::string& exeDir)
         // loader iterates — loadGLTF returns {-1,0}.  The loader's own
         // out-of-range guard in the indexed path is defense-in-depth.
 #if defined(_WIN32)
-        std::vector<Triangle> tris;
+        Scene scene;
         StderrCapture cap(exeDir + "/stderr_capture.log");
-        auto slice = SceneLoader::loadGLTF(exeDir + "/assets/oob_index.gltf", tris);
+        auto slice = SceneLoader::loadGLTF(scene, exeDir + "/assets/oob_index.gltf");
         check(slice.first == -1 && slice.second == 0,
               "oob_index.gltf -> {-1, 0} (cgltf_validate rejects OOB indices)");
         check(cap.text().find("glTF validation failed") != std::string::npos,
               "oob_index.gltf -> 'glTF validation failed' error emitted");
 #else
-        std::vector<Triangle> tris;
-        auto slice = SceneLoader::loadGLTF(exeDir + "/assets/oob_index.gltf", tris);
+        Scene scene;
+        auto slice = SceneLoader::loadGLTF(scene, exeDir + "/assets/oob_index.gltf");
         check(slice.first == -1 && slice.second == 0,
               "oob_index.gltf -> {-1, 0} (cgltf_validate rejects OOB indices)");
 #endif
@@ -326,17 +326,17 @@ static void testLoadGLTF(const std::string& exeDir)
     {
         // NORMAL count (2) != POSITION count (4): cgltf_validate requires all
         // attributes to share a count (cgltf.h ~1696), so the file is rejected.
-        std::vector<Triangle> tris;
-        auto slice = SceneLoader::loadGLTF(exeDir + "/assets/normal_mismatch.gltf", tris);
+        Scene scene;
+        auto slice = SceneLoader::loadGLTF(scene, exeDir + "/assets/normal_mismatch.gltf");
         check(slice.first == -1 && slice.second == 0,
               "normal_mismatch.gltf -> {-1, 0} (attribute count mismatch rejected)");
     }
     {
         // Index count not a multiple of 3: the whole primitive is skipped.
 #if defined(_WIN32)
-        std::vector<Triangle> tris;
+        Scene scene;
         StderrCapture cap(exeDir + "/stderr_capture2.log");
-        auto slice = SceneLoader::loadGLTF(exeDir + "/assets/index_not_mult3.gltf", tris);
+        auto slice = SceneLoader::loadGLTF(scene, exeDir + "/assets/index_not_mult3.gltf");
         check(slice.second == 0, "index_not_mult3.gltf -> 0 triangles (skipped)");
         check(cap.text().find("not a multiple of 3") != std::string::npos,
               "index_not_mult3.gltf -> 'not a multiple of 3' warning emitted");
@@ -398,6 +398,35 @@ static void testLoadGLTF(const std::string& exeDir)
             bool ok = t.uv0 == glm::vec2(0, 0) && t.uv1 == glm::vec2(1, 0) &&
                       t.uv2 == glm::vec2(0, 1);
             check(ok, "tri_uv.gltf -> per-vertex UVs read from TEXCOORD_0");
+        }
+    }
+    {
+        // glTF texture auto-load: external PNG baseColor + normal + occlusion
+        // slots all referencing the SAME image.  The loader must load it ONCE
+        // into Scene::textures (dedup by cgltf image index), stamp the global
+        // id on the triangle's TextureBinding, and linearize the sRGB
+        // baseColor (gray 128/255 ≈ 0.502 → linear ≈ 0.216).
+        Scene scene;
+        SceneLoader::loadGLTF(scene, exeDir + "/assets/tex_cube.gltf");
+        check(scene.hostTriangles.size() == 1, "tex_cube.gltf -> 1 triangle");
+        check(scene.textures.size() == 1,
+              "tex_cube.gltf -> 3 slots sharing one image dedup to 1 texture");
+        if (scene.textures.size() == 1)
+        {
+            const TextureData& td = scene.textures[0];
+            check(td.width == 2 && td.height == 2, "tex_cube.gltf -> texture is 2x2");
+            check(std::fabs(td.pixels[0].r - 0.2158f) < 5e-3f &&
+                  std::fabs(td.pixels[0].g - 0.2158f) < 5e-3f &&
+                  std::fabs(td.pixels[0].b - 0.2158f) < 5e-3f,
+                  "tex_cube.gltf -> baseColor linearized (gray 128 → ~0.216)");
+        }
+        if (scene.hostTriangles.size() == 1)
+        {
+            const TextureBinding& b = scene.hostTriangles[0].tex;
+            check(b.baseColor == 0 && b.normal == 0 && b.occlusion == 0,
+                  "tex_cube.gltf -> bound slots stamped with texture id 0");
+            check(b.metallicRoughness == -1 && b.emissive == -1,
+                  "tex_cube.gltf -> unbound slots stay -1");
         }
     }
     {
@@ -476,6 +505,22 @@ static void testLoadFromJSON(const std::string& exeDir)
         check(scene.textures.empty(),
               "scene_texture: no image texture loaded for checkerboard");
         check(scene.hostTriangles.size() == 12, "scene_texture: 12 host triangles");
+    }
+    {
+        // JSON TEXTURE wins over the glTF baseColor map: the object's material
+        // declares TEXTURE "checkerboard" while the mesh (tex_cube.gltf) carries
+        // its own glTF baseColor slot.  parseObjects must zero the slice's
+        // tex.baseColor so the shading fallback (tex.baseColor → m.textureId)
+        // resolves to the JSON checkerboard, not the model's PNG.
+        Scene scene = SceneLoader::loadFromJSON(exeDir + "/scene_texture_override.json");
+        check(scene.hostTriangles.size() == 1,
+              "scene_texture_override: 1 host triangle");
+        if (scene.hostTriangles.size() == 1)
+            check(scene.hostTriangles[0].tex.baseColor == -1,
+                  "scene_texture_override: JSON TEXTURE zeroes glTF tex.baseColor");
+        check(scene.materials.size() == 1 &&
+              scene.materials[0].textureId == kCheckerboardTextureId,
+              "scene_texture_override: material keeps checkerboard textureId");
     }
 
     std::printf("\n");

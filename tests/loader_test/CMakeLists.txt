@@ -45,4 +45,6 @@ add_custom_command(TARGET loader_test POST_BUILD
         ${CMAKE_CURRENT_SOURCE_DIR}/scene_multi.json $<TARGET_FILE_DIR:loader_test>/scene_multi.json
     COMMAND ${CMAKE_COMMAND} -E copy
         ${CMAKE_CURRENT_SOURCE_DIR}/scene_texture.json $<TARGET_FILE_DIR:loader_test>/scene_texture.json
+    COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_CURRENT_SOURCE_DIR}/scene_texture_override.json $<TARGET_FILE_DIR:loader_test>/scene_texture_override.json
 )

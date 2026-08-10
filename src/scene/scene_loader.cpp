@@ -203,6 +203,99 @@ static pair<int, int> loadOBJ(const string& objPath,
     return {offset, count};
 }
 
+// ---- Texture auto-load (defined here so the glTF walk can stamp
+// per-triangle slots; loadTextureFile is forward-declared and defined in the
+// Texture Loading section) -------------------------------------------------
+
+static int loadTextureFile(Scene& scene, const string& path, bool srgb = true);
+
+// Loader context threaded through the glTF walk: the scene (texture sink),
+// the cgltf document (image-index dedup), and the .gltf's directory (URI
+// resolution — glTF image URIs are relative to the .gltf file, exactly like
+// mesh paths are relative to the scene JSON).
+struct GltfLoadCtx
+{
+    Scene&           scene;
+    cgltf_data*      data;
+    filesystem::path dir;            // parent dir of the .gltf / .glb
+    std::vector<int> imageToTexId;   // data->images index → Scene::textures index
+};
+
+// Resolve one glTF material slot (a cgltf_texture_view) to a global
+// Scene::textures index, loading the image on first use.
+//
+// - Dedup by cgltf image INDEX: a texture shared across primitives or across
+//   material slots loads once.  (Consequence: the FIRST slot to reference an
+//   image sets its sRGB treatment; no real file shares one image between a
+//   color and a data role.)
+// - External PNG/JPG file URIs only.  Images embedded in the .glb buffer
+//   (buffer_view) or as data: URIs are skipped with a warning — shading falls
+//   back to the material's own value.  Deferred, not supported yet.
+// - URIs are percent-decoded (glTF allows %20, unicode, …) before use.
+//
+// @return Scene::textures index (>= 0), or -1 (empty slot / unsupported
+//         image source / load failure).
+static int resolveGltfTextureSlot(GltfLoadCtx& ctx,
+                                  const cgltf_texture_view& view,
+                                  bool srgb)
+{
+    if (view.texture == nullptr || view.texture->image == nullptr)
+        return -1;
+
+    cgltf_image* image = view.texture->image;
+    const int imageIdx = (int)(image - ctx.data->images);
+
+    if (ctx.imageToTexId[imageIdx] >= 0)
+        return ctx.imageToTexId[imageIdx];   // already loaded
+
+    const bool embedded = (image->uri == nullptr || image->buffer_view != nullptr);
+    const bool dataUri  = (!embedded && string(image->uri).rfind("data:", 0) == 0);
+    if (embedded || dataUri)
+    {
+        Log::warn("Scene",
+                  "glTF image #%d ('%s'): embedded (bufferView) and data: "
+                  "textures are not supported yet; using material color",
+                  imageIdx, image->name ? image->name : "unnamed");
+        ctx.imageToTexId[imageIdx] = -1;   // remember — warn once per image
+        return -1;
+    }
+
+    // Percent-decode into a copy (cgltf_decode_uri mutates in place, and the
+    // uri string is owned by the cgltf document).
+    string uri = image->uri;
+    vector<char> decoded(uri.begin(), uri.end());
+    decoded.push_back('\0');
+    cgltf_decode_uri(decoded.data());
+    uri.assign(decoded.data());
+
+    const int id = loadTextureFile(ctx.scene,
+                                   (ctx.dir / uri).generic_string(), srgb);
+    if (id >= 0)
+        Log::info("Scene", "Auto-loaded glTF texture '%s' (image #%d)",
+                  uri.c_str(), imageIdx);
+    ctx.imageToTexId[imageIdx] = id;
+    return id;
+}
+
+// Resolve a glTF material's five texture slots into a TextureBinding.
+// baseColor / emissive are color maps (sRGB → linearized on load); normal /
+// metallicRoughness / occlusion are data maps (raw bytes kept).
+static TextureBinding bindGltfMaterial(GltfLoadCtx& ctx,
+                                       const cgltf_material* mat)
+{
+    TextureBinding b;
+    if (mat == nullptr)
+        return b;
+    b.baseColor         = resolveGltfTextureSlot(ctx,
+        mat->pbr_metallic_roughness.base_color_texture, true);
+    b.normal            = resolveGltfTextureSlot(ctx, mat->normal_texture, false);
+    b.metallicRoughness = resolveGltfTextureSlot(ctx,
+        mat->pbr_metallic_roughness.metallic_roughness_texture, false);
+    b.occlusion         = resolveGltfTextureSlot(ctx, mat->occlusion_texture, false);
+    b.emissive          = resolveGltfTextureSlot(ctx, mat->emissive_texture, true);
+    return b;
+}
+
 // -----------------------------------------------------------------------
 // glTF 2.0 Mesh Loading
 // -----------------------------------------------------------------------
@@ -237,7 +330,8 @@ static glm::mat4 nodeLocalMatrix(const cgltf_node* n)
 static void appendPrimitiveTriangles(const cgltf_primitive* prim,
                                      const glm::mat4& world,
                                      const glm::mat4& worldIT,
-                                     vector<Triangle>& triangles, int& count)
+                                     vector<Triangle>& triangles, int& count,
+                                     GltfLoadCtx& ctx)
 {
     if (prim->type != cgltf_primitive_type_triangles)
     {
@@ -265,6 +359,12 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
         Log::warn("Scene", "glTF primitive has no POSITION accessor; skipping");
         return;
     }
+
+    // Per-triangle texture slots from the primitive's glTF material.  All five
+    // roles (baseColor/normal/ORM/occlusion/emissive) resolve into the global
+    // texture table and are stamped on every triangle; only baseColor is
+    // sampled by the current shading — the rest are data for future features.
+    const TextureBinding binding = bindGltfMaterial(ctx, prim->material);
 
     const cgltf_size vertCount = posAcc->count;
 
@@ -383,6 +483,7 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
             triangles.push_back(makeTri(vTrans(i0), vTrans(i1), vTrans(i2),
                                         nTrans(i0), nTrans(i1), nTrans(i2),
                                         uvAt(i0), uvAt(i1), uvAt(i2)));
+            triangles.back().tex = binding;   // glTF texture slots
             ++count;
         }
     }
@@ -399,6 +500,7 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
             triangles.push_back(makeTri(vTrans(t + 0), vTrans(t + 1), vTrans(t + 2),
                                         nTrans(t + 0), nTrans(t + 1), nTrans(t + 2),
                                         uvAt(t + 0), uvAt(t + 1), uvAt(t + 2)));
+            triangles.back().tex = binding;   // glTF texture slots
             ++count;
         }
     }
@@ -406,30 +508,31 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
 
 // Emit all of a mesh's primitives under one accumulated transform.
 static void appendMeshTriangles(const cgltf_mesh* mesh, const glm::mat4& world,
-                                vector<Triangle>& triangles, int& count)
+                                vector<Triangle>& triangles, int& count,
+                                GltfLoadCtx& ctx)
 {
     const glm::mat4 worldIT = glm::inverseTranspose(world);
     for (cgltf_size pi = 0; pi < mesh->primitives_count; ++pi)
         appendPrimitiveTriangles(&mesh->primitives[pi], world, worldIT,
-                                 triangles, count);
+                                 triangles, count, ctx);
 }
 
 // Depth-first walk of the scene graph.  The accumulated matrix `parentWorld`
 // is the composition of every ancestor's local transform; multiplying it by
 // this node's local transform gives the world matrix that places its mesh.
 static void walkNode(const cgltf_node* node, const glm::mat4& parentWorld,
-                     vector<Triangle>& triangles, int& count)
+                     vector<Triangle>& triangles, int& count, GltfLoadCtx& ctx)
 {
     const glm::mat4 world = parentWorld * nodeLocalMatrix(node);
     if (node->mesh != nullptr)
-        appendMeshTriangles(node->mesh, world, triangles, count);
+        appendMeshTriangles(node->mesh, world, triangles, count, ctx);
     for (cgltf_size c = 0; c < node->children_count; ++c)
-        walkNode(node->children[c], world, triangles, count);
+        walkNode(node->children[c], world, triangles, count, ctx);
 }
 
 /**
  * Load triangles from a glTF 2.0 file (.gltf JSON or .glb binary) and
- * append them to the hostTriangles vector.
+ * append them to the scene's hostTriangles vector.
  *
  * - The scene graph is walked and every node's accumulated transform is
  *   applied, so multi-part models scattered across nodes are assembled
@@ -437,16 +540,20 @@ static void walkNode(const cgltf_node* node, const glm::mat4& parentWorld,
  *   once, with its own transform).
  * - Only triangle primitives (mode 4) are loaded; point/line primitives
  *   are skipped with a warning.
- * - glTF materials/textures are ignored — the scene JSON's MATERIAL field
- *   governs shading (texture mapping is a separate feature).
+ * - Each primitive's material texture slots (baseColor / normal /
+ *   metallicRoughness / occlusion / emissive) are auto-loaded into
+ *   Scene::textures and stamped on the triangles as a TextureBinding.
+ *   Only external PNG/JPG file URIs load; .glb-embedded (bufferView) and
+ *   data: images warn + fall back to the material color.  The scene JSON's
+ *   MATERIAL still governs the shading model (an explicit JSON TEXTURE
+ *   overrides the glTF baseColor — see parseObjects).
  * - Draco-compressed primitives are not supported (cgltf does not decode).
  *
+ * @param scene     Scene to append to (hostTriangles AND textures)
  * @param gltfPath  Path to the .gltf or .glb file
- * @param triangles [out] Flat array of object-space triangles to append to
- * @return (offset, count) — the slice of `triangles` this file occupies
+ * @return (offset, count) — the slice of scene.hostTriangles this file occupies
  */
-static pair<int, int> loadGLTF(const string& gltfPath,
-                               vector<Triangle>& triangles)
+static pair<int, int> loadGLTF(Scene& scene, const string& gltfPath)
 {
     cgltf_options options{};
     cgltf_data*   data = nullptr;
@@ -474,23 +581,33 @@ static pair<int, int> loadGLTF(const string& gltfPath,
         return {-1, 0};
     }
 
-    int offset = (int)triangles.size();
-    int count  = 0;
+    vector<Triangle>& triangles = scene.hostTriangles;
+    const int offset = (int)triangles.size();
+    int       count  = 0;
+
+    // Texture auto-load context: glTF image URIs resolve relative to the
+    // .gltf's directory; images dedup by cgltf image index (a file shared by
+    // several materials / primitives loads once).
+    GltfLoadCtx ctx = {
+        scene, data,
+        filesystem::path(gltfPath).parent_path(),
+        vector<int>(data->images_count, -1)
+    };
 
     // ---- Walk the scene graph, emitting one transformed instance per
     // (node, mesh).  Parts scattered across nodes are assembled by the
     // accumulated node transforms — the glTF-spec behavior.
-    const cgltf_scene* scene = data->scene;   // default scene
-    if (scene != nullptr && scene->nodes_count > 0)
+    const cgltf_scene* gltfScene = data->scene;   // default scene
+    if (gltfScene != nullptr && gltfScene->nodes_count > 0)
     {
-        for (cgltf_size i = 0; i < scene->nodes_count; ++i)
-            walkNode(scene->nodes[i], glm::mat4(1.0f), triangles, count);
+        for (cgltf_size i = 0; i < gltfScene->nodes_count; ++i)
+            walkNode(gltfScene->nodes[i], glm::mat4(1.0f), triangles, count, ctx);
     }
     else
     {
         // No scene graph (some minimal files): emit every mesh untransformed.
         for (cgltf_size mi = 0; mi < data->meshes_count; ++mi)
-            appendMeshTriangles(&data->meshes[mi], glm::mat4(1.0f), triangles, count);
+            appendMeshTriangles(&data->meshes[mi], glm::mat4(1.0f), triangles, count, ctx);
     }
 
     cgltf_free(data);
@@ -505,18 +622,21 @@ static pair<int, int> loadGLTF(const string& gltfPath,
 // -----------------------------------------------------------------------
 
 /**
- * Load an image file (PNG/JPG via stb_image) into Scene::textures as
- * LINEAR-RGB texels.
+ * Load an image file (PNG/JPG via stb_image) into Scene::textures.
  *
- * The shading pipeline works in linear space, and PNG/JPG texels are sRGB,
- * so the linearization happens here, once, at load time — the GPU sampler
+ * The shading pipeline works in linear space, and color PNG/JPG texels are
+ * sRGB, so linearization happens here once, at load time — the GPU sampler
  * then returns linear colors that feed the accumulation buffer directly.
+ * glTF also has DATA maps (normal / metallic-roughness / occlusion) whose
+ * bytes are already linear; those pass through untouched (srgb=false).
  *
  * @param scene  Scene to append the texture to
  * @param path   Absolute path to the image file
+ * @param srgb   True (default): linearize sRGB texels on load (color maps).
+ *               False: keep raw byte values (normal/ORM/occlusion maps).
  * @return       Index into Scene::textures (>= 0), or -1 on failure
  */
-static int loadTextureFile(Scene& scene, const string& path)
+static int loadTextureFile(Scene& scene, const string& path, bool srgb)
 {
     int w = 0, h = 0, comp = 0;
     // req_comp = 3 forces RGB (3 channels), so texels are always vec3.
@@ -539,9 +659,12 @@ static int loadTextureFile(Scene& scene, const string& path)
     };
     for (int i = 0; i < w * h; i++)
     {
-        td.pixels[i] = glm::vec3(lin(data[3 * i + 0] / 255.0f),
-                                 lin(data[3 * i + 1] / 255.0f),
-                                 lin(data[3 * i + 2] / 255.0f));
+        const float r = data[3 * i + 0] / 255.0f;
+        const float g = data[3 * i + 1] / 255.0f;
+        const float b = data[3 * i + 2] / 255.0f;
+        td.pixels[i] = srgb
+            ? glm::vec3(lin(r), lin(g), lin(b))
+            : glm::vec3(r, g, b);
     }
     stbi_image_free(data);
 
@@ -748,7 +871,7 @@ static void parseObjects(
             }
             else if (ext == ".gltf" || ext == ".glb")
             {
-                slice = loadGLTF(meshPath, scene.hostTriangles);
+                slice = loadGLTF(scene, meshPath);
             }
             else
             {
@@ -759,6 +882,23 @@ static void parseObjects(
 
             newGeom.meshTriangleOffset = slice.first;
             newGeom.meshTriangleCount  = slice.second;
+
+            // An explicit JSON TEXTURE on the object's material wins over the
+            // model's glTF baseColor map (the scene author overrides the
+            // asset's own albedo).  Zero the slice's tex.baseColor so the
+            // shading fallback chain (tex.baseColor → m.textureId) resolves
+            // to the JSON-declared image.
+            if (slice.first >= 0 && slice.second > 0)
+            {
+                const string matName = p["MATERIAL"].get<string>();
+                if (data["Materials"].contains(matName) &&
+                    data["Materials"][matName].contains("TEXTURE"))
+                {
+                    for (int i = slice.first;
+                         i < slice.first + slice.second; ++i)
+                        scene.hostTriangles[i].tex.baseColor = -1;
+                }
+            }
         }
         else
         {
