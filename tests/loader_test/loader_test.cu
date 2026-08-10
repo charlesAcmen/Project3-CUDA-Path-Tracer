@@ -175,6 +175,23 @@ static void testLoadOBJ(const std::string& exeDir)
                   "tri_vn.obj -> vertex normals loaded from vn entries");
     }
     {
+        auto tris = loadOBJTris(exeDir, "tri_uv.obj");
+        check(tris.size() == 1, "tri_uv.obj -> 1 triangle");
+        if (tris.size() == 1)
+            check(tris[0].uv0 == glm::vec2(0, 0) && tris[0].uv1 == glm::vec2(1, 0) &&
+                  tris[0].uv2 == glm::vec2(0, 1),
+                  "tri_uv.obj -> per-corner UVs loaded from vt entries");
+    }
+    {
+        // vt exists for some corners but not the face → per-corner guard.
+        auto tris = loadOBJTris(exeDir, "tri_no_vn.obj");
+        check(tris.size() == 1, "tri_no_vn.obj -> 1 triangle (no vt)");
+        if (tris.size() == 1)
+            check(tris[0].uv0 == glm::vec2(0, 0) && tris[0].uv1 == glm::vec2(0, 0) &&
+                  tris[0].uv2 == glm::vec2(0, 0),
+                  "tri_no_vn.obj -> missing vt falls back to (0,0)");
+    }
+    {
         auto tris = loadOBJTris(exeDir, "tri_no_vn.obj");
         check(tris.size() == 1, "tri_no_vn.obj -> 1 triangle");
         if (tris.size() == 1)
@@ -359,6 +376,27 @@ static void testLoadGLTF(const std::string& exeDir)
                       std::fabs(v2.x) < 1e-3f && std::fabs(v2.y - 1.0f) < 1e-3f && std::fabs(v2.z) < 1e-3f;
             check(ok, "norm_i8.gltf -> normalized int8 POSITION decoded");
         }
+    }
+    {
+        // TEXCOORD_0 present: loader must surface the per-vertex UVs.
+        auto tris = loadGLTFTris(exeDir, "tri_uv.gltf");
+        check(tris.size() == 1, "tri_uv.gltf -> 1 triangle");
+        if (tris.size() == 1)
+        {
+            const Triangle& t = tris[0];
+            bool ok = t.uv0 == glm::vec2(0, 0) && t.uv1 == glm::vec2(1, 0) &&
+                      t.uv2 == glm::vec2(0, 1);
+            check(ok, "tri_uv.gltf -> per-vertex UVs read from TEXCOORD_0");
+        }
+    }
+    {
+        // No TEXCOORD_0: UVs must fall back to (0,0) — not garbage.
+        auto tris = loadGLTFTris(exeDir, "no_mode.gltf");
+        check(tris.size() == 1, "no_mode.gltf -> 1 triangle (no UVs)");
+        if (tris.size() == 1)
+            check(tris[0].uv0 == glm::vec2(0, 0) && tris[0].uv1 == glm::vec2(0, 0) &&
+                  tris[0].uv2 == glm::vec2(0, 0),
+                  "no_mode.gltf -> missing TEXCOORD_0 falls back to (0,0)");
     }
 
     std::printf("\n");

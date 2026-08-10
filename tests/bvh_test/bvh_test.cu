@@ -58,10 +58,15 @@ struct Lcg
     float range(float a, float b) { return a + (b - a) * unit(); }
 };
 
-Triangle makeTriangle(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c)
+Triangle makeTriangle(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
+                      const glm::vec2& uva = glm::vec2(0.0f),
+                      const glm::vec2& uvb = glm::vec2(0.0f),
+                      const glm::vec2& uvc = glm::vec2(0.0f))
 {
     glm::vec3 n = glm::normalize(glm::cross(b - a, c - a));
-    return Triangle{ a, b, c, n, n, n };   // materialId stays -1 (source geometry)
+    Triangle t{ a, b, c, n, n, n };        // materialId stays -1 (source geometry)
+    t.uv0 = uva; t.uv1 = uvb; t.uv2 = uvc;
+    return t;
 }
 
 // World-space transform builder (translation → rotation XYZ → scale).
@@ -110,11 +115,17 @@ std::vector<Triangle> makeCube(float half = 1.0f)
         { 4, 5, 1, 0 },  // -y
         { 3, 2, 6, 7 }   // +y
     };
+    // Per-face corner UVs: each face spans the full [0,1]² unit square, so
+    // the interpolated UV at any hit is non-trivial (not a constant (0,0)).
+    const glm::vec2 uv[8] = {
+        { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 },   // -z face
+        { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 }    // +z face
+    };
     std::vector<Triangle> tris;
     for (const auto& f : faces)
     {
-        tris.push_back(makeTriangle(c[f[0]], c[f[1]], c[f[2]]));
-        tris.push_back(makeTriangle(c[f[0]], c[f[2]], c[f[3]]));
+        tris.push_back(makeTriangle(c[f[0]], c[f[1]], c[f[2]], uv[f[0]], uv[f[1]], uv[f[2]]));
+        tris.push_back(makeTriangle(c[f[0]], c[f[2]], c[f[3]], uv[f[0]], uv[f[2]], uv[f[3]]));
     }
     return tris;
 }
@@ -159,18 +170,21 @@ std::vector<Triangle> makeDegenerate(int n)
 // traversal is validated against.  Also returns the hit triangle index so
 // the test can compare materialId with the BVH's triIndex.
 bool bruteForceClosest(const Ray& ray, const std::vector<Triangle>& tris,
-                       int offset, int count, float& t, glm::vec3& nrm, int& idx)
+                       int offset, int count, float& t, glm::vec3& nrm,
+                       glm::vec2& uv, int& idx)
 {
     t = LARGE_T;
     idx = -1;
+    uv = glm::vec2(0.0f);
     bool hit = false;
     for (int j = 0; j < count; j++)
     {
         float tt;
         glm::vec3 nn;
-        if (triangleIntersectionTest(ray, tris[offset + j], tt, nn))
+        glm::vec2 uu;
+        if (triangleIntersectionTest(ray, tris[offset + j], tt, nn, uu))
         {
-            if (tt < t) { t = tt; nrm = nn; idx = offset + j; hit = true; }
+            if (tt < t) { t = tt; nrm = nn; uv = uu; idx = offset + j; hit = true; }
         }
     }
     return hit;
@@ -230,6 +244,11 @@ Triangle bakeExpected(const Geom& g, const Triangle& src)
     d.n1         = glm::vec3(g.invTranspose * glm::vec4(src.n1, 0.0f));
     d.n2         = glm::vec3(g.invTranspose * glm::vec4(src.n2, 0.0f));
     d.materialId = g.materialid;
+    // UVs are texture-space coordinates — the geometry transform does NOT
+    // apply to them; copy through unchanged (mirrors the bake in bvh.cu).
+    d.uv0 = src.uv0;
+    d.uv1 = src.uv1;
+    d.uv2 = src.uv2;
     return d;
 }
 
@@ -369,8 +388,8 @@ bool testTraversalVsBrute(const char* name, const std::vector<Triangle>& tris,
     const std::vector<Ray> rays = makeRayBatch(out.hostTriangles, 0x1234567u);
     for (const Ray& ray : rays)
     {
-        float bt = LARGE_T; glm::vec3 bn; int bidx = -1;
-        const bool bhit = bruteForceClosest(ray, out.hostTriangles, 0, (int)out.hostTriangles.size(), bt, bn, bidx);
+        float bt = LARGE_T; glm::vec3 bn; glm::vec2 buv; int bidx = -1;
+        const bool bhit = bruteForceClosest(ray, out.hostTriangles, 0, (int)out.hostTriangles.size(), bt, bn, buv, bidx);
 
         const BvhHit vhit = traverseBvhClosest(ray, out.hostNodes.data(),
                                                out.hostTriangles.data(), LARGE_T);
@@ -385,6 +404,12 @@ bool testTraversalVsBrute(const char* name, const std::vector<Triangle>& tris,
         if (fabsf(bt - vhit.t) > 1e-3f || glm::dot(bn, vhit.normal) < 0.9999f)
         {
             printf("FAIL %s: t brute=%.6f bvh=%.6f dot=%.6f\n", name, bt, vhit.t, glm::dot(bn, vhit.normal));
+            return false;
+        }
+        if (glm::length(buv - vhit.uv) > 1e-3f)
+        {
+            printf("FAIL %s: uv brute=(%.4f,%.4f) bvh=(%.4f,%.4f)\n", name,
+                   buv.x, buv.y, vhit.uv.x, vhit.uv.y);
             return false;
         }
         if (vhit.triIndex < 0 || vhit.triIndex >= (int)out.hostTriangles.size())
