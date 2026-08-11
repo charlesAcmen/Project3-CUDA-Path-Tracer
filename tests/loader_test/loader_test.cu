@@ -33,12 +33,18 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+#include <array>
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <limits>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -526,8 +532,383 @@ static void testLoadFromJSON(const std::string& exeDir)
     std::printf("\n");
 }
 
+// =====================================================================
+// Part E — sweep mode: load every glTF under a models root
+//
+//   loader_test --sweep <modelsRoot>
+//
+// Walks <modelsRoot>/**/*.gltf|glb (glTF-Sample-Assets layout: each model
+// has glTF/ glTF-Binary/ glTF-Embedded/ variant dirs) and loads each with
+// the REAL production loadGLTF.  The point is scale: M1–M6 unit tests prove
+// each edge case in isolation; this proves no real-world asset crashes the
+// loader, that every material-slot image that EXISTS on disk actually gets
+// loaded (the M6 auto-load contract), and that each triangle's five texture
+// slots point at the RIGHT image (the slot-mapping contract, checked by
+// pixel content — see verifyGltfSlotMapping).
+//
+// Per-model assertions:
+//   - loadGLTF returns a valid slice (load-failures are listed, not fatal —
+//     Draco-compressed models and a few spec-violators legitimately fail).
+//   - When the file parses and the material slots reference external image
+//     URIs whose files exist next to the .gltf, Scene::textures must end up
+//     with EXACTLY that many entries (dedup by cgltf image index).  A shortfall
+//     is a real bug — an existing PNG silently skipped.
+//   - Every distinct TextureBinding stamped on the loaded triangles must be
+//     the binding some material's slots imply: each bound slot's texture
+//     content must equal its image file (decoded exactly as loadTextureFile
+//     stores it).  A mismatch is a real bug — the wrong PNG bound to a slot.
+// Exit code: 0 iff no texture shortfall and no slot mismatch.  Crashes abort
+// the whole sweep (the report then shows how far it got).
+// =====================================================================
+namespace fs = std::filesystem;
+
+// Resolve a material slot's image to its external file path (relative to the
+// .gltf's directory), or "" when the slot should NOT load an image — absent,
+// embedded (bufferView), data: URI, or the percent-decoded file is missing.
+// Mirrors the loader's "unsupported → -1" contract (resolveGltfTextureSlot).
+static std::string loadableImageFile(const fs::path& dir,
+                                     const cgltf_texture_view& view)
+{
+    if (view.texture == nullptr || view.texture->image == nullptr)
+        return "";
+    const cgltf_image* img = view.texture->image;
+    if (img->buffer_view || img->uri == nullptr) return "";      // embedded
+    const std::string uri = img->uri;
+    if (uri.rfind("data:", 0) == 0) return "";                   // data URI
+    std::string    decoded(uri.begin(), uri.end());
+    std::vector<char> buf(decoded.begin(), decoded.end());
+    buf.push_back('\0');
+    cgltf_decode_uri(buf.data());
+    decoded.assign(buf.data());
+    const fs::path p = dir / decoded;
+    return fs::exists(p) ? p.string() : "";
+}
+
+// Count distinct glTF image indices that the material slots reference and that
+// SHOULD load: external file URIs (not bufferView-embedded, not data:) whose
+// percent-decoded file exists next to the .gltf.  -1 if the file doesn't
+// parse/validate (no texture assertion then).
+static int countExpectedExternalTextures(const std::string& path)
+{
+    cgltf_options opts{};
+    cgltf_data*   data = nullptr;
+    if (cgltf_parse_file(&opts, path.c_str(), &data) != cgltf_result_success)
+        return -1;
+    if (cgltf_validate(data) != cgltf_result_success)
+    {
+        cgltf_free(data);
+        return -1;
+    }
+
+    const fs::path dir = fs::path(path).parent_path();
+    std::set<int>  distinct;
+    for (size_t m = 0; m < data->materials_count; ++m)
+    {
+        const cgltf_material* mat = &data->materials[m];
+        const cgltf_texture_view views[] = {
+            mat->pbr_metallic_roughness.base_color_texture,
+            mat->normal_texture,
+            mat->pbr_metallic_roughness.metallic_roughness_texture,
+            mat->occlusion_texture,
+            mat->emissive_texture,
+        };
+        for (const cgltf_texture_view& v : views)
+            if (!loadableImageFile(dir, v).empty())
+                distinct.insert((int)(v.texture->image - data->images));
+    }
+    cgltf_free(data);
+    return (int)distinct.size();
+}
+
+// =====================================================================
+// Slot-mapping verification
+//
+// Every distinct TextureBinding stamped on the loaded triangles must be
+// exactly the binding that SOME material's five slots imply — matched by
+// PIXEL CONTENT, not by predicted texture id (ids are first-come during the
+// scene walk, so predicting them would re-implement the loader).  This is
+// what catches "the wrong PNG bound to a slot" — a swap, a duplicate, an
+// out-of-range id — that the texture-COUNT check alone cannot see.
+// =====================================================================
+
+static uint64_t fnv1a64(const void* data, size_t n)
+{
+    const uint8_t* p = static_cast<const uint8_t*>(data);
+    uint64_t h = 0xcbf29ce484222325ULL;
+    for (size_t i = 0; i < n; ++i)
+        h = (h ^ p[i]) * 0x100000001b3ULL;
+    return h;
+}
+
+// Hash of a loaded texture's pixels as the loader stored them (linear floats).
+static uint64_t hashTexels(const std::vector<glm::vec3>& pixels)
+{
+    return pixels.empty()
+        ? 0
+        : fnv1a64(pixels.data(), pixels.size() * sizeof(glm::vec3));
+}
+
+// Decode an image file EXACTLY as loadTextureFile stores it (stbi_load with
+// req_comp=3, optional sRGB→linear for color maps) and hash the resulting
+// float texels.  0 on decode failure.  Same TU → same stb implementation, so a
+// texture the loader loaded bit-matches its source file's hash.
+static uint64_t hashImageFile(const std::string& path, bool srgb)
+{
+    int w = 0, h = 0, comp = 0;
+    stbi_uc* data = stbi_load(path.c_str(), &w, &h, &comp, 3);
+    if (data == nullptr)
+        return 0;
+
+    // Must replicate loadTextureFile's linearization byte-for-byte.
+    const auto lin = [](float c) {
+        return (c <= 0.04045f) ? c / 12.92f
+                               : std::pow((c + 0.055f) / 1.055f, 2.4f);
+    };
+
+    std::vector<float> texels((size_t)w * (size_t)h * 3);
+    for (int i = 0; i < w * h; i++)
+    {
+        const float r = data[3 * i + 0] / 255.0f;
+        const float g = data[3 * i + 1] / 255.0f;
+        const float b = data[3 * i + 2] / 255.0f;
+        texels[3 * i + 0] = srgb ? (float)lin(r) : r;
+        texels[3 * i + 1] = srgb ? (float)lin(g) : g;
+        texels[3 * i + 2] = srgb ? (float)lin(b) : b;
+    }
+    stbi_image_free(data);
+    return fnv1a64(texels.data(), texels.size() * sizeof(float));
+}
+
+// Content hash of an image file decoded under a treatment, cached per
+// (path, srgb) so each file decodes at most once per sweep.
+static uint64_t imageContentHash(
+    std::map<std::pair<std::string, bool>, uint64_t>& cache,
+    const std::string& file, bool srgb)
+{
+    const auto key = std::make_pair(file, srgb);
+    const auto it  = cache.find(key);
+    if (it != cache.end())
+        return it->second;
+    const uint64_t h = hashImageFile(file, srgb);
+    cache.emplace(key, h);
+    return h;
+}
+
+// Does a texture's content equal this slot's image under either the slot's
+// canonical treatment or the opposite one?  The loader picks the sRGB treatment
+// of the FIRST slot to reference an image (dedup by image index), so a data
+// slot can legally hold a linearized texture (and vice versa) when one file is
+// shared across roles.  Tolerate both — but only both.
+static bool contentMatches(uint64_t texelHash, const std::string& file,
+                           bool slotColor,
+                           std::map<std::pair<std::string, bool>, uint64_t>& cache)
+{
+    const uint64_t canonical = imageContentHash(cache, file, slotColor);
+    if (canonical != 0 && texelHash == canonical) return true;
+    const uint64_t other = imageContentHash(cache, file, !slotColor);
+    return other != 0 && texelHash == other;
+}
+
+// A material's five texture slots, in the loader's resolution order
+// (bindGltfMaterial).  `view` points into the cgltf_material; `color` marks the
+// sRGB→linear color slots (baseColor/emissive).
+struct SlotSpec
+{
+    const char* name;
+    const cgltf_texture_view* view;
+    bool color;
+};
+
+static void materialSlots(const cgltf_material* mat, SlotSpec out[5])
+{
+    out[0] = { "baseColor",         &mat->pbr_metallic_roughness.base_color_texture, true };
+    out[1] = { "normal",            &mat->normal_texture, false };
+    out[2] = { "metallicRoughness", &mat->pbr_metallic_roughness.metallic_roughness_texture, false };
+    out[3] = { "occlusion",         &mat->occlusion_texture, false };
+    out[4] = { "emissive",          &mat->emissive_texture, true };
+}
+
+// Verify the slot mapping of a loaded glTF scene by independent re-parse.
+// Returns the number of distinct bindings on the loaded triangles that no
+// material's slot pattern can explain (0 = mapping is correct).
+static int verifyGltfSlotMapping(const std::string& path, const Scene& scene)
+{
+    cgltf_options opts{};
+    cgltf_data*   data = nullptr;
+    if (cgltf_parse_file(&opts, path.c_str(), &data) != cgltf_result_success)
+        return 0;   // can't independently parse → nothing to check
+    if (cgltf_validate(data) != cgltf_result_success)
+    {
+        cgltf_free(data);
+        return 0;
+    }
+
+    const fs::path dir = fs::path(path).parent_path();
+
+    // Hash every loaded texture once.
+    std::vector<uint64_t> texHash(scene.textures.size());
+    for (size_t k = 0; k < scene.textures.size(); ++k)
+        texHash[k] = hashTexels(scene.textures[k].pixels);
+
+    // Distinct bindings stamped on the triangles → how many triangles carry each.
+    std::map<std::array<int, 5>, int> bindings;
+    for (const Triangle& t : scene.hostTriangles)
+    {
+        std::array<int, 5> k = { t.tex.baseColor, t.tex.normal,
+                                 t.tex.metallicRoughness, t.tex.occlusion,
+                                 t.tex.emissive };
+        ++bindings[k];
+    }
+
+    std::map<std::pair<std::string, bool>, uint64_t> imgHash;
+    int failures = 0;
+
+    for (const auto& kv : bindings)
+    {
+        const std::array<int, 5>& k   = kv.first;
+        const int                 nTri = kv.second;
+
+        bool ok = false;
+        for (size_t m = 0; m < data->materials_count && !ok; ++m)
+        {
+            SlotSpec slots[5];
+            materialSlots(&data->materials[m], slots);
+
+            bool match = true;
+            for (int s = 0; s < 5 && match; ++s)
+            {
+                const std::string file = loadableImageFile(dir, *slots[s].view);
+                if (file.empty())
+                {
+                    if (k[s] != -1) match = false;
+                }
+                else
+                {
+                    if (k[s] < 0 || k[s] >= (int)scene.textures.size())
+                    { match = false; break; }
+                    if (!contentMatches(texHash[k[s]], file, slots[s].color, imgHash))
+                        match = false;
+                }
+            }
+            if (match) ok = true;
+        }
+
+        if (!ok)
+        {
+            ++failures;
+            std::printf("    [SLOT MISMATCH] %s  baseColor=%d normal=%d "
+                        "metallicRoughness=%d occlusion=%d emissive=%d "
+                        "(on %d triangles)\n",
+                        path.c_str(), k[0], k[1], k[2], k[3], k[4], nTri);
+        }
+    }
+
+    cgltf_free(data);
+    return failures;
+}
+
+// Walk a tree depth-first calling `visit` for every regular file, without
+// throwing on un-enumerable directories.  Some glTF-Sample-Assets names use
+// unusual unicode (e.g. "Unicode❤♻Test") that makes std::filesystem throw on
+// Windows; one bad path must not abort the whole sweep.
+static void walkFiles(const fs::path& root,
+                      const std::function<void(const fs::path&)>& visit)
+{
+    std::vector<fs::path> stack = { root };
+    while (!stack.empty())
+    {
+        const fs::path dir = stack.back();
+        stack.pop_back();
+
+        std::error_code ec;
+        fs::directory_iterator it(dir, ec), end;
+        if (ec) { ec.clear(); continue; }            // unenumerable dir → skip
+        while (it != end)
+        {
+            const auto& e = *it;
+            std::error_code fec;
+            if (e.is_directory(fec))
+                stack.push_back(e.path());
+            else if (e.is_regular_file(fec))
+                visit(e.path());
+            it.increment(ec);
+            if (ec) { ec.clear(); break; }           // error mid-iteration → stop this dir
+        }
+    }
+}
+
+static int sweepGltfRoot(const std::string& root)
+{
+    int files = 0, loaded = 0, texExpected = 0, texLoaded = 0, shortfalls = 0;
+    int slotFailures = 0;
+    std::vector<std::string> failList, shortfallList, slotFailList;
+
+    const auto process = [&](const fs::path& p) {
+        if (p.extension() != ".gltf" && p.extension() != ".glb") return;
+
+        Scene scene;
+        auto slice = SceneLoader::loadGLTF(scene, p.string());
+        ++files;
+
+        const bool ok = slice.first >= 0;
+        if (ok) { ++loaded; }
+        else    { failList.push_back(p.string()); }
+
+        const int expected = countExpectedExternalTextures(p.string());
+        if (ok && expected >= 0)
+        {
+            texExpected += expected;
+            texLoaded   += (int)scene.textures.size();
+            if ((int)scene.textures.size() < expected)
+            {
+                ++shortfalls;
+                shortfallList.push_back(
+                    p.string() + "  expected " + std::to_string(expected) +
+                    " textures, got " + std::to_string(scene.textures.size()));
+            }
+        }
+
+        const int slotFails = ok ? verifyGltfSlotMapping(p.string(), scene) : 0;
+        if (slotFails > 0)
+        {
+            slotFailures += slotFails;
+            slotFailList.push_back(p.string());
+        }
+
+        std::printf("%-70s %s  tris=%-8d tex=%-3d slot=%s\n",
+                    p.filename().string().c_str(),
+                    ok ? "ok " : "FAIL",
+                    (int)scene.hostTriangles.size(),
+                    (int)scene.textures.size(),
+                    slotFails > 0 ? "FAIL" : "ok");
+    };
+
+    walkFiles(root, process);
+
+    std::printf("\n===== SWEEP SUMMARY =====\n");
+    std::printf("files scanned      : %d\n", files);
+    std::printf("loaded ok          : %d\n", loaded);
+    std::printf("load failures      : %d\n", (int)failList.size());
+    std::printf("textures exp/ok    : %d / %d\n", texExpected, texLoaded);
+    std::printf("texture shortfalls : %d\n", shortfalls);
+    std::printf("slot mismatches    : %d\n", slotFailures);
+
+    for (const auto& s : failList)
+        std::printf("  [load fail] %s\n", s.c_str());
+    for (const auto& s : shortfallList)
+        std::printf("  [SHORTFALL] %s\n", s.c_str());
+    for (const auto& s : slotFailList)
+        std::printf("  [SLOT FAIL] %s\n", s.c_str());
+
+    return (shortfalls == 0 && slotFailures == 0) ? 0 : 1;
+}
+
 int main(int argc, char** argv)
 {
+    // Sweep mode: loader_test --sweep <modelsRoot>
+    if (argc >= 3 && std::string(argv[1]) == "--sweep")
+        return sweepGltfRoot(argv[2]);
+
     // Assets + scene JSONs are copied next to the exe by POST_BUILD.
     // Allow an explicit base dir override:  loader_test <baseDir>
     const std::string baseDir = (argc > 1) ? argv[1]
