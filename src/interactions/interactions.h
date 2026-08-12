@@ -60,6 +60,33 @@ __host__ __device__ glm::vec3 sampleCheckerboard(
     const glm::vec3& base);
 
 /**
+ * Resolve the Phong-lobe exponent + precomputed 1/(exponent+1) for a hit.
+ *
+ * Roughness source chain — first hit wins:
+ *   1. ORM texture G channel (per-texel, when `tex.metallicRoughness` is bound)
+ *   2. explicit JSON ROUGHNESS  (`m.specular.roughness >= 0`)
+ *   3. glTF `pbrMetallicRoughness.roughnessFactor`  (`tex.roughnessFactor >= 0`)
+ *   4. fixed default 0.5 (medium gloss) — an incomplete model must not
+ *      silently become a perfect mirror
+ *
+ * r below ROUGHNESS_THRESHOLD yields a perfect mirror (exponent = -1).
+ * Mirrors the loader's ROUGHNESS conversion (2/r² − 2) exactly for every
+ * source.  The ORM texture is a data map (srgb=false), so its G channel is
+ * already linear [0,1].
+ *
+ * `metallic` is the ORM B channel, read and RESERVED for a future PBR BRDF —
+ * the Lambert/Phong model has no metallic concept, so the caller currently
+ * ignores it.
+ *
+ * @return true when the ORM texture drove the result, false when a scalar
+ *         source (JSON / glTF factor / default) is authoritative.
+ */
+__host__ __device__ bool resolveGlossyExponent(
+    float& exponent, float& invExpPlusOne, float& metallic,
+    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const Material& m);
+
+/**
  * Scatter a ray with some probabilities according to the material properties.
  * For example, a diffuse surface scatters in a cosine-weighted hemisphere.
  * A perfect specular surface scatters in the reflected ray direction.

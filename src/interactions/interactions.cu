@@ -54,7 +54,7 @@ __host__ __device__ void buildOrthonormalBasis(
 __host__ __device__ glm::vec3 samplePhongSpecularDir(
     glm::vec3 reflectDir,
     float exponent,
-    float invExponentPlusOne,   // precomputed 1/(exponent+1) at load time
+    float invExponentPlusOne,   // 1/(exponent+1), precomputed per-hit by the caller
     RngState& rng)
 {
     float xi1 = rng.next(HaltonDim::SpecularTheta);  // dim 6 (prime 17): specular lobe theta
@@ -277,6 +277,61 @@ __host__ __device__ glm::vec3 sampleCheckerboard(
     return (((u + v) % 2) == 0) ? base : base * 0.25f;
 }
 
+// Resolve the Phong-lobe exponent + precomputed 1/(exponent+1) for a hit.
+// A bound metallicRoughness texture (glTF ORM: G = roughness, B = metallic; a
+// data map loaded raw, so both are already linear [0,1]) overrides the
+// material's JSON roughness scalar; r below ROUGHNESS_THRESHOLD yields a
+// perfect mirror (exponent = -1).  Mirrors the loader's ROUGHNESS conversion
+// (2/r² − 2) exactly, so a texture-driven hit behaves like the JSON scalar did.
+//
+// `metallic` is the ORM B channel, read and RESERVED for a future PBR BRDF —
+// the Lambert/Phong model has no metallic concept, so the caller currently
+// ignores it.  Returns whether the ORM slot drove the result (false = the
+// material scalar is authoritative).
+__host__ __device__ bool resolveGlossyExponent(
+    float& exponent, float& invExpPlusOne, float& metallic,
+    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const Material& m)
+{
+    // Roughness source — first hit wins, priority is the read order:
+    //   ORM texture G (per-texel) → JSON ROUGHNESS → glTF roughnessFactor
+    //   → fixed default 0.5 (incomplete models must not silently become mirrors)
+    float r;
+    metallic = 0.0f;
+    const bool fromTexture = tex.metallicRoughness >= 0;
+    if (fromTexture)
+    {
+        const glm::vec3 orm = sampleTexture(textures.pixels,
+                                            textures.infos[tex.metallicRoughness],
+                                            uv * m.uvScale);
+        metallic = orm.z;                                  // B = metallic (reserved)
+        r        = glm::clamp(orm.y, 0.0f, 1.0f);          // G = roughness
+    }
+    else if (m.specular.roughness >= 0.0f)
+    {
+        r = m.specular.roughness;                          // explicit JSON ROUGHNESS
+    }
+    else if (tex.roughnessFactor >= 0.0f)
+    {
+        r = tex.roughnessFactor;                           // glTF roughnessFactor
+    }
+    else
+    {
+        r = 0.5f;                                          // fixed default (medium gloss)
+    }
+    // Same conversion the loader applies to JSON ROUGHNESS:
+    //   r < ROUGHNESS_THRESHOLD → perfect mirror (exponent = -1)
+    //   otherwise Phong exponent 2/r² − 2, invExponentPlusOne = 1/(exponent+1).
+    if (r < ROUGHNESS_THRESHOLD) { exponent = -1.0f; invExpPlusOne = 0.0f; }
+    else
+    {
+        const float r2 = r * r;
+        exponent      = (2.0f / r2) - 2.0f;
+        invExpPlusOne = r2 / (2.0f - r2);              // one division, no 1/(x+1)
+    }
+    return fromTexture;
+}
+
 __host__ __device__ void scatterRay(
     PathSegment & pathSegment,
     const ShadeableIntersection &hit,
@@ -385,13 +440,21 @@ __host__ __device__ void scatterRay(
         }
         case MaterialType::Reflective:
         {
+            // Per-texel roughness: a bound glTF metallicRoughness texture
+            // (G channel) overrides the JSON material's uniform scalar; falls
+            // back to it when unbound.  `metallic` (ORM B channel) is read but
+            // RESERVED for a future PBR BRDF — not consumed by Phong.
+            float exponent, invExpPlusOne, metallic;
+            resolveGlossyExponent(exponent, invExpPlusOne, metallic,
+                                  tex, textures, uv, m);
+
             glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, shadingNormal);
             glm::vec3 scatterDir;
 
-            if (m.specular.exponent >= 0.0f)
+            if (exponent >= 0.0f)
             {
                 // Glossy specular (imperfect specular)
-                glm::vec3 candidate = samplePhongSpecularDir(reflectedDir, m.specular.exponent, m.specular.invExponentPlusOne, rng);
+                glm::vec3 candidate = samplePhongSpecularDir(reflectedDir, exponent, invExpPlusOne, rng);
                 // Ensure the ray goes outward from the surface, otherwise fallback to perfect reflection
                 scatterDir = (glm::dot(candidate, shadingNormal) > 0.0f) ? candidate : reflectedDir;
             }
