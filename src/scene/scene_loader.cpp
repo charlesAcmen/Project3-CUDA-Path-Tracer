@@ -293,6 +293,10 @@ static TextureBinding bindGltfMaterial(GltfLoadCtx& ctx,
         mat->pbr_metallic_roughness.metallic_roughness_texture, false);
     b.occlusion         = resolveGltfTextureSlot(ctx, mat->occlusion_texture, false);
     b.emissive          = resolveGltfTextureSlot(ctx, mat->emissive_texture, true);
+    // glTF's own roughness default (cgltf fills the spec default 1.0 when the
+    // file omits it) — a fallback for Specular materials whose JSON did not
+    // declare ROUGHNESS.  Non-glTF meshes leave the -1 sentinel.
+    b.roughnessFactor   = mat->pbr_metallic_roughness.roughness_factor;
     return b;
 }
 

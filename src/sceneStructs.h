@@ -22,6 +22,11 @@ struct TextureBinding
     int metallicRoughness = -1;   // ORM: metallic (B) + roughness (G) packed
     int occlusion        = -1;
     int emissive         = -1;
+    // glTF material's pbrMetallicRoughness.roughnessFactor (glTF default 1.0),
+    // read as a fallback when the mesh has no ORM texture and the scene JSON
+    // left ROUGHNESS unspecified.  -1 = this triangle came from a mesh with
+    // no glTF material (plain OBJ), so the scalar fallback is not available.
+    float roughnessFactor = -1.0f;
 };
 
 // Triangle backed by an OBJ mesh.
