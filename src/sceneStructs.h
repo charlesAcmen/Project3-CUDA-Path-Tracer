@@ -80,6 +80,11 @@ struct Material
         float invExponentPlusOne; // Precomputed 1/(exponent+1) to avoid GPU division in Phong sampling
         glm::vec3 color;          // Specular color tint for mirror-like reflections
         //镜面反射的高光颜色色调
+        // Raw scene ROUGHNESS scalar, kept so the shader can distinguish
+        // "author explicitly wrote ROUGHNESS" (∈ [0,1]) from "unspecified"
+        // (-1).  The explicit value wins over a glTF roughnessFactor fallback;
+        // exponent/invExponentPlusOne above are its precomputed conversion.
+        float roughness = -1.0f;
     } specular;
     MaterialType type;            // Explicit material classification used by scattering logic
     float indexOfRefraction;      // IOR of the refractive material, e.g. 1.5 for glass

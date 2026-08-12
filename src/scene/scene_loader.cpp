@@ -739,7 +739,12 @@ static void parseMaterials(
             newMaterial.type = MaterialType::Reflective;
             if (p.contains("ROUGHNESS"))
             {
+                // Keep the raw scalar: an explicitly-written ROUGHNESS is the
+                // authoritative roughness source (wins over a glTF
+                // roughnessFactor fallback).  -1 (unspecified) lets the shader
+                // fall through to the mesh's glTF factor, then a fixed default.
                 float r = glm::clamp((float)p["ROUGHNESS"], 0.0f, 1.0f);
+                newMaterial.specular.roughness = r;
                 if (r < ROUGHNESS_THRESHOLD)
                 {
                     newMaterial.specular.exponent = -1.0f;
@@ -753,6 +758,7 @@ static void parseMaterials(
             else
             {
                 newMaterial.specular.exponent = -1.0f;
+                newMaterial.specular.roughness = -1.0f;  // unspecified
             }
             // Precompute 1/(exponent+1) for the Phong lobe here (host-side) so
             // samplePhongSpecularDir never divides on the GPU.  Mirror
