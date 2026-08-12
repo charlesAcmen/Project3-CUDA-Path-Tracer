@@ -80,15 +80,15 @@ struct Material
     //基础反射率或漫反射/折射的表面色调
     struct
     {
-        float exponent;           // Phong exponent or glossiness for specular highlight falloff
-        //Phong指数或高光的光泽度，用于高光衰减
-        float invExponentPlusOne; // Precomputed 1/(exponent+1) to avoid GPU division in Phong sampling
         glm::vec3 color;          // Specular color tint for mirror-like reflections
         //镜面反射的高光颜色色调
         // Raw scene ROUGHNESS scalar, kept so the shader can distinguish
         // "author explicitly wrote ROUGHNESS" (∈ [0,1]) from "unspecified"
-        // (-1).  The explicit value wins over a glTF roughnessFactor fallback;
-        // exponent/invExponentPlusOne above are its precomputed conversion.
+        // (-1).  The explicit value wins over a glTF roughnessFactor fallback.
+        // The Phong exponent is NOT stored here — the per-hit conversion
+        // (2/r² − 2, ROUGHNESS_THRESHOLD → mirror) lives in
+        // resolveGlossyExponent, because roughness can also be per-texel from
+        // an ORM texture or a glTF factor, so a precomputed scalar is obsolete.
         float roughness = -1.0f;
     } specular;
     MaterialType type;            // Explicit material classification used by scattering logic
