@@ -44,6 +44,12 @@ void pathtraceInit(Scene* scene);
 void pathtraceFree();
 void pathtrace(uchar4* pbo, int iteration);
 
+// Camera / runtime-settings change → restart MC accumulation by zeroing
+// only the HDR accumulation buffer (g_dev.image).  Cheaper than the old
+// pathtraceFree + pathtraceInit cycle, which rebuilt the BVH and re-uploaded
+// the whole scene every interactive frame.
+void pathtraceResetAccumulation();
+
 // On-demand D2H readback of the final post-processed display buffer into state.image.
 // Called by saveImage() so the saved PNG matches the on-screen preview;
 // deliberately NOT copied every frame (the copy is a synchronous stall).

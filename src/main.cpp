@@ -470,14 +470,21 @@ void runCuda()
     // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
 
     static bool pathtraceInitialized = false;
-    if (iteration == 0)
+    if (!pathtraceInitialized)
     {
-        if (pathtraceInitialized)
-        {
-            pathtraceFree();
-        }
+        // First frame: full one-time init — build the BVH, upload materials /
+        // triangles / textures, allocate all device buffers.
         pathtraceInit(scene);
         pathtraceInitialized = true;
+    }
+    else if (iteration == 0)
+    {
+        // Camera or a runtime setting changed → restart MC accumulation.
+        // The scene never changed, so only the HDR accumulation buffer is
+        // zeroed — NOT the old pathtraceFree + pathtraceInit cycle, which
+        // rebuilt the BVH and re-uploaded the whole scene every interactive
+        // frame (the cause of the FPS drop while dragging the camera).
+        pathtraceResetAccumulation();
     }
 
     if (iteration < renderState->iterations)

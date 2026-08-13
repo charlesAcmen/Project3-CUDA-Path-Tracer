@@ -230,6 +230,27 @@ void pathtraceFree()
 }
 
 // ====================================================================
+// Accumulation Reset (camera / settings change)
+// ====================================================================
+
+void pathtraceResetAccumulation()
+{
+    // Camera or a runtime setting changed → restart the Monte Carlo
+    // accumulation.  The scene (materials / triangles / textures / BVH) is
+    // unchanged, and every per-frame buffer (paths, intersections, display,
+    // bloom) is fully overwritten by the kernels each iteration — the ONLY
+    // cross-frame state is g_dev.image, so that is all that needs zeroing.
+    // This is one cheap memset instead of pathtraceFree + pathtraceInit,
+    // which rebuilt the BVH and re-uploaded the whole scene on every frame
+    // while the camera was being dragged.
+    if (!hst_scene) return;
+    const int pixelcount = hst_scene->state.camera.resolution.x *
+                           hst_scene->state.camera.resolution.y;
+    cudaMemset(g_dev.image, 0, pixelcount * sizeof(glm::vec3));
+    checkCUDAError("pathtraceResetAccumulation");
+}
+
+// ====================================================================
 // Host Image Readback (on-demand)
 // ====================================================================
 
