@@ -823,7 +823,6 @@ static void parseObjects(
     const auto& objectsData = data["Objects"];
     for (const auto& p : objectsData)
     {
-        const auto& type = p["TYPE"];
         Geom newGeom{};
 
         newGeom.materialid = MatNameToID[p["MATERIAL"]];
@@ -837,63 +836,54 @@ static void parseObjects(
         newGeom.meshTriangleOffset = -1;
         newGeom.meshTriangleCount  = 0;
 
-        if (type == "mesh")
+        filesystem::path objRel = p.value("FILE", string(""));
+        if (objRel.empty())
         {
-            filesystem::path objRel = p.value("FILE", string(""));
-            if (objRel.empty())
-            {
-                Log::warn("Scene", "Mesh object with no FILE field; skipping");
-                continue;
-            }
+            Log::warn("Scene", "Mesh object with no FILE field; skipping");
+            continue;
+        }
 
-            // Dispatch on file extension: .obj (tinyobjloader) or
-            // .gltf / .glb (cgltf).
-            string meshPath = (jsonDir / objRel).generic_string();
-            string ext = filesystem::path(meshPath).extension().string();
-            transform(ext.begin(), ext.end(), ext.begin(),
-                      [](unsigned char c) { return (char)tolower(c); });
+        // Dispatch on file extension: .obj (tinyobjloader) or
+        // .gltf / .glb (cgltf).
+        string meshPath = (jsonDir / objRel).generic_string();
+        string ext = filesystem::path(meshPath).extension().string();
+        transform(ext.begin(), ext.end(), ext.begin(),
+                  [](unsigned char c) { return (char)tolower(c); });
 
-            pair<int, int> slice = {-1, 0};
-            if (ext == ".obj")
-            {
-                slice = loadOBJ(meshPath, scene.hostTriangles);
-            }
-            else if (ext == ".gltf" || ext == ".glb")
-            {
-                slice = loadGLTF(scene, meshPath);
-            }
-            else
-            {
-                Log::warn("Scene", "Unsupported mesh format '%s' for '%s'; skipping",
-                          ext.c_str(), objRel.string().c_str());
-                continue;
-            }
-
-            newGeom.meshTriangleOffset = slice.first;
-            newGeom.meshTriangleCount  = slice.second;
-
-            // An explicit JSON TEXTURE on the object's material wins over the
-            // model's glTF baseColor map (the scene author overrides the
-            // asset's own albedo).  Zero the slice's tex.baseColor so the
-            // shading fallback chain (tex.baseColor → m.textureId) resolves
-            // to the JSON-declared image.
-            if (slice.first >= 0 && slice.second > 0)
-            {
-                const string matName = p["MATERIAL"].get<string>();
-                if (data["Materials"].contains(matName) &&
-                    data["Materials"][matName].contains("TEXTURE"))
-                {
-                    for (int i = slice.first;
-                         i < slice.first + slice.second; ++i)
-                        scene.hostTriangles[i].tex.baseColor = -1;
-                }
-            }
+        pair<int, int> slice = {-1, 0};
+        if (ext == ".obj")
+        {
+            slice = loadOBJ(meshPath, scene.hostTriangles);
+        }
+        else if (ext == ".gltf" || ext == ".glb")
+        {
+            slice = loadGLTF(scene, meshPath);
         }
         else
         {
-            Log::warn("Scene", "Unknown object TYPE '%s'; skipping",
-                      p["TYPE"].get<std::string>().c_str());
+            Log::warn("Scene", "Unsupported mesh format '%s' for '%s'; skipping",
+                      ext.c_str(), objRel.string().c_str());
             continue;
+        }
+
+        newGeom.meshTriangleOffset = slice.first;
+        newGeom.meshTriangleCount  = slice.second;
+
+        // An explicit JSON TEXTURE on the object's material wins over the
+        // model's glTF baseColor map (the scene author overrides the
+        // asset's own albedo).  Zero the slice's tex.baseColor so the
+        // shading fallback chain (tex.baseColor → m.textureId) resolves
+        // to the JSON-declared image.
+        if (slice.first >= 0 && slice.second > 0)
+        {
+            const string matName = p["MATERIAL"].get<string>();
+            if (data["Materials"].contains(matName) &&
+                data["Materials"][matName].contains("TEXTURE"))
+            {
+                for (int i = slice.first;
+                     i < slice.first + slice.second; ++i)
+                    scene.hostTriangles[i].tex.baseColor = -1;
+            }
         }
 
         newGeom.transform = utilityCore::buildTransformationMatrix(
