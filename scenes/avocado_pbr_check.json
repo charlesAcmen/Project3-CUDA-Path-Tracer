@@ -5,7 +5,7 @@
         {
             "TYPE":"Emitting",
             "RGB":[1.0, 1.0, 1.0],
-            "EMITTANCE":5.0
+            "EMITTANCE":20.0
         },
         "diffuse_white":
         {
@@ -33,10 +33,10 @@
     {
         "RES":[800,800],
         "FOVY":45.0,
-        "ITERATIONS":1500,
+        "ITERATIONS":1000,
         "DEPTH":8,
         "RR_DEPTH":3,
-        "FILE":"avocado",
+        "FILE":"avocado_pbr_check",
         "EYE": [-0.0234, 2.6883, 2.2631],
         "LOOKAT": [0.0890, 0.3114, -3.7301],
         "UP": [0.0069, 0.9296, -0.3685]

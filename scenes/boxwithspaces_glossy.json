@@ -11,7 +11,6 @@
         {
             "TYPE":"Specular",
             "RGB":[1.0, 1.0, 1.0],
-            "SPECULAR_COLOR":[0.95, 0.95, 0.95],
             "ROUGHNESS":0.5
         },
         "diffuse_white":

@@ -5,7 +5,7 @@
         {
             "TYPE":"Emitting",
             "RGB":[1.0, 1.0, 1.0],
-            "EMITTANCE":5.0
+            "EMITTANCE":20.0
         },
         "diffuse_white":
         {
@@ -22,37 +22,34 @@
             "TYPE":"Diffuse",
             "RGB":[0.35, 0.85, 0.35]
         },
-        "avocado_skin":
+        "box":
         {
             "TYPE":"PBR",
-            "RGB":[0.15, 0.38, 0.14],
-            "ROUGHNESS":0.25
+            "RGB":[1.0, 1.0, 1.0]
         }
     },
     "Camera":
     {
         "RES":[800,800],
         "FOVY":45.0,
-        "ITERATIONS":1500,
+        "ITERATIONS":200000,
         "DEPTH":8,
         "RR_DEPTH":3,
-        "FILE":"avocado",
-        "EYE": [-0.0234, 2.6883, 2.2631],
-        "LOOKAT": [0.0890, 0.3114, -3.7301],
-        "UP": [0.0069, 0.9296, -0.3685]
+        "FILE":"orm_test",
+        "EYE":[0.0, 2.5, 6.0],
+        "LOOKAT":[0.0, 1.2, 0.0],
+        "UP":[0.0, 1.0, 0.0]
     },
     "Objects":
     [
         {
-            "TYPE":"mesh",
             "MATERIAL":"light",
             "FILE":"models/light.obj",
-            "TRANS":[0.0,10.0,0.0],
+            "TRANS":[0.0,7.5,0.0],
             "ROTAT":[0.0,0.0,0.0],
             "SCALE":[3.0,0.3,3.0]
         },
         {
-            "TYPE":"mesh",
             "MATERIAL":"diffuse_white",
             "FILE":"models/cube.obj",
             "TRANS":[0.0,0.0,0.0],
@@ -60,44 +57,39 @@
             "SCALE":[10.0,0.01,10.0]
         },
         {
-            "TYPE":"mesh",
             "MATERIAL":"diffuse_white",
             "FILE":"models/cube.obj",
-            "TRANS":[0.0,10.0,0.0],
-            "ROTAT":[0.0,0.0,90.0],
-            "SCALE":[0.01,10.0,10.0]
+            "TRANS":[0.0,8.0,0.0],
+            "ROTAT":[0.0,0.0,0.0],
+            "SCALE":[10.0,0.01,10.0]
         },
         {
-            "TYPE":"mesh",
             "MATERIAL":"diffuse_white",
             "FILE":"models/cube.obj",
-            "TRANS":[0.0,5.0,-5.0],
+            "TRANS":[0.0,4.0,-5.0],
             "ROTAT":[0.0,90.0,0.0],
-            "SCALE":[0.01,10.0,10.0]
+            "SCALE":[0.01,8.0,10.0]
         },
         {
-            "TYPE":"mesh",
             "MATERIAL":"diffuse_red",
             "FILE":"models/cube.obj",
-            "TRANS":[-5.0,5.0,0.0],
+            "TRANS":[-5.0,4.0,0.0],
             "ROTAT":[0.0,0.0,0.0],
-            "SCALE":[0.01,10.0,10.0]
+            "SCALE":[0.01,8.0,10.0]
         },
         {
-            "TYPE":"mesh",
             "MATERIAL":"diffuse_green",
             "FILE":"models/cube.obj",
-            "TRANS":[5.0,5.0,0.0],
+            "TRANS":[5.0,4.0,0.0],
             "ROTAT":[0.0,0.0,0.0],
-            "SCALE":[0.01,10.0,10.0]
+            "SCALE":[0.01,8.0,10.0]
         },
         {
-            "TYPE":"mesh",
-            "MATERIAL":"avocado_skin",
-            "FILE":"models/glTF-Sample-Assets/Avocado.gltf",
-            "TRANS":[0.0,0.01,0.0],
+            "MATERIAL":"box",
+            "FILE":"models/boxwithspaces_test/Box With Spaces.gltf",
+            "TRANS":[0.0,3.0,0.0],
             "ROTAT":[0.0,0.0,0.0],
-            "SCALE":[50.0,50.0,50.0]
+            "SCALE":[1.0,1.0,1.0]
         }
     ]
 }
