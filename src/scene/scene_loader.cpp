@@ -314,16 +314,21 @@ static glm::mat4 nodeLocalMatrix(const cgltf_node* n)
     if (n->has_matrix)
         return glm::make_mat4(n->matrix);
 
+    // glTF 2.0 TRS: local = T·R·S.  The standard GLM idiom composes them in
+    // the order translate → rotate → scale, each helper RIGHT-multiplying
+    // (translate(m,v) = m·T, rotate/scale likewise), which yields exactly
+    // T·R·S — translation applied LAST to the vertex (scale, then rotate,
+    // then move into place).
     glm::mat4 m(1.0f);
-    if (n->has_scale)
-        m = glm::scale(m, glm::vec3(n->scale[0], n->scale[1], n->scale[2]));
-    if (n->has_rotation)
-        // cgltf stores the quaternion as (x, y, z, w); GLM's constructor is (w, x, y, z).
-        m = glm::mat4_cast(glm::quat(n->rotation[3], n->rotation[0],
-                                     n->rotation[1], n->rotation[2])) * m;
     if (n->has_translation)
         m = glm::translate(m, glm::vec3(n->translation[0], n->translation[1],
                                         n->translation[2]));
+    if (n->has_rotation)
+        // cgltf stores the quaternion as (x, y, z, w); GLM's constructor is (w, x, y, z).
+        m = m * glm::mat4_cast(glm::quat(n->rotation[3], n->rotation[0],
+                                         n->rotation[1], n->rotation[2]));
+    if (n->has_scale)
+        m = glm::scale(m, glm::vec3(n->scale[0], n->scale[1], n->scale[2]));
     return m;   // m = T·R·S
 }
 
