@@ -33,6 +33,10 @@ ctrl shift p select variant
 .\build\bin\Release\cis565_path_tracer.exe scenes/debug_black_3_room_closed.json
 .\build\bin\Release\cis565_path_tracer.exe scenes/debug_black_3_room_open.json
 
+.\build\bin\Release\cis565_path_tracer.exe scenes/boxwithspaces.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/boombox.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/boxwithspaces_glossy.json
+
 
 
 
