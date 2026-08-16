@@ -94,15 +94,7 @@ struct Material
     {
         glm::vec3 color;          // Specular color tint for mirror-like reflections
         //镜面反射的高光颜色色调
-        // Raw scene ROUGHNESS scalar, kept so the shader can distinguish
-        // "author explicitly wrote ROUGHNESS" (∈ [0,1]) from "unspecified"
-        // (-1).  The explicit value wins over a glTF roughnessFactor fallback.
-        float roughness = -1.0f;
     } specular;
-    // Raw scene METALLIC scalar ∈ [0,1] (JSON; -1 = unspecified).  Like
-    // roughness it can also be per-texel (ORM B channel) or a glTF
-    // metallicFactor
-    float metallic = -1.0f;
     MaterialType type;            // Explicit material classification used by scattering logic
     float indexOfRefraction;      // IOR of the refractive material, e.g. 1.5 for glass
     float invIndexOfRefraction;   // Precomputed inverse IOR to avoid GPU division

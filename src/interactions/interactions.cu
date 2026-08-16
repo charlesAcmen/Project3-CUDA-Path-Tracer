@@ -336,8 +336,7 @@ __host__ __device__ void resolvePbrSurfaceParams(
     const Material& m)
 {
     // Roughness source — first hit wins, priority is the read order:
-    //   ORM texture G (per-texel) → JSON ROUGHNESS → glTF roughnessFactor
-    //   → fixed default 0.5 (incomplete models must not silently become mirrors)
+    //   ORM texture G (per-texel) → glTF roughnessFactor → type default (Reflective: 0.0, Pbr: 0.5)
     float r;
     if (tex.metallicRoughness >= 0)
     {
@@ -356,15 +355,13 @@ __host__ __device__ void resolvePbrSurfaceParams(
     }
     else
     {
-        // Roughness source — first hit wins: JSON ROUGHNESS > glTF factor > 0.5.
-        r = (m.specular.roughness >= 0.0f)     ? m.specular.roughness
-          : (tex.roughnessFactor >= 0.0f)      ? tex.roughnessFactor
-          : 0.5f;
-        // Metallic source — first hit wins: JSON METALLIC > glTF factor >
+        // Roughness source — first hit wins: glTF factor > type default (Reflective=0.0 mirror, Pbr=0.5).
+        r = (tex.roughnessFactor >= 0.0f) ? tex.roughnessFactor
+          : (m.type == MaterialType::Reflective ? 0.0f : 0.5f);
+        // Metallic source — first hit wins: glTF factor >
         // type default (Reflective = chrome 1.0, Pbr = dielectric 0.0).
-        metallic = (m.metallic >= 0.0f)             ? m.metallic
-                 : (tex.metallicFactor >= 0.0f)     ? tex.metallicFactor
-                 : (m.type == MaterialType::Reflective) ? 1.0f : 0.0f;
+        metallic = (tex.metallicFactor >= 0.0f) ? tex.metallicFactor
+                 : (m.type == MaterialType::Reflective ? 1.0f : 0.0f);
     }
 
     // baseColor role per type: legacy chrome uses specular.color as its metal

@@ -78,16 +78,13 @@ __host__ __device__ glm::vec3 resolveBaseColor(
 // Resolve the per-hit GGX surface parameters for a Reflective / Pbr material.
 //
 // Roughness source chain — first hit wins:
-//   1. ORM texture G channel (per-texel, when `tex.metallicRoughness` is bound)
-//   2. explicit JSON ROUGHNESS  (`m.specular.roughness >= 0`)
-//   3. glTF `pbrMetallicRoughness.roughnessFactor`  (`tex.roughnessFactor >= 0`)
-//   4. fixed default 0.5 (medium gloss) — an incomplete model must not
-//      silently become a perfect mirror
+//   1. ORM texture G channel (per-texel, when `tex.metallicRoughness` is bound) × factor
+//   2. glTF `pbrMetallicRoughness.roughnessFactor`  (`tex.roughnessFactor >= 0`)
+//   3. type default — Reflective = 0.0 (mirror), Pbr = 0.5 (medium gloss)
 // Metallic source chain:
-//   1. ORM texture B channel (per-texel)
-//   2. explicit JSON METALLIC  (`m.metallic >= 0`)
-//   3. glTF `pbrMetallicRoughness.metallicFactor`  (`tex.metallicFactor >= 0`)
-//   4. type default — Reflective (legacy JSON Specular) = 1.0 (chrome),
+//   1. ORM texture B channel (per-texel, when `tex.metallicRoughness` is bound) × factor
+//   2. glTF `pbrMetallicRoughness.metallicFactor`  (`tex.metallicFactor >= 0`)
+//   3. type default — Reflective (legacy JSON Specular) = 1.0 (chrome),
 //      Pbr = 0.0 (dielectric)
 //
 // baseColor role per type: Reflective uses specular.color as the metal tint;

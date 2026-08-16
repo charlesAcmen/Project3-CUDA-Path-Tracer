@@ -76,38 +76,16 @@ static void applyMaterialType(const json& p, const string& name, Material& m)
             m.specular.color = glm::vec3(col[0], col[1], col[2]);
         }
         m.type = MaterialType::Reflective;
-        // Store only the raw roughness / metallic scalars; the per-hit
-        // conversion (α = r², ROUGHNESS_THRESHOLD → mirror, F0 =
-        // mix(0.04, tint, metallic)) is done by resolvePbrSurfaceParams,
-        // because the source chain also feeds per-texel ORM and glTF factor
-        // values — a precomputed exponent here would be redundant.
-        if (p.contains("ROUGHNESS"))
-            m.specular.roughness =
-                glm::clamp((float)p["ROUGHNESS"], 0.0f, 1.0f);
-        // else: -1 (unspecified) → the shader falls through to the mesh's
-        // glTF roughnessFactor, then a fixed default.
-        if (p.contains("METALLIC"))
-            m.metallic = glm::clamp((float)p["METALLIC"], 0.0f, 1.0f);
-        // else: -1 → glTF metallicFactor, then the Reflective default 1.0
-        // (chrome) — a legacy JSON Specular was always a metal.
     }
     else if (typeStr == "PBR")
     {
         // Unified metallic-roughness surface (GGX).  RGB is the base color
-        // — the diffuse albedo, which also tints the conductor F0 by
-        // metallic.  Raw scalars are resolved per-hit by
-        // resolvePbrSurfaceParams (same chain as Reflective above).
+        // — the diffuse albedo, which also tints the conductor F0 by metallic.
+        // Roughness and metallic parameters are resolved per-hit from mesh
+        // textures (ORM) or glTF factors (or standard defaults).
         const auto& col = p["RGB"];
         m.color = glm::vec3(col[0], col[1], col[2]);
         m.type = MaterialType::Pbr;
-        if (p.contains("ROUGHNESS"))
-            m.specular.roughness =
-                glm::clamp((float)p["ROUGHNESS"], 0.0f, 1.0f);
-        // else: -1 → glTF roughnessFactor, then a fixed default 0.5.
-        if (p.contains("METALLIC"))
-            m.metallic = glm::clamp((float)p["METALLIC"], 0.0f, 1.0f);
-        // else: -1 → glTF metallicFactor, then the Pbr default 0.0
-        // (dielectric).
     }
     else if (typeStr == "REFRACTIVE")
     {
