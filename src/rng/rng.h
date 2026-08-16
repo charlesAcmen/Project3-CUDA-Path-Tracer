@@ -115,10 +115,11 @@ __host__ __device__ inline unsigned int utilhash(unsigned int a)
 //    3     7    Lens aperture v                generateRayFromCamera (DoF)
 //    4    11    Diffuse hemisphere θ           calculateRandomDirectionInHemisphere
 //    5    13    Diffuse hemisphere φ           calculateRandomDirectionInHemisphere
-//    6    17    Specular lobe θ                samplePhongSpecularDir
-//    7    19    Specular lobe φ                samplePhongSpecularDir
+//    6    17    Specular lobe θ (GGX half-vector)  sampleGgxHalfVector
+//    7    19    Specular lobe φ (GGX half-vector)  sampleGgxHalfVector
 //    8    23    Fresnel roulette               scatterRay (refractive branch)
 //    9    29    Path Russian roulette          russianRouletteTerminate
+//   10    31    Diffuse/specular split (PBR)   scatterRay (GGX surface)
 //   ---  -----  -----------------------------  ----------------------------
 
 /** Named constants for Halton dimension indices.
@@ -127,7 +128,7 @@ __host__ __device__ inline unsigned int utilhash(unsigned int a)
  *    rng.next(HaltonDim::AaJitterX)     instead of  rng.next(0)
  *    rng.next(HaltonDim::DiffuseTheta)  instead of  rng.next(4)
  *
- *  Dimensions 0-9 are allocated; 10-15 are reserved for future use.
+ *  
  */
 namespace HaltonDim {
     constexpr int AaJitterX      = 0;
@@ -140,6 +141,7 @@ namespace HaltonDim {
     constexpr int SpecularPhi    = 7;
     constexpr int FresnelRR      = 8;
     constexpr int PathRR         = 9;
+    constexpr int PbrSplit       = 10;   // diffuse vs specular roulette (GGX surface)
 }
 
 /**
@@ -148,7 +150,7 @@ namespace HaltonDim {
  * distinct bounceIndex value inside the hash.  The actual multiplier (8)
  * is arbitrary — any value works since bounceIndex goes into a chained hash.
  */
-constexpr int MAX_DRAWS_PER_BOUNCE = 8;
+constexpr int MAX_DRAWS_PER_BOUNCE = 16;
 
 // ============================================================================
 // RNG mode selection  (RngMode defined in sceneStructs.h, shared with
