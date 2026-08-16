@@ -70,6 +70,7 @@ enum class MaterialType
 {
     Diffuse,
     Reflective,
+    Pbr,    
     Refractive,
     Emissive
 };

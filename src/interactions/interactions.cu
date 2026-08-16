@@ -341,8 +341,15 @@ __host__ __device__ void scatterRay(
 {
     // Scatter a ray according to the material's BSDF.
     // Diffuse: cosine-weighted hemisphere sampling.
-    // Reflective: perfect specular reflection (glm::reflect).
-    // Refractive: Fresnel-weighted Russian roulette between reflection and
+    // Reflective / Pbr: 
+    //unified metallic-roughness(现代PBR最常见的材质工作流) 
+    //GGX(Ground Glass X,微平面法线分布,NDF) surface -
+    //smooth (r < ROUGHNESS_THRESHOLD) collapses to a single mirror
+    //lobe(when roughness draws close to 0,,NDF will draw close to 狄拉克函数
+    //,which will cause fireflies);otherwise a Fresnel-weighted(菲涅尔项) probabilistic split
+    //between a GGX half-vector(半角向量) specular lobe(高光波瓣) and the diffuse
+    //albedo(漫反射反照率), each weight divided by its branch probability(ensuring unbiased).
+    //Refractive: Fresnel-weighted Russian roulette between reflection and
     //             refraction (glm::refract), with normal flipped for exit rays.
 
     // The hit record carries everything the scatter needs; unpack it here so
@@ -439,6 +446,7 @@ __host__ __device__ void scatterRay(
             break;
         }
         case MaterialType::Reflective:
+        case MaterialType::Pbr:
         {
             // Per-texel roughness: a bound glTF metallicRoughness texture
             // (G channel) overrides the JSON material's uniform scalar; falls
