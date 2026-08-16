@@ -44,45 +44,59 @@ __host__ __device__ glm::vec3 sampleTexture(
     const TextureInfo& ti,
     glm::vec2 uv);
 
-/**
- * Sample a procedural checkerboard texture at a UV coordinate.
- *
- * An 8×8 grid of alternating squares: bright squares use `base`, dark
- * squares use `base * 0.25f` — the pattern reads clearly while keeping the
- * material's hue.  The grid repeats every 1.0 in uv (period 8 cells).
- *
- * @param uv    Texture coordinate
- * @param base  Material albedo the checker is derived from
- * @return      base (bright cell) or base * 0.25f (dark cell)
- */
-__host__ __device__ glm::vec3 sampleCheckerboard(
-    glm::vec2 uv,
-    const glm::vec3& base);
+// ---- Unified metallic-roughness GGX surface (the PBR path) ---------------
 
-/**
- * Resolve the Phong-lobe exponent + precomputed 1/(exponent+1) for a hit.
- *
- * Roughness source chain — first hit wins:
- *   1. ORM texture G channel (per-texel, when `tex.metallicRoughness` is bound)
- *   2. explicit JSON ROUGHNESS  (`m.specular.roughness >= 0`)
- *   3. glTF `pbrMetallicRoughness.roughnessFactor`  (`tex.roughnessFactor >= 0`)
- *   4. fixed default 0.5 (medium gloss) — an incomplete model must not
- *      silently become a perfect mirror
- *
- * r below ROUGHNESS_THRESHOLD yields a perfect mirror (exponent = -1).
- * Mirrors the loader's ROUGHNESS conversion (2/r² − 2) exactly for every
- * source.  The ORM texture is a data map (srgb=false), so its G channel is
- * already linear [0,1].
- *
- * `metallic` is the ORM B channel, read and RESERVED for a future PBR BRDF —
- * the Lambert/Phong model has no metallic concept, so the caller currently
- * ignores it.
- *
- * @return true when the ORM texture drove the result, false when a scalar
- *         source (JSON / glTF factor / default) is authoritative.
- */
-__host__ __device__ bool resolveGlossyExponent(
-    float& exponent, float& invExpPlusOne, float& metallic,
+// Schlick Fresnel with per-channel F0: F0 + (1−F0)(1−cosθ)⁵.  Handles both
+// conductors (F0 = metal tint from baseColor) and dielectrics (F0 ≈ 0.04);
+// the (1−cos)⁵ is computed with explicit multiplies (never powf) to stay
+// fast-math friendly, matching the scalar fresnelSchlick.
+__host__ __device__ glm::vec3 fresnelSchlickF0(float cosTheta, const glm::vec3& F0);
+
+// Rec.709 relative luminance — used for the diffuse/specular split probability.
+__host__ __device__ float luminance(const glm::vec3& c);
+
+// Separable Smith masking-shadowing for GGX (glTF form): alpha = roughness².
+// G1(v) = 2(N·v) / ((N·v) + sqrt(alpha² + (1−alpha²)(N·v)²)).
+__host__ __device__ float smithG1Ggx(float alpha, float NdotV);
+
+// GGX normal-distribution function (for the energy integral test; the sampling
+// path needs it only implicitly — it cancels in the weight).
+__host__ __device__ float ggxD(float alpha, float NdotH);
+
+// Importance-sample the GGX NDF's half-vector: cosθh = sqrt((1−ξ₁)/(1+(α²−1)ξ₁)),
+// φ = 2π·ξ₂, in an ONB around `normal`.  α→0 collapses to H→N (a perfect mirror).
+__host__ __device__ glm::vec3 sampleGgxHalfVector(const glm::vec3& normal, float alpha, RngState& rng);
+
+// Resolve the diffuse albedo.  Source chain — first hit wins:
+//   glTF baseColor texture (tex.baseColor, × baseColorFactor) >
+//   JSON-declared Material::textureId >
+//   flat material color m.color.
+__host__ __device__ glm::vec3 resolveBaseColor(
+    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const Material& m);
+
+// Resolve the per-hit GGX surface parameters for a Reflective / Pbr material.
+//
+// Roughness source chain — first hit wins:
+//   1. ORM texture G channel (per-texel, when `tex.metallicRoughness` is bound)
+//   2. explicit JSON ROUGHNESS  (`m.specular.roughness >= 0`)
+//   3. glTF `pbrMetallicRoughness.roughnessFactor`  (`tex.roughnessFactor >= 0`)
+//   4. fixed default 0.5 (medium gloss) — an incomplete model must not
+//      silently become a perfect mirror
+// Metallic source chain:
+//   1. ORM texture B channel (per-texel)
+//   2. explicit JSON METALLIC  (`m.metallic >= 0`)
+//   3. glTF `pbrMetallicRoughness.metallicFactor`  (`tex.metallicFactor >= 0`)
+//   4. type default — Reflective (legacy JSON Specular) = 1.0 (chrome),
+//      Pbr = 0.0 (dielectric)
+//
+// baseColor role per type: Reflective uses specular.color as the metal tint;
+// Pbr resolves the albedo (baseColor texture / material color).  From those:
+//   alpha = r² ;  F0 = mix(0.04, baseColor, metallic) ;
+//   diffuseColor = baseColor·(1 − metallic)
+// The ORM texture is a data map (srgb=false), so G/B are already linear [0,1].
+__host__ __device__ void resolvePbrSurfaceParams(
+    float& roughness, float& metallic, float& alpha, glm::vec3& F0, glm::vec3& diffuseColor,
     const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m);
 

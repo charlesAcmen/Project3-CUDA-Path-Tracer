@@ -235,32 +235,103 @@ __host__ __device__ glm::vec3 sampleTexture(
     return top + fy * (bot - top);
 }
 
-__host__ __device__ glm::vec3 sampleCheckerboard(
-    glm::vec2 uv,
-    const glm::vec3& base)
+// ---- Unified metallic-roughness GGX surface (the PBR path) ---------------
+// v2.0: replaces the v1.0 Phong lobe (archived in legacy_phong_v1.cuh — NOT
+// called here).  The old Phong lobe (cosine-power lobe × flat specular color)
+// was not energy-conserving and split diffuse/specular into mutually-exclusive
+// material types.  This replaces it with a microfacet BRDF — GGX NDF +
+// separable Smith geometry + Schlick Fresnel (F0 parameterized) — sampled via
+// the GGX half-vector, where diffuse and specular are drawn probabilistically
+// and each weight divided by its branch probability (unbiased mixture).
+
+__host__ __device__ glm::vec3 fresnelSchlickF0(float cosTheta, const glm::vec3& F0)
 {
-    // 8×8 grid: which cell are we in?
-    const int u = (int)floorf(uv.x * 8.0f);
-    const int v = (int)floorf(uv.y * 8.0f);
-    // Checker parity: (u+v) even → bright, odd → dark.  % 2 preserves parity
-    // under C++'s truncate-toward-zero even for negative (u+v), so negative
-    // uv stays a consistent checker too.
-    return (((u + v) % 2) == 0) ? base : base * 0.25f;
+    const float c  = fminf(fmaxf(cosTheta, 0.0f), 1.0f);
+    const float omc = 1.0f - c;
+    const float omc2 = omc * omc;
+    const float omc5 = omc2 * omc2 * omc;   // explicit multiplies — never powf
+    return F0 + (1.0f - F0) * omc5;
 }
 
-// Resolve the Phong-lobe exponent + precomputed 1/(exponent+1) for a hit.
-// A bound metallicRoughness texture (glTF ORM: G = roughness, B = metallic; a
-// data map loaded raw, so both are already linear [0,1]) overrides the
-// material's JSON roughness scalar; r below ROUGHNESS_THRESHOLD yields a
-// perfect mirror (exponent = -1).  Mirrors the loader's ROUGHNESS conversion
-// (2/r² − 2) exactly, so a texture-driven hit behaves like the JSON scalar did.
-//
-// `metallic` is the ORM B channel, read and RESERVED for a future PBR BRDF —
-// the Lambert/Phong model has no metallic concept, so the caller currently
-// ignores it.  Returns whether the ORM slot drove the result (false = the
-// material scalar is authoritative).
-__host__ __device__ bool resolveGlossyExponent(
-    float& exponent, float& invExpPlusOne, float& metallic,
+__host__ __device__ float luminance(const glm::vec3& c)
+{
+    return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+}
+
+__host__ __device__ float smithG1Ggx(float alpha, float NdotV)
+{
+    // Separable Smith masking-shadowing (glTF GGX form), alpha = roughness².
+    const float a2 = alpha * alpha;
+    const float ndv = fmaxf(NdotV, 0.0f);
+    return (2.0f * ndv) / (ndv + sqrtf(a2 + (1.0f - a2) * ndv * ndv));
+}
+
+__host__ __device__ float ggxD(float alpha, float NdotH)
+{
+    // GGX NDF: α² / (π ((N·H)²(α²−1) + 1)²).  Used by the energy test; the
+    // sampling weight cancels it (see the specular branch in scatterRay).
+    const float a2 = alpha * alpha;
+    const float t  = NdotH * NdotH * (a2 - 1.0f) + 1.0f;
+    return a2 / (PI * t * t);
+}
+
+__host__ __device__ glm::vec3 sampleGgxHalfVector(const glm::vec3& normal, float alpha, RngState& rng)
+{
+    // Importance-sample the GGX NDF half-vector.  Inverse-CDF of D(θ):
+    //   cosθh² = (1−ξ₁) / (1 + (α²−1)ξ₁)   →  α→0 ⇒ cosθh→1 ⇒ H→N (mirror),
+    //   α=1 ⇒ cosθh = sqrt(1−ξ₁) (cosine distribution).
+    const float xi1 = rng.next(HaltonDim::SpecularTheta);
+    const float xi2 = rng.next(HaltonDim::SpecularPhi);
+    const float a2  = alpha * alpha;
+    const float cosThetaSq = (1.0f - xi1) / (1.0f + (a2 - 1.0f) * xi1);
+    const float cosTheta  = sqrtf(fmaxf(cosThetaSq, 0.0f));
+    const float sinTheta  = sqrtf(fmaxf(1.0f - cosTheta * cosTheta, 0.0f));
+    const float phi       = TWO_PI * xi2;
+
+    glm::vec3 tangent, bitangent;
+    buildOrthonormalBasis(normal, tangent, bitangent);
+    return glm::normalize(sinTheta * cosf(phi) * tangent +
+                          sinTheta * sinf(phi) * bitangent +
+                          cosTheta  * normal);
+}
+
+// Resolve the diffuse albedo.  Source chain — first hit wins:
+//   glTF baseColor texture (tex.baseColor, × baseColorFactor) >
+//   JSON-declared Material::textureId >
+//   flat material color m.color.
+__host__ __device__ glm::vec3 resolveBaseColor(
+    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const Material& m)
+{
+    int bid = tex.baseColor;
+    if (bid < 0) bid = m.textureId;
+    glm::vec3 albedo = m.color;
+    if (bid >= 0)
+    {
+        albedo = sampleTexture(textures.pixels, textures.infos[bid], uv * m.uvScale);
+        // glTF semantics: baseColor = texture.rgb · baseColorFactor.  The
+        // factor applies only when the winning slot is the glTF baseColor
+        // binding (tex.baseColor), not a JSON-declared TEXTURE.
+        if (tex.baseColor >= 0)
+            albedo *= glm::vec3(tex.baseColorFactor);
+    }
+    else if (tex.roughnessFactor >= 0.0f)
+    {
+        // glTF material whose color is factor-only (no baseColorTexture):
+        // baseColorFactor IS the glTF material's own tint (e.g. the flat
+        // red/yellow spheres in transmission_test).  Only glTF triangles
+        // carry roughnessFactor >= 0 (OBJ keeps the -1 sentinel), so the
+        // scene JSON color still governs plain meshes.
+        albedo = glm::vec3(tex.baseColorFactor);
+    }
+    return albedo;
+}
+
+// Resolve the per-hit GGX surface parameters for a Reflective / Pbr material
+// (chains documented in interactions.h).  `roughness` (r) drives the mirror
+// threshold and α; `alpha`, `F0`, `diffuseColor` feed the BRDF directly.
+__host__ __device__ void resolvePbrSurfaceParams(
+    float& roughness, float& metallic, float& alpha, glm::vec3& F0, glm::vec3& diffuseColor,
     const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m)
 {
@@ -268,39 +339,46 @@ __host__ __device__ bool resolveGlossyExponent(
     //   ORM texture G (per-texel) → JSON ROUGHNESS → glTF roughnessFactor
     //   → fixed default 0.5 (incomplete models must not silently become mirrors)
     float r;
-    metallic = 0.0f;
-    const bool fromTexture = tex.metallicRoughness >= 0;
-    if (fromTexture)
+    if (tex.metallicRoughness >= 0)
     {
+        // ORM texture drives BOTH channels per-texel (a data map, already linear).
+        // glTF spec: final value = texture × factor.  The factor defaults to
+        // 1.0 (via cgltf) when the file omits it, so the multiply is a no-op
+        // for files that only have a texture.  A -1 sentinel means this is not
+        // a glTF material (plain OBJ) — treat as factor 1.
         const glm::vec3 orm = sampleTexture(textures.pixels,
                                             textures.infos[tex.metallicRoughness],
                                             uv * m.uvScale);
-        metallic = orm.z;                                  // B = metallic (reserved)
-        r        = glm::clamp(orm.y, 0.0f, 1.0f);          // G = roughness
-    }
-    else if (m.specular.roughness >= 0.0f)
-    {
-        r = m.specular.roughness;                          // explicit JSON ROUGHNESS
-    }
-    else if (tex.roughnessFactor >= 0.0f)
-    {
-        r = tex.roughnessFactor;                           // glTF roughnessFactor
+        const float rFactor = (tex.roughnessFactor >= 0.0f) ? tex.roughnessFactor : 1.0f;
+        const float mFactor = (tex.metallicFactor  >= 0.0f) ? tex.metallicFactor  : 1.0f;
+        metallic = glm::clamp(orm.z * mFactor, 0.0f, 1.0f);  // B = metallic × factor
+        r        = glm::clamp(orm.y * rFactor, 0.0f, 1.0f);  // G = roughness × factor
     }
     else
     {
-        r = 0.5f;                                          // fixed default (medium gloss)
+        // Roughness source — first hit wins: JSON ROUGHNESS > glTF factor > 0.5.
+        r = (m.specular.roughness >= 0.0f)     ? m.specular.roughness
+          : (tex.roughnessFactor >= 0.0f)      ? tex.roughnessFactor
+          : 0.5f;
+        // Metallic source — first hit wins: JSON METALLIC > glTF factor >
+        // type default (Reflective = chrome 1.0, Pbr = dielectric 0.0).
+        metallic = (m.metallic >= 0.0f)             ? m.metallic
+                 : (tex.metallicFactor >= 0.0f)     ? tex.metallicFactor
+                 : (m.type == MaterialType::Reflective) ? 1.0f : 0.0f;
     }
-    // Same conversion the loader applies to JSON ROUGHNESS:
-    //   r < ROUGHNESS_THRESHOLD → perfect mirror (exponent = -1)
-    //   otherwise Phong exponent 2/r² − 2, invExponentPlusOne = 1/(exponent+1).
-    if (r < ROUGHNESS_THRESHOLD) { exponent = -1.0f; invExpPlusOne = 0.0f; }
+
+    // baseColor role per type: legacy chrome uses specular.color as its metal
+    // tint (F0); the Pbr surface resolves the albedo like the diffuse branch.
+    glm::vec3 baseColor;
+    if (m.type == MaterialType::Reflective)
+        baseColor = m.specular.color;
     else
-    {
-        const float r2 = r * r;
-        exponent      = (2.0f / r2) - 2.0f;
-        invExpPlusOne = r2 / (2.0f - r2);              // one division, no 1/(x+1)
-    }
-    return fromTexture;
+        baseColor = resolveBaseColor(tex, textures, uv, m);
+
+    roughness     = r;
+    alpha         = r * r;
+    F0            = glm::mix(glm::vec3(0.04f), baseColor, metallic);
+    diffuseColor  = baseColor * (1.0f - metallic);
 }
 
 __host__ __device__ void scatterRay(
@@ -313,14 +391,14 @@ __host__ __device__ void scatterRay(
     // Scatter a ray according to the material's BSDF.
     // Diffuse: cosine-weighted hemisphere sampling.
     // Reflective / Pbr: 
-    //unified metallic-roughness(现代PBR最常见的材质工作流) 
-    //GGX(Ground Glass X,微平面法线分布,NDF) surface -
-    //smooth (r < ROUGHNESS_THRESHOLD) collapses to a single mirror
-    //lobe(when roughness draws close to 0,,NDF will draw close to 狄拉克函数
-    //,which will cause fireflies);otherwise a Fresnel-weighted(菲涅尔项) probabilistic split
-    //between a GGX half-vector(半角向量) specular lobe(高光波瓣) and the diffuse
-    //albedo(漫反射反照率), each weight divided by its branch probability(ensuring unbiased).
-    //Refractive: Fresnel-weighted Russian roulette between reflection and
+    //   Unified metallic-roughness PBR workflow.
+    //   GGX microfacet NDF surface (Trowbridge-Reitz variant, Walter et al. 2007):
+    //   - Smooth surfaces (r < ROUGHNESS_THRESHOLD): collapse to a mirror lobe
+    //     to avoid numerical instability where NDF approaches a Dirac delta.
+    //   - Rough surfaces: Fresnel-weighted probabilistic split between GGX
+    //     half-vector specular reflection and diffuse Lambert reflection,
+    //     with unbiased throughput compensation (divided by branch probability).
+    // Refractive: Fresnel-weighted Russian roulette between reflection and
     //             refraction (glm::refract), with normal flipped for exit rays.
 
     // The hit record carries everything the scatter needs; unpack it here so
@@ -419,34 +497,92 @@ __host__ __device__ void scatterRay(
         case MaterialType::Reflective:
         case MaterialType::Pbr:
         {
-            // Per-texel roughness: a bound glTF metallicRoughness texture
-            // (G channel) overrides the JSON material's uniform scalar; falls
-            // back to it when unbound.  `metallic` (ORM B channel) is read but
-            // RESERVED for a future PBR BRDF — not consumed by Phong.
-            float exponent, invExpPlusOne, metallic;
-            resolveGlossyExponent(exponent, invExpPlusOne, metallic,
-                                  tex, textures, uv, m);
+            // Unified metallic-roughness GGX surface (legacy JSON Specular →
+            // Reflective is just the metallic=1 chrome case).  Resolve the
+            // per-hit surface params: roughness (mirror threshold below
+            // ROUGHNESS_THRESHOLD), alpha = r², conductor F0, diffuse albedo.
+            float r, metallic, alpha;
+            glm::vec3 F0, diffuseColor;
+            resolvePbrSurfaceParams(r, metallic, alpha, F0, diffuseColor, tex, textures, uv, m);
 
-            glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, shadingNormal);
+            const float NdotV      = glm::clamp(glm::dot(shadingNormal, -rayDir), 1e-4f, 1.0f);
+            const glm::vec3 F_view = fresnelSchlickF0(NdotV, F0);
+            // Diffuse/specular split probability from the graze Fresnel, so a
+            // surface that is mostly specular (metal, or dielectric at grazing
+            // angles) spends most samples on the specular lobe.  Clamped so
+            // both branch weights stay bounded (unbiased mixture — the divide
+            // cancels the probability regardless of the clamp).
+            const float specProb  = glm::clamp(luminance(F_view), 0.05f, 0.95f);
+
             glm::vec3 scatterDir;
+            glm::vec3 throughput;
 
-            if (exponent >= 0.0f)
+            if (r < ROUGHNESS_THRESHOLD && metallic > 0.5f)
             {
-                // Glossy specular (imperfect specular)
-                glm::vec3 candidate = samplePhongSpecularDir(reflectedDir, exponent, invExpPlusOne, rng);
-                // Ensure the ray goes outward from the surface, otherwise fallback to perfect reflection
-                scatterDir = (glm::dot(candidate, shadingNormal) > 0.0f) ? candidate : reflectedDir;
+                // Smooth metal: a single mirror lobe — F0 ≈ baseColor, so
+                // virtually all energy is in the specular reflection.  The
+                // diffuse term is negligible (diffuseColor ≈ 0 for metallic ≈ 1).
+                scatterDir = glm::reflect(rayDir, shadingNormal);
+                throughput = fresnelSchlickF0(NdotV, F0);
+            }
+            else if (r < ROUGHNESS_THRESHOLD)
+            {
+                // Smooth dielectric: F0 ≈ 0.04, so most energy is diffuse.
+                // Use the same probabilistic split as rough surfaces — specular
+                // = mirror reflect with probability specProb, diffuse with
+                // 1−specProb.  This avoids the old shortcut that dropped ~96%
+                // of the energy for smooth dielectrics.
+                if (rng.next(HaltonDim::PbrSplit) < specProb)
+                {
+                    scatterDir = glm::reflect(rayDir, shadingNormal);
+                    throughput = fresnelSchlickF0(NdotV, F0) / specProb;
+                }
+                else
+                {
+                    scatterDir = calculateRandomDirectionInHemisphere(shadingNormal, rng);
+                    throughput = diffuseColor * (glm::vec3(1.0f) - F_view) / (1.0f - specProb);
+                }
+            }
+            else if (rng.next(HaltonDim::PbrSplit) < specProb)   // dim 10 (prime 31): GGX split
+            {
+                // Specular: importance-sample the GGX half-vector H, reflect
+                // the view about it.  The NDF and the cos(N·L) cancel out of
+                // the weight (D·(N·H)/(4·(V·H)) appears in both f and pdf):
+                //   f = F·G·D/(4·(N·V)(N·L)) ,  pdf = D·(N·H)/(4·(V·H))
+                //   weight = f·(N·L)/pdf = F·G·(V·H)/((N·V)·(N·H))
+                const glm::vec3 H   = sampleGgxHalfVector(shadingNormal, alpha, rng);
+                scatterDir = glm::reflect(rayDir, H);
+                if (glm::dot(shadingNormal, scatterDir) > 0.0f)
+                {
+                    const float NdotL = glm::clamp(glm::dot(shadingNormal, scatterDir), 0.0f, 1.0f);
+                    const float NdotH = glm::max(glm::dot(shadingNormal, H), 1e-4f);
+                    const float VdotH = glm::max(glm::dot(-rayDir, H), 0.0f);
+                    const float G = smithG1Ggx(alpha, NdotV) * smithG1Ggx(alpha, NdotL);
+                    const glm::vec3 F = fresnelSchlickF0(VdotH, F0);
+                    throughput = F * (G * VdotH / (NdotV * NdotH)) / specProb;
+                }
+                else
+                {
+                    // Below-surface sample (lobe backfacing the surface):
+                    // zero weight, but scatter the mirror reflection so the
+                    // path survives for Russian roulette to terminate it.
+                    scatterDir = glm::reflect(rayDir, shadingNormal);
+                    throughput = glm::vec3(0.0f);
+                }
             }
             else
             {
-                // exponent < 0 (i.e. -1.0f): Perfect specular mirror
-                scatterDir = reflectedDir;
+                // Diffuse (probability 1 − specProb).  albedo is already
+                // scaled by (1 − metallic); the per-channel (1 − F_view)
+                // complement ensures specular + diffuse conserve energy.
+                scatterDir = calculateRandomDirectionInHemisphere(shadingNormal, rng);
+                throughput = diffuseColor * (glm::vec3(1.0f) - F_view) / (1.0f - specProb);
             }
 
+            pathSegment.color *= throughput;
             float offsetSign = glm::dot(scatterDir, shadingNormal) > 0.0f ? 1.0f : -1.0f;
             pathSegment.ray.origin = intersect + shadingNormal * (EPSILON * offsetSign);
             pathSegment.ray.direction = scatterDir;
-            pathSegment.color *= m.specular.color;
             break;
         }
         case MaterialType::Diffuse:
@@ -462,15 +598,8 @@ __host__ __device__ void scatterRay(
 
             // Resolve the diffuse albedo: a per-triangle glTF baseColor binding
             // wins over the JSON-declared Material::textureId, then over the
-            // flat material color.  Only the diffuse branch samples textures —
-            // mirror/glass keep their material color (a texture on them is
-            // bound but unused this milestone).
-            int bid = tex.baseColor;
-            if (bid < 0) bid = m.textureId;
-            glm::vec3 albedo = m.color;
-            if (bid == kCheckerboardTextureId)             albedo = sampleCheckerboard(uv, m.color);
-            else if (bid >= 0)                             albedo = sampleTexture(textures.pixels, textures.infos[bid], uv * m.uvScale);
-            pathSegment.color *= albedo;
+            // flat material color.
+            pathSegment.color *= resolveBaseColor(tex, textures, uv, m);
             break;
         }
     }

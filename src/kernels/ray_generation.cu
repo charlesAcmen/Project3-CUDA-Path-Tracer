@@ -27,7 +27,15 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         //   dim 1 (prime 3)  = AA jitter y
         //   dim 2 (prime 5)  = lens aperture u  (only when DoF is active)
         //   dim 3 (prime 7)  = lens aperture v  (only when DoF is active)
-        RngState rng = makeRngState(iter, index, 0, rngMode);
+        // depth = -1: a sentinel distinct from every bounce's
+        // bounceNum * MAX_DRAWS_PER_BOUNCE encoding.  Bounce-0 shading uses
+        // depth 0, so a 0 here would give the LCG branch the EXACT same seed
+        // as the first-bounce scatter RNG → AA jitter and bounce-0 BSDF draws
+        // become 100% correlated (a regression from the old
+        // descending-remainingBounces schedule).  -1 keeps the primary-ray
+        // stream independent in LCG mode; Halton is unaffected either way
+        // (different dims already produce different Owen seeds).
+        RngState rng = makeRngState(iter, index, -1, rngMode);
 
         // Anti-aliasing: stochastic sub-pixel jitter
         float jitterX = rng.next(HaltonDim::AaJitterX) - 0.5f;
