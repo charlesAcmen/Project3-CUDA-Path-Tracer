@@ -171,26 +171,10 @@ static void testResolvePbrSurfaceParams()
               "ORM B=0.5 → F0=mix(0.04,base,0.5), diffuse=base·0.5");
     }
 
-    // ---- Unbound: JSON ROUGHNESS + METALLIC win over the glTF factors ----
+    // ---- Unbound: glTF factors govern roughness and metallic ----
     {
         Material m; m.type = MaterialType::Pbr;
-        m.color = ALBEDO; m.specular.roughness = 0.2f; m.metallic = 0.5f;
-        m.uvScale = 1.0f;
-        TextureBinding tex;                 // no textures, but glTF factors set
-        tex.roughnessFactor = 0.9f; tex.metallicFactor = 0.8f;
-        resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
-                                glm::vec2(0.25f, 0.25f), m);
-        check(std::fabs(alpha - 0.04f) < 1e-6f,
-              "unbound: JSON ROUGHNESS 0.2 > glTF 0.9 → alpha=0.04");
-        check(closeTo(F0, glm::mix(D3, ALBEDO, 0.5f)) &&
-              closeTo(diff, ALBEDO * 0.5f),
-              "unbound: JSON METALLIC 0.5 > glTF 0.8 → F0=mix, diffuse=base·0.5");
-    }
-
-    // ---- Unbound: glTF factors when JSON leaves both unspecified ----
-    {
-        Material m; m.type = MaterialType::Pbr;
-        m.color = ALBEDO; m.uvScale = 1.0f;    // roughness, metallic stay -1
+        m.color = ALBEDO; m.uvScale = 1.0f;
         TextureBinding tex;
         tex.roughnessFactor = 0.9f; tex.metallicFactor = 0.7f;
         resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
