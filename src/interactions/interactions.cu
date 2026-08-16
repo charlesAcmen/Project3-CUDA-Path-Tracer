@@ -517,21 +517,28 @@ __host__ __device__ void scatterRay(
             glm::vec3 scatterDir;
             glm::vec3 throughput;
 
-            if (r < ROUGHNESS_THRESHOLD && metallic > 0.5f)
+            if (r < ROUGHNESS_THRESHOLD && metallic > PBR_MIRROR_METALLIC_THRESHOLD)
             {
-                // Smooth metal: a single mirror lobe — F0 ≈ baseColor, so
-                // virtually all energy is in the specular reflection.  The
-                // diffuse term is negligible (diffuseColor ≈ 0 for metallic ≈ 1).
+                // Type: Reflective chrome (metallic = 1) / Pbr metallic > 0.95, smooth.
+                // Near-pure metal: a single mirror lobe — F0 ≈ baseColor
+                // and diffuseColor = baseColor·(1−metallic) is < 5% of the albedo,
+                // so virtually all energy is in the specular reflection.  Below
+                // the threshold the diffuse term is NOT negligible (e.g. metallic
+                // 0.6 → 40% diffuse albedo); collapsing those to a mirror would
+                // silently drop the diffuse lobe, so they fall through to the
+                // specular/diffuse split below.
                 scatterDir = glm::reflect(rayDir, shadingNormal);
                 throughput = fresnelSchlickF0(NdotV, F0);
             }
             else if (r < ROUGHNESS_THRESHOLD)
             {
-                // Smooth dielectric: F0 ≈ 0.04, so most energy is diffuse.
-                // Use the same probabilistic split as rough surfaces — specular
-                // = mirror reflect with probability specProb, diffuse with
-                // 1−specProb.  This avoids the old shortcut that dropped ~96%
-                // of the energy for smooth dielectrics.
+                // Type: Pbr, metallic ≤ 0.95 (smooth dielectric / mid metal).
+                // F0 ≈ 0.04, so most energy is diffuse.  Same probabilistic
+                // split as rough surfaces — specular = mirror reflect with
+                // probability specProb, diffuse with 1−specProb.  This avoids
+                // the old shortcut that dropped ~96% of the energy for smooth
+                // dielectrics (and the mirror shortcut above dropping mid-metal
+                // diffuse energy).
                 if (rng.next(HaltonDim::PbrSplit) < specProb)
                 {
                     scatterDir = glm::reflect(rayDir, shadingNormal);
@@ -545,7 +552,8 @@ __host__ __device__ void scatterRay(
             }
             else if (rng.next(HaltonDim::PbrSplit) < specProb)   // dim 10 (prime 31): GGX split
             {
-                // Specular: importance-sample the GGX half-vector H, reflect
+                // rough — specular half (prob specProb).
+                // Importance-sample the GGX half-vector H, reflect
                 // the view about it.  The NDF and the cos(N·L) cancel out of
                 // the weight (D·(N·H)/(4·(V·H)) appears in both f and pdf):
                 //   f = F·G·D/(4·(N·V)(N·L)) ,  pdf = D·(N·H)/(4·(V·H))
@@ -572,9 +580,10 @@ __host__ __device__ void scatterRay(
             }
             else
             {
-                // Diffuse (probability 1 − specProb).  albedo is already
-                // scaled by (1 − metallic); the per-channel (1 − F_view)
-                // complement ensures specular + diffuse conserve energy.
+                // rough — diffuse half (prob 1 − specProb).
+                // Albedo is already scaled by (1 − metallic); the per-channel
+                // (1 − F_view) complement ensures specular + diffuse conserve
+                // energy.
                 scatterDir = calculateRandomDirectionInHemisphere(shadingNormal, rng);
                 throughput = diffuseColor * (glm::vec3(1.0f) - F_view) / (1.0f - specProb);
             }

@@ -20,6 +20,13 @@
 // between all three.
 #define REFRACT_VALID_SQ_LEN_MIN 0.5f
 #define ROUGHNESS_THRESHOLD 0.001f
+// A smooth (r < ROUGHNESS_THRESHOLD) GGX surface with metallic above this
+// value collapses to a single mirror lobe.  Below it the diffuse albedo
+// (diffuseColor = baseColor·(1−metallic)) is non-negligible — at metallic 0.5
+// that's half the albedo — so those surfaces must go through the specular/
+// diffuse split in scatterRay or the diffuse lobe is silently dropped.
+// 0.95 bounds the mirror-shortcut energy loss to ~(1−metallic)² ≈ 0.25%.
+#define PBR_MIRROR_METALLIC_THRESHOLD 0.95f
 // Type-default roughness used when a material provides no roughness source
 // (see resolvePbrSurfaceParams): Reflective is a perfect mirror, Pbr is a
 // generic dielectric rough surface.
