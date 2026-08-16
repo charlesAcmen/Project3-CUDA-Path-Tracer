@@ -27,7 +27,7 @@
 
 #pragma once
 
-#include "glm/glm.hpp"
+#include <glm/glm.hpp>
 #include <cuda_runtime.h>
 
 // ---------------------------------------------------------------------------

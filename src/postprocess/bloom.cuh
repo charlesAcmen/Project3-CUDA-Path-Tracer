@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "glm/glm.hpp"
+#include <glm/glm.hpp>
 #include "constants.h"   // MAX_BLOOM_RADIUS, BLOOM_BLOCK_SIZE (shared with src/config.h)
 #include <cuda_runtime.h>
 #include <vector>

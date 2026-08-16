@@ -16,11 +16,9 @@
 
 #include <stb_image.h>   // stbi_load for PNG/JPG texture files
 
-#include <glm/gtc/matrix_inverse.hpp>
-#include <glm/gtc/matrix_transform.hpp>   // glm::translate / glm::scale (node TRS)
-#include <glm/gtc/quaternion.hpp>         // glm::mat4_cast (node rotation)
-#include <glm/gtc/type_ptr.hpp>           // glm::make_mat4 (node matrix)
-#include "json.hpp"
+#include <glm/gtc/matrix_inverse.hpp>   // glm::inverse / glm::inverseTranspose
+
+#include <json.hpp>
 
 #include <algorithm>
 #include <cctype>

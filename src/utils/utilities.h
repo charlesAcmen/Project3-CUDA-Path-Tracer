@@ -1,7 +1,7 @@
 #pragma once
 
 #include "constants.h"
-#include "glm/glm.hpp"
+#include <glm/glm.hpp>
 
 #include <string>
 

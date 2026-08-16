@@ -18,8 +18,8 @@
 #include <thrust/gather.h>
 #include <thrust/sequence.h>
 
-#include "glm/glm.hpp"
-#include "glm/gtx/norm.hpp"
+#include <glm/glm.hpp>
+#include <glm/gtx/norm.hpp>
 
 #include "intersection/intersections.h"   // getExactPointOnRay, concentricSampleDisk
 #include "interactions/interactions.h"    // scatterRay, fresnel*, classifyRefraction

@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-#include "json.hpp"
+#include <json.hpp>
 
 // ---- Post-processing sub-configs ---------------------------------------
 

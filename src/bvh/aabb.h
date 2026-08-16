@@ -11,7 +11,7 @@
 #include "sceneStructs.h"   // Triangle
 #include "constants.h"      // RAY_EPSILON
 
-#include "glm/glm.hpp"
+#include <glm/glm.hpp>
 
 #include <cfloat>   // FLT_MAX
 #include <cmath>    // host fmaxf/fminf (device versions come from CUDA)
