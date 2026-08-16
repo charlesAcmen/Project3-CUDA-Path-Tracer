@@ -336,7 +336,8 @@ __host__ __device__ void resolvePbrSurfaceParams(
     const Material& m)
 {
     // Roughness source — first hit wins, priority is the read order:
-    //   ORM texture G (per-texel) → glTF roughnessFactor → type default (Reflective: 0.0, Pbr: 0.5)
+    //   ORM texture G (per-texel) → glTF roughnessFactor → type default
+    //   (REFLECTIVE_ROUGHNESS_DEFAULT / PBR_ROUGHNESS_DEFAULT)
     float r;
     if (tex.metallicRoughness >= 0)
     {
@@ -355,9 +356,11 @@ __host__ __device__ void resolvePbrSurfaceParams(
     }
     else
     {
-        // Roughness source — first hit wins: glTF factor > type default (Reflective=0.0 mirror, Pbr=0.5).
+        // Roughness source — first hit wins: glTF factor > type default
+        // (Reflective = perfect mirror, Pbr = generic rough dielectric).
         r = (tex.roughnessFactor >= 0.0f) ? tex.roughnessFactor
-          : (m.type == MaterialType::Reflective ? 0.0f : 0.5f);
+          : (m.type == MaterialType::Reflective ? REFLECTIVE_ROUGHNESS_DEFAULT
+                                                : PBR_ROUGHNESS_DEFAULT);
         // Metallic source — first hit wins: glTF factor >
         // type default (Reflective = chrome 1.0, Pbr = dielectric 0.0).
         metallic = (tex.metallicFactor >= 0.0f) ? tex.metallicFactor

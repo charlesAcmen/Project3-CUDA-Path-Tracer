@@ -20,6 +20,11 @@
 // between all three.
 #define REFRACT_VALID_SQ_LEN_MIN 0.5f
 #define ROUGHNESS_THRESHOLD 0.001f
+// Type-default roughness used when a material provides no roughness source
+// (see resolvePbrSurfaceParams): Reflective is a perfect mirror, Pbr is a
+// generic dielectric rough surface.
+#define REFLECTIVE_ROUGHNESS_DEFAULT 0.0f
+#define PBR_ROUGHNESS_DEFAULT        0.5f
 #define RR_P_MIN          0.2f
 #define RR_P_MAX          1.0f
 #define LARGE_T           1e30f       // sentinel > any valid ray–scene intersection
