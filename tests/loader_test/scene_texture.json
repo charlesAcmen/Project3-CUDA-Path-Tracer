@@ -1,12 +1,12 @@
 {
   "Materials": {
-    "checker": { "TYPE": "Diffuse", "RGB": [0.8, 0.6, 0.4], "TEXTURE": "checkerboard", "UV_SCALE": 2.0 }
+    "mat": { "TYPE": "Diffuse", "RGB": [0.8, 0.6, 0.4], "TEXTURE": "missing.png", "UV_SCALE": 2.0 }
   },
   "Objects": [
     {
       "TYPE": "mesh",
       "FILE": "assets/cube_embed.gltf",
-      "MATERIAL": "checker",
+      "MATERIAL": "mat",
       "TRANS": [0, 0, 0],
       "ROTAT": [0, 0, 0],
       "SCALE": [1, 1, 1]

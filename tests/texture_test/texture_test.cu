@@ -4,8 +4,8 @@
  *
  * Compiles with nvcc as a pure host program (no kernel launches), like
  * rng_test.  Includes the real interactions/interactions.h and exercises
- * the actual `__host__ __device__` sampleTexture / sampleCheckerboard
- * implementations from CPU code — a kernel launch would test the same
+ * the actual `__host__ __device__` sampleTexture implementation from CPU
+ * code — a kernel launch would test the same
  * arithmetic, just slower to debug.
  *
  * Usage:
@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cmath>
 #include <vector>
+#include <algorithm>
 
 // -----------------------------------------------------------------------
 // Check harness — same shape as loader_test / bvh_test
@@ -96,141 +97,259 @@ static void testSampleTexture()
 }
 
 // -----------------------------------------------------------------------
-// sampleCheckerboard — 8×8 grid derived from the base color
+// resolvePbrSurfaceParams — unified metallic-roughness GGX surface params
 // -----------------------------------------------------------------------
-static void testSampleCheckerboard()
+static void testResolvePbrSurfaceParams()
 {
-    std::printf("=== sampleCheckerboard ===\n");
+    std::printf("=== resolvePbrSurfaceParams ===\n");
 
-    const glm::vec3 base(0.8f, 0.6f, 0.4f);
-    const glm::vec3 dark = base * 0.25f;
+    // 2×2 ORM texture (data map: G = roughness, B = metallic) + a 2×2
+    // baseColor texture with a distinct albedo at each corner.
+    //   ORM (slice 0):  (0,0) G=0.5 B=0.0     (1,0) G=0.5 B=1.0
+    //                   (0,1) G=1.0 B=0.0     (1,1) G=0.0 B=0.5
+    //   base (slice 1): (0,0) (0.8,0.2,0.1)   (1,0) (0.1,0.9,0.1)
+    //                   (0,1) (0.2,0.1,0.8)   (1,1) (0.9,0.9,0.9)
+    std::vector<glm::vec3> ormBuf(4);
+    ormBuf[0] = glm::vec3(0.0f, 0.50f, 0.00f);
+    ormBuf[1] = glm::vec3(0.0f, 0.50f, 1.00f);
+    ormBuf[2] = glm::vec3(0.0f, 1.00f, 0.00f);
+    ormBuf[3] = glm::vec3(0.0f, 0.0001f, 0.50f);
+    std::vector<glm::vec3> baseBuf(4);
+    baseBuf[0] = glm::vec3(0.8f, 0.2f, 0.1f);
+    baseBuf[1] = glm::vec3(0.1f, 0.9f, 0.1f);
+    baseBuf[2] = glm::vec3(0.2f, 0.1f, 0.8f);
+    baseBuf[3] = glm::vec3(0.9f, 0.9f, 0.9f);
 
-    // (0,0) is an even cell (u+v = 0) → base.
-    check(closeTo(sampleCheckerboard(glm::vec2(0.0f, 0.0f), base), base),
-          "(0,0) even cell → base");
-    // Adjacent cells flip parity in each axis.
-    check(closeTo(sampleCheckerboard(glm::vec2(0.125f, 0.0f), base), dark),
-          "(0.125,0) u+1 → dark");
-    check(closeTo(sampleCheckerboard(glm::vec2(0.0f, 0.125f), base), dark),
-          "(0,0.125) v+1 → dark");
-    // Diagonal is same parity as the origin.
-    check(closeTo(sampleCheckerboard(glm::vec2(0.125f, 0.125f), base), base),
-          "(0.125,0.125) diagonal → base");
-    // Last cell (u=7) is dark, so the 8-cell grid ends dark.
-    check(closeTo(sampleCheckerboard(glm::vec2(0.9375f, 0.0f), base), dark),
-          "(0.9375,0) u=7 last cell → dark");
+    std::vector<glm::vec3> tbl(8);      // ORM at offset 0, base at offset 4
+    std::copy(ormBuf.begin(), ormBuf.end(), tbl.begin());
+    std::copy(baseBuf.begin(), baseBuf.end(), tbl.begin() + 4);
+    std::vector<TextureInfo> infos = { TextureInfo{ 0, 2, 2 }, TextureInfo{ 4, 2, 2 } };
+    TextureTable table;
+    table.pixels = tbl.data();
+    table.infos  = infos.data();
+    table.count  = 2;
 
-    // Period 8 in uv: uv=1.125 is cell u=9, same parity as u=1.
-    check(closeTo(sampleCheckerboard(glm::vec2(1.125f, 0.0f), base), dark),
-          "(1.125,0) wraps to u=9 → dark (period 8)");
+    const glm::vec3 ALBEDO = baseBuf[0];   // the Pbr baseColor at (0,0)
+    const glm::vec3 D3(0.04f);             // dielectric F0
 
-    // Negative uv keeps consistent parity (C++ % preserves parity under
-    // truncate-toward-zero): (-0.0625,0) → u=-1 → dark; add v=1 → even → base.
-    check(closeTo(sampleCheckerboard(glm::vec2(-0.0625f, 0.0f), base), dark),
-          "(-0.0625,0) u=-1 → dark");
-    check(closeTo(sampleCheckerboard(glm::vec2(-0.0625f, 0.125f), base), base),
-          "(-0.0625,0.125) u+v=0 → base");
+    float r, alpha;
+    glm::vec3 F0, diff;
+
+    // ---- ORM bound: dielectric (B=0) — F0 = 0.04, full diffuse ----
+    {
+        Material m; m.type = MaterialType::Pbr; m.uvScale = 1.0f;
+        TextureBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
+        resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
+                                glm::vec2(0.0f, 0.0f), m);
+        check(std::fabs(r - 0.5f) < 1e-6f && std::fabs(alpha - 0.25f) < 1e-6f,
+              "ORM dielectric: G=0.5 → r=0.5, alpha=r²=0.25");
+        check(closeTo(F0, D3) && closeTo(diff, ALBEDO),
+              "ORM dielectric: B=0 → F0=0.04, diffuse=baseColor");
+    }
+
+    // ---- ORM bound: metal (B=1) — F0 = baseColor, no diffuse ----
+    {
+        Material m; m.type = MaterialType::Pbr; m.uvScale = 1.0f;
+        TextureBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
+        resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
+                                glm::vec2(0.5f, 0.0f), m);
+        check(std::fabs(r - 0.5f) < 1e-6f, "ORM metal: G=0.5 → r=0.5");
+        check(closeTo(F0, baseBuf[1]) && closeTo(diff, glm::vec3(0.0f)),
+              "ORM metal: B=1 → F0=baseColor, diffuse=0");
+    }
+
+    // ---- ORM bound: r below ROUGHNESS_THRESHOLD + metallic 0.5 ----
+    {
+        Material m; m.type = MaterialType::Pbr; m.uvScale = 1.0f;
+        TextureBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
+        resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
+                                glm::vec2(0.5f, 0.5f), m);
+        check(r < ROUGHNESS_THRESHOLD,
+              "ORM G=0.0001 < ROUGHNESS_THRESHOLD → mirror path");
+        check(closeTo(F0, glm::mix(D3, baseBuf[3], 0.5f)) &&
+              closeTo(diff, baseBuf[3] * 0.5f),
+              "ORM B=0.5 → F0=mix(0.04,base,0.5), diffuse=base·0.5");
+    }
+
+    // ---- Unbound: JSON ROUGHNESS + METALLIC win over the glTF factors ----
+    {
+        Material m; m.type = MaterialType::Pbr;
+        m.color = ALBEDO; m.specular.roughness = 0.2f; m.metallic = 0.5f;
+        m.uvScale = 1.0f;
+        TextureBinding tex;                 // no textures, but glTF factors set
+        tex.roughnessFactor = 0.9f; tex.metallicFactor = 0.8f;
+        resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
+                                glm::vec2(0.25f, 0.25f), m);
+        check(std::fabs(alpha - 0.04f) < 1e-6f,
+              "unbound: JSON ROUGHNESS 0.2 > glTF 0.9 → alpha=0.04");
+        check(closeTo(F0, glm::mix(D3, ALBEDO, 0.5f)) &&
+              closeTo(diff, ALBEDO * 0.5f),
+              "unbound: JSON METALLIC 0.5 > glTF 0.8 → F0=mix, diffuse=base·0.5");
+    }
+
+    // ---- Unbound: glTF factors when JSON leaves both unspecified ----
+    {
+        Material m; m.type = MaterialType::Pbr;
+        m.color = ALBEDO; m.uvScale = 1.0f;    // roughness, metallic stay -1
+        TextureBinding tex;
+        tex.roughnessFactor = 0.9f; tex.metallicFactor = 0.7f;
+        resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
+                                glm::vec2(0.25f, 0.25f), m);
+        check(std::fabs(alpha - 0.81f) < 1e-6f,
+              "unbound: glTF roughnessFactor 0.9 → alpha=0.81");
+        check(closeTo(F0, glm::mix(D3, ALBEDO, 0.7f)) &&
+              closeTo(diff, ALBEDO * 0.3f),
+              "unbound: glTF metallicFactor 0.7 → F0=mix, diffuse=base·0.3");
+    }
+
+    // ---- Type default: Reflective (legacy chrome) — metallic 1.0 ----
+    {
+        Material m; m.type = MaterialType::Reflective;
+        m.specular.color = glm::vec3(0.9f, 0.8f, 0.7f);   // chrome tint
+        m.uvScale = 1.0f;                                // no ROUGHNESS / METALLIC
+        TextureBinding unbound;                          // all slots -1
+        resolvePbrSurfaceParams(r, alpha, F0, diff, unbound, table,
+                                glm::vec2(0.25f, 0.25f), m);
+        check(closeTo(F0, m.specular.color) && closeTo(diff, glm::vec3(0.0f)),
+              "Reflective default: metallic=1 → F0=specular.color, diffuse=0 (chrome)");
+    }
+
+    // ---- Type default: Pbr — metallic 0.0, roughness 0.5, baseColor m.color ----
+    {
+        Material m; m.type = MaterialType::Pbr;
+        m.color = ALBEDO; m.uvScale = 1.0f;
+        TextureBinding unbound;
+        resolvePbrSurfaceParams(r, alpha, F0, diff, unbound, table,
+                                glm::vec2(0.25f, 0.25f), m);
+        check(std::fabs(r - 0.5f) < 1e-6f && std::fabs(alpha - 0.25f) < 1e-6f,
+              "Pbr default: roughness 0.5, alpha 0.25 (incomplete model not a mirror)");
+        check(closeTo(F0, D3) && closeTo(diff, ALBEDO),
+              "Pbr default: metallic=0 → F0=0.04, diffuse=baseColor");
+    }
+
+    // ---- baseColorFactor applies when the glTF baseColor slot wins ----
+    {
+        Material m; m.type = MaterialType::Pbr;
+        m.color = glm::vec3(1.0f, 0.0f, 0.0f);   // would win if no texture
+        m.uvScale = 1.0f;
+        TextureBinding tex; tex.baseColor = 1;
+        tex.baseColorFactor = glm::vec3(0.5f, 0.5f, 0.5f);
+        float rr, aa; glm::vec3 f0, dd;
+        resolvePbrSurfaceParams(rr, aa, f0, dd, tex, table,
+                                glm::vec2(0.0f, 0.0f), m);
+        check(closeTo(dd, baseBuf[0] * 0.5f),
+              "glTF baseColorFactor × texture → diffuse = texel·factor");
+    }
 
     std::printf("\n");
 }
 
 // -----------------------------------------------------------------------
-// resolveGlossyExponent — per-texel roughness from the ORM G channel
+// testPbrBrdf — Fresnel endpoints, GGX half-vector sampling, energy
 // -----------------------------------------------------------------------
-static void testResolveGlossyExponent()
+static void testPbrBrdf()
 {
-    std::printf("=== resolveGlossyExponent ===\n");
+    std::printf("=== testPbrBrdf ===\n");
 
-    // 2×2 ORM texture (a data map: G = roughness, B = metallic).  Each texel
-    // carries a distinct G so the four corners exercise every branch.
-    //   (0,0) r=0.00        (1,0) r=0.50
-    //   (0,1) r=1.00        (1,1) r=0.0005 (< ROUGHNESS_THRESHOLD)
-    std::vector<glm::vec3> buf(4);
-    buf[0] = glm::vec3(0.0f, 0.00f, 1.00f);   // smooth → mirror, metallic 1.0
-    buf[1] = glm::vec3(0.0f, 0.50f, 0.00f);   // glossy, metallic 0.0
-    buf[2] = glm::vec3(0.0f, 1.00f, 0.50f);   // max roughness, metallic 0.5
-    buf[3] = glm::vec3(0.0f, 0.0005f, 0.80f); // below threshold → mirror
+    const glm::vec3 D3(0.04f);
 
-    TextureInfo ti{ 0, 2, 2 };
-    TextureTable table;
-    table.pixels = buf.data();
-    table.infos  = &ti;
-    table.count  = 1;
+    // ---- Conductor Fresnel (Schlick) endpoints ----
+    check(closeTo(fresnelSchlickConductor(1.0f, D3), D3),
+          "Fresnel cos=1 → F0 (0.04)");
+    check(closeTo(fresnelSchlickConductor(0.0f, D3), glm::vec3(1.0f)),
+          "Fresnel cos=0 → 1.0 (grazing white-out)");
+    // cos=0.5 → 0.04 + 0.96·(0.5)⁵ = 0.04 + 0.96·0.03125 = 0.07.
+    const glm::vec3 mid = fresnelSchlickConductor(0.5f, D3);
+    check(std::fabs(mid.x - 0.07f) < 1e-6f,
+          "Fresnel cos=0.5 → 0.04 + 0.96·(0.5)⁵ = 0.07");
+    // Out-of-range cos clamps, never NaNs.
+    check(closeTo(fresnelSchlickConductor(5.0f, D3), D3) &&
+          closeTo(fresnelSchlickConductor(-5.0f, D3), glm::vec3(1.0f)),
+          "Fresnel clamps cos outside [0,1]");
 
-    Material m;                 // specular.roughness stays -1 (unspecified)
-    m.uvScale = 1.0f;
+    // ---- Smith G1 masking-shadowing ----
+    // α=0 → G1 = 2v/(v + sqrt(v²)) = 1 for any v>0 (perfectly smooth).
+    check(std::fabs(smithG1Ggx(0.0f, 1.0f) - 1.0f) < 1e-5f,
+          "G1(α=0, NdotV=1) → 1");
+    check(std::fabs(smithG1Ggx(0.0f, 1e-3f) - 1.0f) < 1e-5f,
+          "G1(α=0, grazing) → 1 (limit)");
+    // Roughness increases masking: G1 drops as α grows.
+    check(smithG1Ggx(0.25f, 0.5f) < smithG1Ggx(0.05f, 0.5f),
+          "G1 rougher → more masking (lower G1)");
+    // Grazing NdotV → G1 → 0 (a nearly-tangent ray is almost surely shadowed).
+    check(smithG1Ggx(0.25f, 1e-3f) < 1e-2f,
+          "G1 grazing NdotV → ≈ 0");
 
-    float exponent = 0.0f, invExp = 0.0f, metallic = -1.0f;
-
-    // ---- ORM bound: r=0 → perfect mirror ----
-    TextureBinding tex;
-    tex.metallicRoughness = 0;
-    bool drove = resolveGlossyExponent(exponent, invExp, metallic, tex, table,
-                                       glm::vec2(0.0f, 0.0f), m);
-    check(drove && exponent == -1.0f && invExp == 0.0f,
-          "r=0 texel → mirror (exponent -1, invExp 0)");
-    check(metallic == 1.0f, "B channel reserved: metallic read = 1.0");
-
-    // ---- ORM bound: r=0.5 → exponent 6, 1/(exponent+1) = 1/7 ----
-    resolveGlossyExponent(exponent, invExp, metallic, tex, table,
-                          glm::vec2(0.5f, 0.0f), m);
-    check(exponent == 6.0f, "r=0.5 texel → exponent 2/r² − 2 = 6");
-    check(std::fabs(invExp - (1.0f / 7.0f)) < 1e-6f,
-          "invExpPlusOne = 1/(exponent+1) = 1/7");
-    check(metallic == 0.0f, "B channel reserved: metallic read = 0.0");
-
-    // ---- ORM bound: r=1 → exponent 0 (max-roughness lobe) ----
-    resolveGlossyExponent(exponent, invExp, metallic, tex, table,
-                          glm::vec2(0.0f, 0.5f), m);
-    check(exponent == 0.0f && invExp == 1.0f,
-          "r=1 texel → exponent 0, invExp 1 (SPECULAR_EXPONENT_ZERO_EPSILON path)");
-    check(metallic == 0.5f, "B channel reserved: metallic read = 0.5");
-
-    // ---- ORM bound: r below ROUGHNESS_THRESHOLD → mirror ----
-    resolveGlossyExponent(exponent, invExp, metallic, tex, table,
-                          glm::vec2(0.5f, 0.5f), m);
-    check(exponent == -1.0f && invExp == 0.0f,
-          "r=0.0005 < ROUGHNESS_THRESHOLD → mirror");
-    check(metallic == 0.8f, "B channel reserved: metallic read = 0.8");
-
-    // ---- ORM unbound: JSON ROUGHNESS beats a glTF factor, reports false ----
-    // m.specular.roughness = 0.2 (explicit) must win over the mesh's glTF
-    // factor 0.9 → exponent 2/0.04 − 2 = 48.
+    // ---- GGX half-vector sampling ----
+    // α=0: cosθh² = (1−ξ)/(1+(0−1)ξ) = 1 ⇒ H == N exactly (perfect mirror H).
     {
-        Material mj = m;
-        mj.specular.roughness = 0.2f;
-        TextureBinding tb;                 // unbound slots; glTF factor 0.9
-        tb.roughnessFactor = 0.9f;
-        drove = resolveGlossyExponent(exponent, invExp, metallic, tb, table,
-                                      glm::vec2(0.25f, 0.25f), mj);
-        check(!drove && std::fabs(exponent - 48.0f) < 1e-5f &&
-              std::fabs(invExp - (0.04f / 1.96f)) < 1e-6f,
-              "unbound, JSON r=0.2 > glTF 0.9 → exponent 48 (JSON wins)");
-        check(metallic == 0.0f, "unbound → metallic = 0");
+        const glm::vec3 N(0.0f, 0.0f, 1.0f);
+        RngState rng = makeRngState(0, 0, 0, RngMode::LCG);
+        const glm::vec3 H = sampleGgxHalfVector(N, 0.0f, rng);
+        check(glm::dot(H, N) > 0.99999f,
+              "α=0 half-vector → H ≈ N (mirror collapse)");
+    }
+    // α=1: H stays in the N hemisphere and unit length (cosine-ish spread).
+    {
+        const glm::vec3 N(0.0f, 0.0f, 1.0f);
+        RngState rng = makeRngState(1, 0, 0, RngMode::LCG);
+        const glm::vec3 H = sampleGgxHalfVector(N, 1.0f, rng);
+        check(glm::dot(H, N) > 0.0f && std::fabs(glm::length(H) - 1.0f) < 1e-6f,
+              "α=1 half-vector → in hemisphere, unit length");
     }
 
-    // ---- ORM unbound: glTF roughnessFactor used when JSON left unspecified ----
-    // m.specular.roughness = -1 → fall through to tex.roughnessFactor = 0.8
-    // → exponent 2/0.64 − 2 = 1.125.
+    // ---- Directional-hemispherical energy (compensated) ----
+    // Per-bounce reflected energy = ∫ f_spec·(N·L) dω + diffuseCompensation,
+    // where diffuseCompensation = albedo·(1−metallic)·(1−lum(F_view)).  A naive
+    // additive model (compensation 1.0) sums to ≈2 for dielectrics; the
+    // compensated model stays ≤ 1 + tolerance.  Numerically integrate the
+    // specular lobe f·(N·L) over a spherical grid around the view direction.
     {
-        Material mj = m;                   // roughness stays -1 (unspecified)
-        TextureBinding tb;                 // unbound slots; glTF factor 0.8
-        tb.roughnessFactor = 0.8f;
-        drove = resolveGlossyExponent(exponent, invExp, metallic, tb, table,
-                                      glm::vec2(0.25f, 0.25f), mj);
-        check(!drove && std::fabs(exponent - 1.125f) < 1e-6f &&
-              std::fabs(invExp - (0.64f / 1.36f)) < 1e-6f,
-              "unbound, no JSON, glTF factor 0.8 → exponent 1.125");
-        check(metallic == 0.0f, "unbound → metallic = 0");
-    }
+        const glm::vec3 N(0.0f, 0.0f, 1.0f);
+        const glm::vec3 wo(0.0f, 0.0f, -1.0f);      // view straight down
+        const float NdotV = glm::clamp(glm::dot(N, -wo), 1e-4f, 1.0f);
+        const float alpha = 0.1f;                    // fairly smooth dielectric
 
-    // ---- ORM unbound + no JSON + no glTF factor (plain OBJ) → fixed 0.5 ----
-    TextureBinding unbound;                    // all slots -1, factor -1
-    drove = resolveGlossyExponent(exponent, invExp, metallic, unbound, table,
-                                  glm::vec2(0.25f, 0.25f), m);
-    check(!drove && exponent == 6.0f && std::fabs(invExp - (1.0f / 7.0f)) < 1e-6f,
-          "unbound, no JSON, no glTF factor → fixed default r=0.5 (exponent 6)");
-    check(metallic == 0.0f, "unbound → metallic = 0");
+        // Integrate over the HALF-VECTOR, not wi: the change of variables
+        // dω_l = 4·(V·H)·dω_h is what GGX half-vector sampling is built on, and
+        // it sidesteps the catastrophic cancellation of normalize(wo+wi) near
+        // the mirror direction (wo+wi → 0 at the specular peak).
+        //   f_spec·(N·L)·dω_l = F·G·D·(V·H)/(N·V) · dω_h
+        // with V=wo=(0,0,-1):  V·H = N·H = cosθh, N·V = 1, and
+        //   wi = reflect(wo,H) ⇒ N·L = 2·cosθh² − 1  (>0 only for θh < 45°).
+        float specSum = 0.0f;
+        const int NTH = 200, NPH = 400;              // fine enough for <0.1%
+        for (int i = 0; i < NTH; i++)
+        {
+            const float th    = (i + 0.5f) / NTH * (PI * 0.5f);   // θh
+            const float sinTh = sinf(th), cosTh = cosf(th);
+            for (int j = 0; j < NPH; j++)
+            {
+                const float ph    = (j + 0.5f) / NPH * TWO_PI;
+                const float NdotL = 2.0f * cosTh * cosTh - 1.0f;   // reflect(wo,H)·N
+                if (NdotL <= 0.0f) continue;                       // outside the lobe
+                const float G = smithG1Ggx(alpha, NdotV) * smithG1Ggx(alpha, NdotL);
+                const float D = ggxD(alpha, cosTh);                // N·H = cosθh
+                const float F = fresnelSchlickConductor(cosTh, D3).r;   // V·H = cosθh
+                specSum += (F * G * D * cosTh / NdotV)
+                           * sinTh * (PI * 0.5f / NTH) * (TWO_PI / NPH);
+            }
+        }
+
+        // F_view at NdotV=1 → Fresnel(1) = 0.04; compensated diffuse energy
+        // for albedo=1, metallic=0 is (1 − 0.04) = 0.96.
+        const float diffEnergy = 1.0f * (1.0f - luminance(fresnelSchlickConductor(1.0f, D3)));
+        const float total = specSum + diffEnergy;
+        check(total <= 1.0f + 2e-2f,
+              "compensated GGX + diffuse energy ≤ 1.02");
+        check(specSum < 0.1f,
+              "dielectric specular directional albedo < 0.1 at normal incidence");
+
+        // Discriminator: the naive additive model (uncompensated diffuse = 1.0)
+        // would exceed the bound — prove the compensation is what keeps ≤ 1.02.
+        check(specSum + 1.0f > 1.0f + 2e-2f,
+              "naive (uncompensated) model would exceed the bound");
+    }
 
     std::printf("\n");
 }
@@ -238,8 +357,8 @@ static void testResolveGlossyExponent()
 int main()
 {
     testSampleTexture();
-    testSampleCheckerboard();
-    testResolveGlossyExponent();
+    testResolvePbrSurfaceParams();
+    testPbrBrdf();
 
     if (g_failures == 0)
         std::printf("ALL PASS\n");

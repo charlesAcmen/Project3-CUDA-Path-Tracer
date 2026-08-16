@@ -2,11 +2,12 @@
  * @file loader_test.cu
  * @brief Edge-case tests for the whole scene loader (OBJ + glTF + JSON dispatch).
  *
- * Includes the REAL scene_loader.cpp (which carries the tinyobjloader and cgltf
- * implementations) and links utils/utilities.cu for buildTransformationMatrix,
- * so this exercises the production load path.  Because the .cpp is in this TU,
- * the internal `static` SceneLoader::makeTri / loadOBJ / loadGLTF are callable
- * directly, and SceneLoader::loadFromJSON covers the JSON dispatch.
+ * Includes the REAL scene-loader sources (obj / gltf / texture / scene .cpp,
+ * which carry the tinyobjloader, cgltf, and stb implementations) and links
+ * utils/utilities.cu for buildTransformationMatrix, so this exercises the
+ * production load path.  Because the sources are in this TU, the
+ * SceneLoader::makeTri / loadOBJ / loadGLTF helpers are callable directly,
+ * and SceneLoader::loadFromJSON covers the JSON dispatch.
  *
  * Covers extreme cases: face-normal fallback (no NORMAL / zero NORMAL / NaN),
  * degenerate triangles, non-triangle primitives, missing POSITION, indexed vs
@@ -20,14 +21,23 @@
  * Then run build/Release/loader_test.exe
  */
 
-// scene_loader.cpp calls stbi_load for TEXTURE images; this TU must supply
+// The scene loader is split into four TUs (obj / gltf / texture / scene).
+// Each is #included here so this test links the production load path without
+// touching the root CMake build, and so the SceneLoader helpers are callable
+// directly in this TU.
+//
+// texture_loader.cpp calls stbi_load for TEXTURE images; this TU must supply
 // the implementation (the main app gets it from src/stb.cpp).
 //
 // ORDER MATTERS: stb_image v2.06 keeps the implementation block OUTSIDE the
 // include guard, so STB_IMAGE_IMPLEMENTATION must NOT be defined when
-// scene_loader.cpp's own `#include <stb_image.h>` runs (that would compile
-// the implementation a second time).  Include the loader first (declarations
+// texture_loader.cpp's own `#include <stb_image.h>` runs (that would compile
+// the implementation a second time).  Include the loaders first (declarations
 // only), then define the implementation in a second include.
+#include "scene/loader_internal.h"
+#include "scene/texture_loader.cpp"
+#include "scene/obj_loader.cpp"
+#include "scene/gltf_loader.cpp"
 #include "scene/scene_loader.cpp"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -496,28 +506,29 @@ static void testLoadFromJSON(const std::string& exeDir)
         check(scene.hostTriangles.size() == 6, "scene_multi: 6 host triangles");
     }
     {
-        // Procedural checkerboard material: TEXTURE = "checkerboard" must map
-        // to the checkerboard sentinel, and UV_SCALE to uvScale (textureId
-        // stays -2 → no image loaded → Scene::textures empty).
+        // A JSON TEXTURE that cannot resolve to an image must degrade
+        // gracefully to the flat color: textureId stays -1 (no image loaded,
+        // no dangling index) rather than crash.  UV_SCALE still maps.
         Scene scene = SceneLoader::loadFromJSON(exeDir + "/scene_texture.json");
         check(scene.materials.size() == 1, "scene_texture: 1 material");
         if (scene.materials.size() == 1)
         {
-            check(scene.materials[0].textureId == kCheckerboardTextureId,
-                  "scene_texture: TEXTURE \"checkerboard\" → kCheckerboardTextureId");
+            check(scene.materials[0].textureId == -1,
+                  "scene_texture: unresolvable TEXTURE → flat color (textureId -1)");
             check(scene.materials[0].uvScale == 2.0f,
                   "scene_texture: UV_SCALE 2.0 → uvScale");
         }
         check(scene.textures.empty(),
-              "scene_texture: no image texture loaded for checkerboard");
+              "scene_texture: no image loaded for unresolvable TEXTURE");
         check(scene.hostTriangles.size() == 12, "scene_texture: 12 host triangles");
     }
     {
         // JSON TEXTURE wins over the glTF baseColor map: the object's material
-        // declares TEXTURE "checkerboard" while the mesh (tex_cube.gltf) carries
-        // its own glTF baseColor slot.  parseObjects must zero the slice's
-        // tex.baseColor so the shading fallback (tex.baseColor → m.textureId)
-        // resolves to the JSON checkerboard, not the model's PNG.
+        // declares a TEXTURE while the mesh (tex_cube.gltf) carries its own glTF
+        // baseColor slot.  parseObjects must zero the slice's tex.baseColor so
+        // the shading fallback (tex.baseColor → m.textureId) resolves to the
+        // JSON TEXTURE (here flat color, since missing.png cannot load), not the
+        // model's PNG.
         Scene scene = SceneLoader::loadFromJSON(exeDir + "/scene_texture_override.json");
         check(scene.hostTriangles.size() == 1,
               "scene_texture_override: 1 host triangle");
@@ -525,8 +536,8 @@ static void testLoadFromJSON(const std::string& exeDir)
             check(scene.hostTriangles[0].tex.baseColor == -1,
                   "scene_texture_override: JSON TEXTURE zeroes glTF tex.baseColor");
         check(scene.materials.size() == 1 &&
-              scene.materials[0].textureId == kCheckerboardTextureId,
-              "scene_texture_override: material keeps checkerboard textureId");
+              scene.materials[0].textureId == -1,
+              "scene_texture_override: unresolvable JSON TEXTURE → flat color");
     }
 
     std::printf("\n");

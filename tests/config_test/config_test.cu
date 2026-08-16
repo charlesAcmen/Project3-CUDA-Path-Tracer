@@ -15,7 +15,7 @@
  */
 
 #include "config.h"
-#include "json.hpp"
+#include <json.hpp>
 
 #include <cstdio>
 #include <cstring>
