@@ -110,11 +110,12 @@ __host__ __device__ bool resolveGlossyExponent(
  * It also modifies the color `color` of the ray in place.
  *
  * Texture input: the hit record carries the per-triangle TextureBinding
- * (`hit.tex`) and a UV; the diffuse branch resolves the albedo from the
+ * (`hit.tex`) and a UV.  The Diffuse branch resolves the albedo from the
  * baseColor slot (glTF binding wins over the JSON-declared
- * Material::textureId) and samples the scene's texture table (`textures`)
- * if one is bound.  Mirror-like and refractive materials keep their material
- * color and ignore textures.
+ * Material::textureId) and samples the scene's texture table (`textures`).
+ * The unified GGX surface (Reflective / Pbr) additionally samples the
+ * metallicRoughness slot (G = roughness, B = metallic) per-texel.  Refractive
+ * materials keep their material color and ignore textures.
  *
  * The hit geometry (point, normal, UV, texture slots) is passed as the
  * ShadeableIntersection record rather than as loose scalars: it is exactly
@@ -131,10 +132,3 @@ __host__ __device__ void scatterRay(
     RngState& rng,
     const TextureTable& textures);
 
-// Glossy specular: samples a direction around the reflected direction
-// using a Phong lobe with the given exponent.
-__host__ __device__ glm::vec3 samplePhongSpecularDir(
-    glm::vec3 reflectDir,
-    float exponent,
-    float invExponentPlusOne,   // precomputed 1/(exponent+1) — no GPU division
-    RngState& rng);

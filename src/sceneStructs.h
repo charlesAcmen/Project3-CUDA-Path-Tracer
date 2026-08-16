@@ -86,10 +86,6 @@ struct Material
         // Raw scene ROUGHNESS scalar, kept so the shader can distinguish
         // "author explicitly wrote ROUGHNESS" (∈ [0,1]) from "unspecified"
         // (-1).  The explicit value wins over a glTF roughnessFactor fallback.
-        // The Phong exponent is NOT stored here — the per-hit conversion
-        // (2/r² − 2, ROUGHNESS_THRESHOLD → mirror) lives in
-        // resolveGlossyExponent, because roughness can also be per-texel from
-        // an ORM texture or a glTF factor, so a precomputed scalar is obsolete.
         float roughness = -1.0f;
     } specular;
     MaterialType type;            // Explicit material classification used by scattering logic
@@ -98,8 +94,8 @@ struct Material
     float emittance;              // Emission strength for light sources (nonzero = emissive)
 
     // Texture mapping.  textureId selects the image to sample in the
-    // shading step; -1 = no texture (use `color`), -2 = procedural
-    // checkerboard, >= 0 = index into the scene's texture array.
+    // shading step; -1 = no texture (use `color`), >= 0 = index into the
+    // scene's texture array.
     int   textureId = -1;
     float uvScale   = 1.0f;       // UV repeat scale (1 = one tile over [0,1])
 };

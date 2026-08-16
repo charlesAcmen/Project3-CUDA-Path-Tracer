@@ -51,35 +51,6 @@ __host__ __device__ void buildOrthonormalBasis(
     bitangent = glm::normalize(glm::cross(normal, tangent));
 }
 
-__host__ __device__ glm::vec3 samplePhongSpecularDir(
-    glm::vec3 reflectDir,
-    float exponent,
-    float invExponentPlusOne,   // 1/(exponent+1), precomputed per-hit by the caller
-    RngState& rng)
-{
-    float xi1 = rng.next(HaltonDim::SpecularTheta);  // dim 6 (prime 17): specular lobe theta
-    float xi2 = rng.next(HaltonDim::SpecularPhi);  // dim 7 (prime 19): specular lobe phi
-
-    // Eq.7: cos(theta_s) = xi1^(1/(n+1))
-    // Optimization: if exponent is 0.0f (i.e. maximum roughness, r=1.0f), we skip powf
-    float cosTheta = (exponent < SPECULAR_EXPONENT_ZERO_EPSILON) ? xi1 : powf(xi1, invExponentPlusOne);
-    float sinTheta = sqrtf(fmaxf(0.0f, 1.0f - cosTheta * cosTheta));
-
-    // Eq.8: phi_s = 2*pi*xi2
-    float phi = TWO_PI * xi2;
-
-    // Eq.9: Local Cartesian coordinates
-    float xs = sinTheta * cosf(phi);
-    float ys = sinTheta * sinf(phi);
-    float zs = cosTheta;
-
-    // Construct local ONB with reflectDir as the up direction (Z-axis)
-    glm::vec3 tangent, bitangent;
-    buildOrthonormalBasis(reflectDir, tangent, bitangent);
-
-    return glm::normalize(xs * tangent + ys * bitangent + zs * reflectDir);
-}
-
 __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     glm::vec3 normal,
     RngState &rng)
