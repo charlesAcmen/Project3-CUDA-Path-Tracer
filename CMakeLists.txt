@@ -82,6 +82,7 @@ set(headers
     src/pathtrace.h
     src/profiler/profiler.h
     src/rng/rng.h
+    src/scene/loader_internal.h
     src/scene/scene.h
     src/scene/scene_loader.h
     src/sceneStructs.h
@@ -102,8 +103,11 @@ set(sources
     src/kernels/bvh_traversal.cu
     src/kernels/shading.cu
     src/kernels/accumulation.cu
+    src/scene/gltf_loader.cpp
+    src/scene/obj_loader.cpp
     src/scene/scene.cpp
     src/scene/scene_loader.cpp
+    src/scene/texture_loader.cpp
     src/utils/utilities.cu
 )
 list(SORT headers)
