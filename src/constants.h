@@ -20,10 +20,6 @@
 // between all three.
 #define REFRACT_VALID_SQ_LEN_MIN 0.5f
 #define ROUGHNESS_THRESHOLD 0.001f
-// A specular exponent ≈ 0 means maximum roughness (ROUGHNESS = 1 → exponent
-// = 2/1² − 2 = 0), where the Phong lobe is uniform and the powf(x, 1/(n+1))
-// in samplePhongSpecularDir reduces to x.  Used only to skip that powf —
-#define SPECULAR_EXPONENT_ZERO_EPSILON 0.00001f
 #define RR_P_MIN          0.2f
 #define RR_P_MAX          1.0f
 #define LARGE_T           1e30f       // sentinel > any valid ray–scene intersection
