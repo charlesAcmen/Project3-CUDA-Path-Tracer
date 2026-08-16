@@ -14,7 +14,7 @@
         },
         "john":
         {
-            "TYPE":"Specular",
+            "TYPE":"pbr",
             "RGB":[0.5,0.5,0.5],
             "ROUGHNESS":0.25
         }

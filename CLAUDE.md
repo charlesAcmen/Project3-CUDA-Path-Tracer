@@ -40,8 +40,12 @@ src/
 ├── main.cpp                  # GLFW/GL window, camera controls, ImGui, render loop → pathtrace()
 ├── pathtrace.cu / .h         # GPU pipeline + runtime getters/setters; includes kernels/ + pipeline/
 ├── config/config.cpp / .h    # AppConfig singleton, JSON + CLI merge, startup help/summary
-├── scene/scene_loader.cpp / .h  # JSON scene + OBJ/glTF mesh loading (tinyobjloader + cgltf, vertex normals)
-├── scene/scene.cpp / .h         # Scene container + computeSceneStats
+├── scene/scene_loader.cpp / .h    # JSON scene dispatch (Materials/Objects/Camera); the only public entry
+├── scene/obj_loader.cpp           # OBJ mesh loading (tinyobjloader impl) + shared makeTri
+├── scene/gltf_loader.cpp          # glTF 2.0 mesh loading (cgltf impl): scene-graph walk + texture auto-load
+├── scene/texture_loader.cpp       # PNG/JPG decode (stb_image header only) into Scene::textures
+├── scene/loader_internal.h        # cross-TU loader helpers (makeTri/loadOBJ/loadGLTF/loadTexture…)
+├── scene/scene.cpp / .h           # Scene container + computeSceneStats
 ├── sceneStructs.h            # All shared data structures (Ray, Geom, Material, PathSegment, …)
 ├── constants.h               # PI, EPSILON, RAY_EPSILON, RR_P_MIN/MAX, LARGE_T, …
 ├── utils/utilities.h / .cu   # buildTransformationMatrix, checkCUDAErrorFn
@@ -63,14 +67,14 @@ src/
 │   ├── compact.cuh           #   stream-compaction dispatch (gather + compact per bounce)
 │   └── postprocess.cuh       #   bloom → prepareDisplay → ACES/sRGB → CA → vignette → PBO
 ├── postprocess/              # bloom, tonemap (ACES + sRGB), chromatic_aberration, vignette kernels
-├── interactions/             # scatterRay + Fresnel (Schlick/Accurate) + hemisphere/Phong sampling
+├── interactions/             # scatterRay + Fresnel (Schlick/Accurate) + hemisphere/GGX surface sampling
 ├── intersection/             # intersections.h (ray utils, concentricSampleDisk), triangle.h (Möller–Trumbore)
 ├── rng/rng.h                 # RngState: LCG + scrambled Halton, utilhash
 ├── profiler/                 # Profiler singleton: cudaEvent GPU + chrono CPU timing, CSV export
 ├── stream_compaction/        # efficient.cu/h: global-scan + shared-mem hierarchical-scan compaction
 ├── ImGui/                    # Dear ImGui source
-└── json.hpp                  # nlohmann/json (header-only)
 ```
+(json.hpp lives in `external/include/` alongside the other vendored headers — see Dependencies.)
 
 ### Path Tracing Pipeline (one iteration = one sample per pixel)
 
@@ -89,7 +93,7 @@ src/
 
 - **`Triangle`** — 3 vertices + 3 vertex normals + `materialId`. Object space in `Scene::hostTriangles`; baked to world space (vertices via `transform`, normals via `invTranspose`) by `buildSceneBvh`.
 - **`Geom`** — `materialid`, transform/inverse/invTranspose (used only by the world-space bake at build time; no longer read by any kernel), plus `meshTriangleOffset`/`meshTriangleCount` (slice into `Scene::hostTriangles`; `-1,0` for none).
-- **`Material`** — `color`, `specular { exponent, color }`, `type` (`MaterialType` enum: Diffuse/Reflective/Refractive/Emissive), `indexOfRefraction` + `invIndexOfRefraction`, `emittance`.
+- **`Material`** — `color`, `specular { color, roughness }` (raw JSON `ROUGHNESS` ∈ [0,1]; -1 = unspecified), `metallic` (raw JSON `METALLIC` ∈ [0,1]; -1 = unspecified), `type` (`MaterialType` enum: Diffuse/Reflective/Pbr/Refractive/Emissive), `indexOfRefraction` + `invIndexOfRefraction`, `emittance`.
 - **`Camera`** — resolution, position/lookAt/view/up/right, fov, pixelLength, `lensRadius` (0 = pinhole), `focalDistance`.
 - **`PathSegment`** — ray + accumulated color + pixelIndex + remainingBounces.
 - **`ShadeableIntersection`** — `t` (<0 = miss), `surfaceNormal`, `materialId`.
@@ -101,8 +105,8 @@ src/
 `RngState` exposes a uniform `.next(dim)` API for both modes. `makeRngState(iter, pixelIndex, bounceNum * MAX_DRAWS_PER_BOUNCE, mode)` creates the per-bounce state (bounce encoding via `MAX_DRAWS_PER_BOUNCE = 8`).
 
 - **LCG** — `thrust::default_random_engine` seeded by `utilhash` (backward compatible).
-- **Halton** — `haltonIndex = hash(pixel, bounce) + iter` (consecutive walk across frames → low-discrepancy convergence). `next(dim)` picks a prime base per dimension (`HaltonDim`: AA jitter, lens, diffuse θ/φ, specular θ/φ, Fresnel roulette, path RR) and applies a Cranley-Patterson rotation with a **fixed** per-(pixel, bounce, dim) offset. `iter` is deliberately excluded from the CP seed (see comments in `rng.h`).
-- Dimensions 0–9 are allocated; 10–15 reserved.
+- **Halton** — `haltonIndex = hash(pixel, bounce) + iter` (consecutive walk across frames → low-discrepancy convergence). `next(dim)` picks a prime base per dimension (`HaltonDim`: AA jitter, lens, diffuse θ/φ, GGX half-vector θ/φ, Fresnel roulette, path RR, PBR diffuse/specular split) and applies a Cranley-Patterson rotation with a **fixed** per-(pixel, bounce, dim) offset. `iter` is deliberately excluded from the CP seed (see comments in `rng.h`).
+- Dimensions 0–10 are allocated (10 = PBR diffuse/specular split); 11–15 reserved.
 
 ### Intersection Testing
 
@@ -111,10 +115,13 @@ Mesh-only. Every `Geom` is a triangulated mesh; non-mesh geoms silently miss. Tr
 ### Scattering (`interactions/interactions.cu`)
 
 - **Diffuse** — cosine-weighted hemisphere sampling; `color *= albedo` (the `cosθ/pdf` factor cancels the `1/π` in the Lambert BRDF).
-- **Reflective** — `exponent < 0` → perfect mirror (`glm::reflect`); `exponent ≥ 0` → glossy Phong lobe around the reflected direction.
-- **Refractive** — enter/exit keyed off the intersection's `frontFace` flag, Fresnel hardcoded to **Accurate** (Schlick is kept in `interactions.cu` for a one-line switch — no runtime mode dispatch), Russian-roulette split between reflection and refraction with probability-compensated throughput; ray origin offset into the correct side of the surface by a per-hit `rayOffset`.
+- **Reflective / Pbr** — unified metallic-roughness GGX surface (`resolvePbrSurfaceParams` resolves per-hit `r`, `α = r²`, conductor `F0 = mix(0.04, baseColor, metallic)`, `diffuseColor = baseColor·(1−metallic)`). `r < ROUGHNESS_THRESHOLD` collapses to a single mirror lobe weighted by `Fresnel(N·V)`; otherwise a Fresnel-weighted probabilistic split, `specProb = clamp(lum(Fresnel(N·V)), 0.05, 0.95)`:
+  - **Specular branch** (prob `specProb`) — importance-sample the GGX half-vector (`cosθh² = (1−ξ₁)/(1+(α²−1)ξ₁)`), reflect the view about it, weight `F·G·(V·H)/((N·V)(N·H)) ÷ specProb` (D and N·L cancel out of the estimator). Below-surface samples (N·L ≤ 0) get weight 0 and scatter the mirror reflection so the path survives for Russian roulette.
+  - **Diffuse branch** (prob `1−specProb`) — cosine hemisphere, weight `diffuseColor·(1−lum(F_view)) ÷ (1−specProb)`. The `(1−lum(F_view))` energy compensation prevents specular+diffuse from summing past 1 (grazing fireflies).
+  - Legacy JSON `Specular` → `Reflective` is the metallic=1 chrome case: F0 = `specular.color`, no diffuse.
+- **Refractive** — enter/exit keyed off the intersection's `frontFace` flag, Fresnel hardcoded to **Accurate** (Schlick is kept in `interactions.cu` for a one-line switch — no runtime mode dispatch), Russian-roulette split between reflection and refraction with probability-compensated throughput; ray origin offset by `EPSILON` into the correct side of the surface (keyed off the enter/exit state, stable near grazing).
 - **Russian roulette** (`shading.cuh`) — after `rrMinBounces`, survival probability = clamp(max RGB, `RR_P_MIN`, `RR_P_MAX`); survivors divide color by p.
-- **Ray-origin offset** (`shading.cu`) — every scatter pushes the new origin off the surface by `rayOffset = EPSILON·(1+t) + 2·sagitta`. The first term covers hit-point FP error (grows with travel distance); the second covers the hit facet's **sagitta** — how far the facet plane dips below the smooth surface on a tessellated sphere (≈ `L²/8R`, stored per triangle by the `buildSceneBvh` bake). Without it, silhouette rays start inside the mesh, re-intersect, and ping-pong to a black rim. Flat facets have sagitta ≈ 0, restoring the old `EPSILON` behavior.
+- **Ray-origin offset** — every scatter pushes the new origin off the surface by `EPSILON` along the shading normal (sign per branch: refraction off the enter/exit side, GGX/diffuse off the scatter-direction orientation), and the traversal's `RAY_EPSILON` near-clip skips the freshly-scattered surface.
 
 ### Post-Processing
 
@@ -122,10 +129,14 @@ Bloom runs in linear HDR space (threshold → separable Gaussian blur with share
 
 ### Scene Files
 
-- **Materials** — `TYPE`: `Diffuse` / `Emitting` / `Specular` / `Refractive`. `Specular` supports `SPECULAR_COLOR` and `ROUGHNESS` (0 → mirror; higher → glossier via `exponent = 2/r² − 2`). `Refractive` uses `IOR`. Roughness is resolved by a **source chain** (first hit wins, see `resolveGlossyExponent` in `interactions.cu`): a bound glTF `metallicRoughness` texture overrides everything **per-texel** (ORM G channel — a data map, raw bytes — sampled at the hit UV and converted with the same `2/r² − 2`; its B channel `metallic` is read but reserved for a future PBR BRDF, not consumed by the Lambert/Phong model); otherwise an explicit JSON `ROUGHNESS`; otherwise the glTF `roughnessFactor` for glTF meshes (loaded into `TextureBinding::roughnessFactor`, `-1` for OBJ); otherwise a fixed default `r = 0.5` (medium gloss) — a Specular material with none of the three must not silently become a perfect mirror. `ROUGHNESS:0` (or G=0, or factor 0) is still a true mirror via `ROUGHNESS_THRESHOLD`.
+- **Materials** — `TYPE`: `Diffuse` / `Emitting` / `Specular` / `PBR` / `Refractive`. `Specular` (legacy → `Reflective` chrome) supports `SPECULAR_COLOR` and `ROUGHNESS`; `PBR` is the unified metallic-roughness GGX surface; `Refractive` uses `IOR`. Roughness/metallic/baseColor are resolved by **source chains** (first hit wins, see `resolvePbrSurfaceParams` / `resolveBaseColor` in `interactions.cu`):
+  - **Roughness** — a bound glTF `metallicRoughness` texture overrides everything **per-texel** (ORM G channel — a data map, raw bytes → already linear); else explicit JSON `ROUGHNESS`; else the glTF `roughnessFactor` (into `TextureBinding::roughnessFactor`, `-1` for OBJ); else fixed default `r = 0.5` (an incomplete material must not silently become a mirror). `r < ROUGHNESS_THRESHOLD` (or `ROUGHNESS:0` / G=0 / factor 0) is a true mirror.
+  - **Metallic** — ORM B channel per-texel; else explicit JSON `METALLIC`; else glTF `metallicFactor`; else type default: `Specular`→Reflective = 1.0 (chrome, no diffuse), `PBR` = 0.0 (dielectric).
+  - **Base color** — `PBR` resolves the albedo via `resolveBaseColor` (glTF `baseColor` texture × `baseColorFactor`, else JSON `TEXTURE`, else `RGB`); `Specular` uses `RGB`/`SPECULAR_COLOR` as the metal tint; `Diffuse` stays pure Lambert (`RGB`/`TEXTURE`, unchanged).
 - **Camera** — `RES`, `FOVY`, `ITERATIONS`, `DEPTH`, `RR_DEPTH`, `FILE`, `EYE`, `LOOKAT`, `UP`; optional `LENS_RADIUS` / `FOCAL_DISTANCE` (DoF).
-- **Objects** — `TYPE`: `"mesh"` with `FILE` (mesh path relative to the scene file; `.obj` via tinyobjloader, `.gltf`/`.glb` via cgltf), `MATERIAL`, `TRANS`, `ROTAT`, `SCALE`. Models live in `scenes/models/` (cube.obj, sphere.obj, sphere_inv.obj, light.obj, pyramid.obj, diamond.obj, plus `gen_shapes.py` outputs and downloaded glTF under `glTF-Sample-Assets/`).
-- **glTF node transforms are applied** — `scene_loader.cpp` walks the scene graph and emits each `(node, mesh)` instance under the accumulated TRS/matrix transform (`nodeLocalMatrix` → `walkNode`), so multi-part models assemble exactly as the file specifies. Caveat: some Sketchfab/asset exports are **baked** — the vertices already carry the world-space transform and the node matrices are redundant. Applying both double-transforms the model. For such files, zero out the redundant node matrices (see `scenes/models/glTF-Sample-Assets/johnmarston.gltf` — nodes 0/1/3 set to identity — vs `johnmarston_original.gltf`, the untouched copy), or compensate with the scene `TRANS`/`ROTAT`/`SCALE`. The loader reads POSITION/NORMAL; glTF materials/textures/skinning are ignored — the scene JSON's `MATERIAL` governs shading.
+- **Objects** — no `TYPE` field (mesh is the only object type; the loader ignores it entirely, and the old JSONs' `"TYPE":"mesh"` still loads as a harmless unknown key). Each entry: `FILE` (mesh path relative to the scene file; `.obj` via tinyobjloader, `.gltf`/`.glb` via cgltf), `MATERIAL`, `TRANS`, `ROTAT`, `SCALE`. Models live in `scenes/models/` (cube.obj, sphere.obj, sphere_inv.obj, light.obj, pyramid.obj, diamond.obj, plus `gen_shapes.py` outputs and downloaded glTF under `glTF-Sample-Assets/`).
+- **glTF node transforms are applied** — `gltf_loader.cpp` walks the scene graph and emits each `(node, mesh)` instance under the accumulated TRS/matrix transform (`nodeLocalMatrix` → `walkNode`), so multi-part models assemble exactly as the file specifies. Caveat: some Sketchfab/asset exports are **baked** — the vertices already carry the world-space transform and the node matrices are redundant. Applying both double-transforms the model. For such files, zero out the redundant node matrices (see `scenes/models/glTF-Sample-Assets/johnmarston.gltf` — nodes 0/1/3 set to identity — vs `johnmarston_original.gltf`, the untouched copy), or compensate with the scene `TRANS`/`ROTAT`/`SCALE`. The loader reads POSITION/NORMAL/TEXCOORD_0; glTF skinning/morphs/Draco are ignored — the scene JSON's `MATERIAL` governs the shading model (see the Textures bullet for what the asset's own maps contribute).
+- **Textures** — auto-loaded from the model file itself. glTF `baseColor` / `normal` / `metallicRoughness` / `occlusion` / `emissive` slots load from external PNG/JPG URIs (relative to the `.gltf`/`.glb`) **and** from images packed into the `.glb` binary buffer (bufferView — decoded from memory); `data:` URIs fall back to the material color. OBJ companion `.mtl` maps load too (`map_Kd` → baseColor, `map_Bump`/`map_bump` → normal, `map_Ke` → emissive), resolved relative to the OBJ file (tinyobjloader is handed the OBJ's dir as its MTL base — otherwise it looks in the CWD). MTL flat colors (`Kd`/`Ks`/`Ns`) are **not** applied — the scene JSON's `MATERIAL` still governs type/color. An explicit JSON `TEXTURE` on a material overrides the asset's own baseColor (see `parseObjects`).
 - **Winding / normals** — the renderer **trusts the model's winding and normal direction**. The intersection reports the true shading normal; `scatterRay` orients it toward the ray only for opaque materials, and refraction reads its sign (dot with the ray) to classify enter vs exit. For solid glass use an **outward-wound** mesh (`sphere.obj` — smooth `vn`, CCW). `sphere_inv.obj` is **inward-wound and flat-shaded** (no `vn`): it renders as inside-out glass — Fresnel wall reflections still visible, but the entry ray is misclassified as "exit", so there is **no lensing/caustics** (that's the correct winding-respecting behavior, not a bug).
 
 ### Known Performance Notes
@@ -134,7 +145,7 @@ Bloom runs in linear HDR space (threshold → separable Gaussian blur with share
 - `LAUNCH_KERNEL_AUTO` calls `cudaGetDeviceProperties` on every launch (`kernel_config.h`).
 - Intersection is always the single world-space BVH closest-hit traversal (`bvhTraverse` + `traverseBvhClosest`). One traversal per ray (no per-mesh loop or transform) with near-child-first ordering; the win over a linear scan appears on large meshes. The exhaustive SAH build + world-space bake is a few ms at a few thousand triangles.
 - **Fast math** — `CMakeLists.txt` compiles CUDA with `-use_fast_math` (rcp.approx division, fast sqrt/trig/pow). Errors are ~2 ulp, invisible in a path tracer, and it makes the hot `1.0f / a` in `intersection/triangle.h` cheap. Consequence: **results differ from a precise-math build in the last few bits** — use the same flags when diffing renders or benchmarking.
-- **GPU division avoidance** — reciprocals and ratios that are constant per frame / per material are precomputed on the host: per-pixel `÷iter` became `*invIter` (`postprocess.cuh` → `tonemap.cuh`/`bloom.cuh`), Fresnel takes precomputed `eta` = n1/n2 (`interactions.cu`, from `invIndexOfRefraction`/`indexOfRefraction`), and `sendImageToPBO` no longer divides (display buffer is pre-averaged). Phong's `invExponentPlusOne` moved off the host list: roughness can be per-texel, so `resolveGlossyExponent` derives it per-hit with one fast-math division (`r²/(2−r²)`), and `samplePhongSpecularDir` still never divides.
+- **GPU division avoidance** — reciprocals and ratios that are constant per frame / per material are precomputed on the host: per-pixel `÷iter` became `*invIter` (`postprocess.cuh` → `tonemap.cuh`/`bloom.cuh`), Fresnel takes precomputed `eta` = n1/n2 (`interactions.cu`, from `invIndexOfRefraction`/`indexOfRefraction`), and `sendImageToPBO` no longer divides (display buffer is pre-averaged). The old Phong `exponent`/`invExponentPlusOne` precomputes are gone — the GGX surface derives `α = r²` per-hit in `resolvePbrSurfaceParams` (roughness/metallic can be per-texel or glTF factors, so a host-side exponent would be wrong), and the GGX branch divides only by its own branch probability. `fresnelSchlickConductor`'s `(1−cosθ)⁵` is explicit multiplies, never `powf` (fast-math friendly).
 
 ## Controls (Runtime)
 
@@ -158,4 +169,4 @@ The camera is a free-fly camera: `cam.position` is independent state, translated
 
 ## Dependencies
 
-CUDA (with Thrust), OpenGL, GLFW, GLEW, GLM (header-only, in `external/`), nlohmann/json (`src/json.hpp`), stb (`src/stb.cpp`), tinyobjloader (`external/include/tiny_obj_loader.h`), cgltf (`external/include/cgltf.h`). Compiled with C++17 / CUDA 17 standard, `CUDA_SEPARABLE_COMPILATION ON`, targeting `native` architecture.
+CUDA (with Thrust), OpenGL, GLFW, GLEW, GLM (header-only, in `external/`), nlohmann/json (`external/include/json.hpp`), stb (`src/stb.cpp`), tinyobjloader (`external/include/tiny_obj_loader.h`), cgltf (`external/include/cgltf.h`). All vendored headers are `#include`d with angle brackets (`<glm/…>`, `<json.hpp>`, `<stb_image.h>`, `<cgltf.h>`, `<tiny_obj_loader.h>`) and resolve via the `external/include` include path; project-local headers under `src/` use quotes. Compiled with C++17 / CUDA 17 standard, `CUDA_SEPARABLE_COMPILATION ON`, targeting `native` architecture.
