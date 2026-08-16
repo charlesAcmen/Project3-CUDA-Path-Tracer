@@ -12,9 +12,10 @@
 // texture for that role (use the material's own color / fall back).
 //
 // The roles mirror glTF material slots (base / normal / metallic-roughness
-// ORM / occlusion / emissive).  Only baseColor is sampled by the current
-// Lambert/Phong shading; the rest are stored so future features (normal
-// mapping, PBR, emissive maps) just sample the slot that is already bound.
+// ORM / occlusion / emissive).  The unified GGX surface samples baseColor +
+// metallicRoughness (G=roughness, B=metallic); normal/occlusion/emissive are
+// stored so future features (normal mapping, emissive maps) just sample the
+// slot that is already bound.
 struct TextureBinding
 {
     int baseColor        = -1;
@@ -27,6 +28,16 @@ struct TextureBinding
     // left ROUGHNESS unspecified.  -1 = this triangle came from a mesh with
     // no glTF material (plain OBJ), so the scalar fallback is not available.
     float roughnessFactor = -1.0f;
+    // glTF pbrMetallicRoughness.metallicFactor (glTF default 1.0), a scalar
+    // fallback for metallic when there is no ORM texture and the scene JSON
+    // left METALLIC unspecified.  -1 = not a glTF material (plain OBJ).
+    float metallicFactor = -1.0f;
+    // glTF pbrMetallicRoughness.baseColorFactor (RGBA; alpha ignored).  Applied
+    // only when the winning baseColor is the glTF baseColor texture: the
+    // sampler returns texture.rgb · factor, matching glTF semantics.  Default
+    // (1,1,1) is a no-op; for non-glTF meshes it is never applied because
+    // tex.baseColor < 0.
+    glm::vec3 baseColorFactor{ 1.0f, 1.0f, 1.0f };
 };
 
 // Triangle backed by an OBJ mesh.
@@ -88,6 +99,10 @@ struct Material
         // (-1).  The explicit value wins over a glTF roughnessFactor fallback.
         float roughness = -1.0f;
     } specular;
+    // Raw scene METALLIC scalar ∈ [0,1] (JSON; -1 = unspecified).  Like
+    // roughness it can also be per-texel (ORM B channel) or a glTF
+    // metallicFactor
+    float metallic = -1.0f;
     MaterialType type;            // Explicit material classification used by scattering logic
     float indexOfRefraction;      // IOR of the refractive material, e.g. 1.5 for glass
     float invIndexOfRefraction;   // Precomputed inverse IOR to avoid GPU division
