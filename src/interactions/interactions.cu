@@ -509,10 +509,19 @@ __host__ __device__ void scatterRay(
             const glm::vec3 F_view = fresnelSchlickF0(NdotV, F0);
             // Diffuse/specular split probability from the graze Fresnel, so a
             // surface that is mostly specular (metal, or dielectric at grazing
-            // angles) spends most samples on the specular lobe.  Clamped so
-            // both branch weights stay bounded (unbiased mixture — the divide
-            // cancels the probability regardless of the clamp).
-            const float specProb  = glm::clamp(luminance(F_view), 0.05f, 0.95f);
+            // angles) spends most samples on the specular lobe.  A metal's
+            // diffuse lobe carries only (1−metallic) of the albedo, so as
+            // metallic rises the split is pushed toward 1.0 — a pure metal
+            // (metallic = 1 ⇒ diffuseColor = 0) spends no samples on the
+            // zero-weight diffuse branch.  The mix keeps it unbiased and
+            // firefly-free: (1−specProb) = (1−metallic)·(1−clampedProb) shrinks
+            // in lockstep with diffuseColor = baseColor·(1−metallic), so the
+            // diffuse branch weight diffuseColor·(1−F_view)/(1−specProb)
+            // = baseColor·(1−F_view)/(1−clampedProb) stays bounded and
+            // independent of metallic (a naive specProb = 1 would blow it up).
+            const float clampedProb = glm::clamp(luminance(F_view), 0.05f, 0.95f);
+            const float specProb    = glm::mix(clampedProb, 1.0f,
+                                               glm::clamp(metallic, 0.0f, 1.0f));
 
             glm::vec3 scatterDir;
             glm::vec3 throughput;
