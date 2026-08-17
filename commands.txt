@@ -1,60 +1,8 @@
 cmake --build build --config Release
-.\build\bin\Release\cis5650_boids.exe
 ctrl shift p select variant
 
 .\build\bin\Release\cis565_path_tracer.exe scenes/cornell.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_invsphere.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/cornellRefra_invsphere.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/cornellRefra.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_gltf.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_glb.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_shapes.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_inv.json
-//the following scenes has a considerable number of triangles
-.\build\bin\Release\cis565_path_tracer.exe scenes/directional_light.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/coffee-table.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/water_bottle.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/john_marston.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/john_marston_cornell.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/john_marston_hall.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/john_marston_scattered.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/john_marston_compare.json
 
-.\build\bin\Release\cis565_path_tracer.exe scenes/test_white_furnace.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/test_white_furnace_v2.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/test_energy_debug.json
-
-.\build\bin\Release\cis565_path_tracer.exe scenes/test_glass_inversion.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/test_dof.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/test_self_intersection.json
-
-.\build\bin\Release\cis565_path_tracer.exe scenes/debug_black_1_diffuse_control.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/debug_black_2_tessellation.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/debug_black_3_room_closed.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/debug_black_3_room_open.json
-
-.\build\bin\Release\cis565_path_tracer.exe scenes/boxwithspaces.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/boombox.json
-
-.\build\bin\Release\cis565_path_tracer.exe scenes/avocado_pbr_check.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/avocado.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/boxwithspaces_glossy.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/cornellGlossy.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/helmet.json
-.\build\bin\Release\cis565_path_tracer.exe scenes/orm_test.json
-
-build/bin/Release/cis565_path_tracer.exe scenes/test_pbr_metal_smooth.json
-build/bin/Release/cis565_path_tracer.exe scenes/test_pbr_metal_rough.json
-build/bin/Release/cis565_path_tracer.exe scenes/test_pbr_plastic_smooth.json
-build/bin/Release/cis565_path_tracer.exe scenes/test_pbr_plastic_rough.json
-
-build/bin/Release/cis565_path_tracer.exe scenes/transmission_test.json
-build/bin/Release/cis565_path_tracer.exe scenes/cornell_mcguire_sphere.json
-
-
-
-.\build\bin\Debug\cis565_path_tracer.exe scenes/cornell.json
-.\build\bin\RelWithDebInfo\cis565_path_tracer.exe scenes/cornellGlossy.json
 
 
 

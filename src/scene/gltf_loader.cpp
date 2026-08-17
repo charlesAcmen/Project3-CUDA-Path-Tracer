@@ -19,8 +19,11 @@
 #include <glm/gtc/quaternion.hpp>       // glm::mat4_cast (node rotation)
 #include <glm/gtc/type_ptr.hpp>         // glm::make_mat4 (node matrix)
 
+#include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace std;
@@ -39,93 +42,213 @@ struct GltfLoadCtx
     std::vector<int> imageToTexId;   // data->images index → Scene::textures index
 };
 
-// Resolve one glTF material slot (a cgltf_texture_view) to a global
-// Scene::textures index, loading the image on first use.
+// One glTF image queued for the parallel pre-decode (index = cgltf image
+// index).  `decode` is true when the image is referenced by a material slot
+// AND has a loadable source; `srgb` is the treatment the FIRST slot to
+// reference it asked for (mirrors the sequential loader's first-reference-
+// wins rule; no real file shares one image between a color and a data role).
+struct PendingTexture
+{
+    bool        decode = false;
+    bool        srgb   = false;
+    string      uri;                 // percent-decoded URI (file source, for logs)
+    string      path;                // dir-joined absolute path (file source)
+    const unsigned char* bytes = nullptr;   // .glb bufferView payload
+    int         len    = 0;
+};
+
+// Decode result for one queued image.
+struct TextureDecodeOut
+{
+    TextureData td;
+    bool        ok = false;
+};
+
+// Queue every image the material walk below will bind, in first-reference
+// order.  Replicates the old per-slot resolveGltfTextureSlot decision logic:
+// the first slot to reference an image sets its sRGB treatment, and a skipped
+// image (data: URI / no buffer / no URI) is never retried — the same cached
+// -1 semantics, just decided up front instead of mid-walk.
+static void queueMaterialSlots(GltfLoadCtx& ctx, const cgltf_material* mat,
+                               vector<PendingTexture>& pending,
+                               vector<bool>& decided)
+{
+    if (mat == nullptr)
+        return;
+
+    const auto queueSlot = [&](const cgltf_texture_view& view, bool srgb) {
+        if (view.texture == nullptr || view.texture->image == nullptr)
+            return;
+        const int idx = (int)(view.texture->image - ctx.data->images);
+        if (decided[(size_t)idx])
+            return;                                // already decided
+        decided[(size_t)idx] = true;
+        PendingTexture& p = pending[(size_t)idx];
+        p.srgb = srgb;
+
+        const cgltf_image* image = view.texture->image;
+
+        // data: URIs stay unsupported (neither a file nor a bufferView).
+        if (image->uri != nullptr && string(image->uri).rfind("data:", 0) == 0)
+        {
+            Log::warn("Scene",
+                      "glTF image #%d ('%s'): data: URIs are not supported; "
+                      "using material color",
+                      idx, image->name ? image->name : "unnamed");
+            return;                                // p.decode stays false
+        }
+
+        // Embedded (bufferView) images — .glb's default layout packs the
+        // PNG/JPG bytes into the binary buffer; cgltf_load_buffers already
+        // loaded them, so decode straight from memory (stb detects format).
+        if (image->buffer_view != nullptr)
+        {
+            const cgltf_buffer* buf = image->buffer_view->buffer;
+            if (buf == nullptr || buf->data == nullptr || image->buffer_view->size == 0)
+            {
+                Log::warn("Scene", "glTF image #%d ('%s'): embedded image has no "
+                          "buffer data; using material color",
+                          idx, image->name ? image->name : "unnamed");
+                return;
+            }
+            p.bytes = (const unsigned char*)buf->data + image->buffer_view->offset;
+            p.len   = (int)image->buffer_view->size;
+            p.decode = true;
+            return;
+        }
+
+        // No URI and no bufferView — nothing to load.
+        if (image->uri == nullptr)
+            return;
+
+        // Percent-decode into a copy (cgltf_decode_uri mutates in place, and
+        // the uri string is owned by the cgltf document).
+        string uri = image->uri;
+        vector<char> decoded(uri.begin(), uri.end());
+        decoded.push_back('\0');
+        cgltf_decode_uri(decoded.data());
+        uri.assign(decoded.data());
+        p.uri  = uri;
+        p.path = (ctx.dir / uri).generic_string();
+        p.decode = true;
+    };
+
+    // Visit the same 5 slots in the same order as bindGltfMaterial.
+    queueSlot(mat->pbr_metallic_roughness.base_color_texture, true);
+    queueSlot(mat->normal_texture, false);
+    queueSlot(mat->pbr_metallic_roughness.metallic_roughness_texture, false);
+    queueSlot(mat->occlusion_texture, false);
+    queueSlot(mat->emissive_texture, true);
+}
+
+// Depth-first pre-walk mirroring walkNode / appendMeshTriangles, collecting
+// each (node, mesh) instance's primitive materials in traversal order.  No
+// triangle work — just enough to know WHICH images the graph walk will bind,
+// and in what order, so the first-reference sRGB decision matches it.
+static void collectPrimitiveMaterials(const cgltf_node* node,
+                                      vector<const cgltf_material*>& mats)
+{
+    if (node->mesh != nullptr)
+        for (cgltf_size pi = 0; pi < node->mesh->primitives_count; ++pi)
+            if (node->mesh->primitives[pi].material != nullptr)
+                mats.push_back(node->mesh->primitives[pi].material);
+    for (cgltf_size c = 0; c < node->children_count; ++c)
+        collectPrimitiveMaterials(node->children[c], mats);
+}
+
+// Decode every queued glTF image in parallel, then assemble the survivors
+// into Scene::textures in image-index order and fill ctx.imageToTexId.
 //
-// - Dedup by cgltf image INDEX: a texture shared across primitives or across
-//   material slots loads once.  (Consequence: the FIRST slot to reference an
-//   image sets its sRGB treatment; no real file shares one image between a
-//   color and a data role.)
-// - External PNG/JPG file URIs (relative to the .gltf/.glb) AND images
-//   embedded in the .glb buffer (buffer_view, decoded from memory) load;
-//   data: URIs are skipped with a warning — shading falls back to the
-//   material's own value.
-// - URIs are percent-decoded (glTF allows %20, unicode, …) before use.
-//
-// @return Scene::textures index (>= 0), or -1 (empty slot / unsupported
-//         image source / load failure).
+// stbi_load / stbi_load_from_memory are thread-safe per call, and decode +
+// sRGB-linearize touch no shared state, so the ~30 × 2048² JPEG dump that
+// took seconds of serial decode becomes one wave of worker threads.  The
+// ASSEMBLY stays serial: texture ids are Scene::textures indices, and
+// push_back must be ordered deterministically.
+static void preloadGltfTextures(GltfLoadCtx& ctx,
+                                const vector<const cgltf_material*>& mats)
+{
+    const int nImages = (int)ctx.data->images_count;
+    if (nImages == 0)
+        return;
+
+    vector<PendingTexture> pending((size_t)nImages);
+    vector<bool>           decided((size_t)nImages, false);
+    for (const cgltf_material* mat : mats)
+        queueMaterialSlots(ctx, mat, pending, decided);
+
+    // ---- Parallel decode (atomic index pull keeps workers balanced) ----
+    int decodeCount = 0;
+    for (const PendingTexture& p : pending)
+        if (p.decode) ++decodeCount;
+
+    vector<TextureDecodeOut> results((size_t)nImages);
+    if (decodeCount > 0)
+    {
+        const unsigned nThreads = (unsigned)std::max<size_t>(
+            1, std::min<size_t>(std::thread::hardware_concurrency(),
+                                (size_t)decodeCount));
+        std::atomic<int> next{0};
+        vector<std::thread> workers;
+        workers.reserve(nThreads);
+        for (unsigned t = 0; t < nThreads; ++t)
+            workers.emplace_back([&] {
+                for (int i = next.fetch_add(1, std::memory_order_relaxed);
+                     i < nImages;
+                     i = next.fetch_add(1, std::memory_order_relaxed))
+                {
+                    const PendingTexture& p = pending[(size_t)i];
+                    if (!p.decode) continue;
+                    results[(size_t)i].ok = decodeTexture(
+                        p.path, p.bytes, p.len, p.srgb, results[(size_t)i].td);
+                }
+            });
+        for (std::thread& t : workers)
+            t.join();                       // join → decodes visible
+    }
+
+    // ---- Serial assembly: deterministic ids, logs in image order ----
+    for (int i = 0; i < nImages; ++i)
+    {
+        const PendingTexture& p = pending[(size_t)i];
+        if (!p.decode)
+        {
+            ctx.imageToTexId[(size_t)i] = -1;   // unreferenced or skipped
+            continue;
+        }
+        const TextureDecodeOut& r = results[(size_t)i];
+        if (!r.ok)
+        {
+            if (p.bytes)
+                Log::error("Scene", "Failed to decode embedded texture image "
+                          "(%d bytes)", p.len);
+            else
+                Log::error("Scene", "Failed to load texture image: %s",
+                          p.path.c_str());
+            ctx.imageToTexId[(size_t)i] = -1;
+            continue;
+        }
+        const int id = (int)ctx.scene.textures.size();
+        ctx.scene.textures.push_back(std::move(r.td));
+        ctx.imageToTexId[(size_t)i] = id;
+        if (p.bytes)
+            Log::info("Scene", "Auto-loaded embedded glTF texture (image #%d)", i);
+        else
+            Log::info("Scene", "Auto-loaded glTF texture '%s' (image #%d)",
+                      p.uri.c_str(), i);
+    }
+}
+
+// Resolve one glTF material slot (a cgltf_texture_view) to its global
+// Scene::textures index.  All referenced images were pre-decoded in parallel
+// by preloadGltfTextures, so this is a pure lookup — the decode and the
+// first-reference sRGB decision both happened up front.
 static int resolveGltfTextureSlot(GltfLoadCtx& ctx,
-                                  const cgltf_texture_view& view,
-                                  bool srgb)
+                                  const cgltf_texture_view& view)
 {
     if (view.texture == nullptr || view.texture->image == nullptr)
         return -1;
-
-    cgltf_image* image = view.texture->image;
-    const int imageIdx = (int)(image - ctx.data->images);
-
-    if (ctx.imageToTexId[imageIdx] >= 0)
-        return ctx.imageToTexId[imageIdx];   // already loaded
-
-    // data: URIs stay unsupported (neither a file nor a bufferView) — warn
-    // once per image and fall back to the material's own value.
-    if (image->uri != nullptr && string(image->uri).rfind("data:", 0) == 0)
-    {
-        Log::warn("Scene",
-                  "glTF image #%d ('%s'): data: URIs are not supported; "
-                  "using material color",
-                  imageIdx, image->name ? image->name : "unnamed");
-        ctx.imageToTexId[imageIdx] = -1;   // remember — warn once per image
-        return -1;
-    }
-
-    // Embedded (bufferView) images — .glb's default layout packs the PNG/JPG
-    // bytes into the binary buffer.  cgltf_load_buffers already loaded those
-    // bytes, so decode straight from memory (stb auto-detects the format).
-    if (image->buffer_view != nullptr)
-    {
-        const cgltf_buffer* buf = image->buffer_view->buffer;
-        if (buf == nullptr || buf->data == nullptr || image->buffer_view->size == 0)
-        {
-            Log::warn("Scene", "glTF image #%d ('%s'): embedded image has no "
-                      "buffer data; using material color",
-                      imageIdx, image->name ? image->name : "unnamed");
-            ctx.imageToTexId[imageIdx] = -1;
-            return -1;
-        }
-        const unsigned char* bytes =
-            (const unsigned char*)buf->data + image->buffer_view->offset;
-        const int id = loadTextureMemory(ctx.scene, bytes,
-                                         (int)image->buffer_view->size, srgb);
-        if (id >= 0)
-            Log::info("Scene", "Auto-loaded embedded glTF texture (image #%d)",
-                      imageIdx);
-        ctx.imageToTexId[imageIdx] = id;
-        return id;
-    }
-
-    // No URI and no bufferView — nothing to load.
-    if (image->uri == nullptr)
-    {
-        ctx.imageToTexId[imageIdx] = -1;
-        return -1;
-    }
-
-    // Percent-decode into a copy (cgltf_decode_uri mutates in place, and the
-    // uri string is owned by the cgltf document).
-    string uri = image->uri;
-    vector<char> decoded(uri.begin(), uri.end());
-    decoded.push_back('\0');
-    cgltf_decode_uri(decoded.data());
-    uri.assign(decoded.data());
-
-    const int id = loadTextureFile(ctx.scene,
-                                   (ctx.dir / uri).generic_string(), srgb);
-    if (id >= 0)
-        Log::info("Scene", "Auto-loaded glTF texture '%s' (image #%d)",
-                  uri.c_str(), imageIdx);
-    ctx.imageToTexId[imageIdx] = id;
-    return id;
+    const int imageIdx = (int)(view.texture->image - ctx.data->images);
+    return ctx.imageToTexId[imageIdx];
 }
 
 // Resolve a glTF material's five texture slots into a TextureBinding.
@@ -138,12 +261,12 @@ static TextureBinding bindGltfMaterial(GltfLoadCtx& ctx,
     if (mat == nullptr)
         return b;
     b.baseColor         = resolveGltfTextureSlot(ctx,
-        mat->pbr_metallic_roughness.base_color_texture, true);
-    b.normal            = resolveGltfTextureSlot(ctx, mat->normal_texture, false);
+        mat->pbr_metallic_roughness.base_color_texture);
+    b.normal            = resolveGltfTextureSlot(ctx, mat->normal_texture);
     b.metallicRoughness = resolveGltfTextureSlot(ctx,
-        mat->pbr_metallic_roughness.metallic_roughness_texture, false);
-    b.occlusion         = resolveGltfTextureSlot(ctx, mat->occlusion_texture, false);
-    b.emissive          = resolveGltfTextureSlot(ctx, mat->emissive_texture, true);
+        mat->pbr_metallic_roughness.metallic_roughness_texture);
+    b.occlusion         = resolveGltfTextureSlot(ctx, mat->occlusion_texture);
+    b.emissive          = resolveGltfTextureSlot(ctx, mat->emissive_texture);
     // glTF's pbrMetallicRoughness scalar factors:
     // When an ORM texture is bound, factors act as multipliers (glTF spec default 1.0).
     // When no ORM texture is bound, cgltf fills 1.0 by default — if factors were left at
@@ -482,10 +605,31 @@ pair<int, int> loadGLTF(Scene& scene, const string& gltfPath)
         vector<int>(data->images_count, -1)
     };
 
+    const cgltf_scene* gltfScene = data->scene;   // default scene
+
+    // ---- Parallel texture pre-decode ----
+    // Collect the materials the walk below will bind (in walk order), then
+    // decode every referenced image in parallel.  The graph walk itself is
+    // fast; the ~30 × 2048² JPEG decode was the serial startup bottleneck.
+    vector<const cgltf_material*> mats;
+    if (gltfScene != nullptr && gltfScene->nodes_count > 0)
+    {
+        for (cgltf_size i = 0; i < gltfScene->nodes_count; ++i)
+            collectPrimitiveMaterials(gltfScene->nodes[i], mats);
+    }
+    else
+    {
+        // No scene graph (some minimal files): every mesh's material binds.
+        for (cgltf_size mi = 0; mi < data->meshes_count; ++mi)
+            for (cgltf_size pi = 0; pi < data->meshes[mi].primitives_count; ++pi)
+                if (data->meshes[mi].primitives[pi].material != nullptr)
+                    mats.push_back(data->meshes[mi].primitives[pi].material);
+    }
+    preloadGltfTextures(ctx, mats);
+
     // ---- Walk the scene graph, emitting one transformed instance per
     // (node, mesh).  Parts scattered across nodes are assembled by the
     // accumulated node transforms — the glTF-spec behavior.
-    const cgltf_scene* gltfScene = data->scene;   // default scene
     if (gltfScene != nullptr && gltfScene->nodes_count > 0)
     {
         for (cgltf_size i = 0; i < gltfScene->nodes_count; ++i)
