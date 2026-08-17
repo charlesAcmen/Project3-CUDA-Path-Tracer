@@ -270,16 +270,6 @@ void pathtraceCopyDisplayToHost()
                pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 }
 
-// ====================================================================
-// Debug Helpers (called from pathtrace)
-// ====================================================================
-
-static void debugPrintBounce(int iter, int depth, int num_paths) {
-    if (g_profiler().verbose()) {
-        printf("  iter=%d depth=%d paths=%d\n", iter, depth, num_paths);
-    }
-}
-
 // Update the ImGui trace-depth display after each frame.
 // Per-kernel timing is synced by Profiler::updateGuiData() internally.
 static void updateGuiAfterFrame(Profiler& prof) {
@@ -363,7 +353,6 @@ void pathtrace(uchar4* pbo, int iter)
         bool allDead = compactActivePaths(num_paths);
         done = allDead || (depth >= traceDepth);
 
-        debugPrintBounce(iter, depth, num_paths);
         g_profiler().guiData().TracedDepth = depth;
     }
 
