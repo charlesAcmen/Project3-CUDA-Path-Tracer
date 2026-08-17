@@ -20,22 +20,15 @@ using namespace std;
 
 namespace SceneLoader {
 
-// Upload decoded RGB texels into Scene::textures.
-//
-// The shading pipeline works in linear space, and color PNG/JPG texels are
-// sRGB, so linearization happens here once, at load time — the GPU sampler
-// then returns linear colors that feed the accumulation buffer directly.
-// DATA maps (normal / metallic-roughness / occlusion) whose bytes are already
-// linear pass through untouched (srgb=false).
-//
-// @return Index into Scene::textures (>= 0), or -1 on failure
-static int uploadTexturePixels(Scene& scene, const stbi_uc* data,
-                               int w, int h, bool srgb)
+// stbi texels (RGB bytes) → host vec3 texels.  Color maps (srgb) get the
+// sRGB→linear curve applied here at load time — the GPU sampler then returns
+// linear colors that feed the accumulation buffer directly.  DATA maps
+// (normal / metallic-roughness / occlusion) whose bytes are already linear
+// pass through untouched (srgb=false).
+static std::vector<glm::vec3> linearizeTexels(const stbi_uc* data,
+                                              int w, int h, bool srgb)
 {
-    TextureData td;
-    td.width  = w;
-    td.height = h;
-    td.pixels.resize((size_t)w * (size_t)h);
+    std::vector<glm::vec3> pixels((size_t)w * (size_t)h);
 
     // sRGB → linear: c <= 0.04045 ? c/12.92 : ((c+0.055)/1.055)^2.4
     const auto lin = [](float c) {
@@ -47,14 +40,62 @@ static int uploadTexturePixels(Scene& scene, const stbi_uc* data,
         const float r = data[3 * i + 0] / 255.0f;
         const float g = data[3 * i + 1] / 255.0f;
         const float b = data[3 * i + 2] / 255.0f;
-        td.pixels[i] = srgb
+        pixels[i] = srgb
             ? glm::vec3(lin(r), lin(g), lin(b))
             : glm::vec3(r, g, b);
     }
+    return pixels;
+}
+
+// Upload decoded RGB texels into Scene::textures.
+//
+// @return Index into Scene::textures (>= 0), or -1 on failure
+static int uploadTexturePixels(Scene& scene, const stbi_uc* data,
+                               int w, int h, bool srgb)
+{
+    TextureData td;
+    td.width  = w;
+    td.height = h;
+    td.pixels = linearizeTexels(data, w, h, srgb);
 
     const int id = (int)scene.textures.size();
     scene.textures.push_back(std::move(td));
     return id;
+}
+
+/**
+ * Decode one image into a host TextureData without touching Scene::textures.
+ *
+ * Decode + sRGB-linearize are the expensive, thread-safe part of texture
+ * loading — the parallel glTF pre-pass (gltf_loader.cpp) calls this from
+ * worker threads.  The caller owns `out` and decides when and how to insert
+ * it into Scene::textures, so texture ids stay deterministic.
+ *
+ * @param path   File to decode (used when `bytes == nullptr`)
+ * @param bytes  In-memory image payload (used when non-null — a .glb
+ *               bufferView); stb auto-detects the format from the bytes
+ * @param len    Byte length of `bytes`
+ * @param srgb   True: linearize sRGB texels (color maps); false: keep raw
+ *               byte values (normal/ORM/occlusion maps)
+ * @param out    Receives the decoded texels on success
+ * @return       True on success; `out` untouched on decode failure
+ */
+bool decodeTexture(const std::string& path, const unsigned char* bytes, int len,
+                   bool srgb, TextureData& out)
+{
+    int w = 0, h = 0, comp = 0;
+    // req_comp = 3 forces RGB (3 channels), so texels are always vec3.
+    stbi_uc* data = (bytes != nullptr)
+        ? stbi_load_from_memory(bytes, len, &w, &h, &comp, 3)
+        : stbi_load(path.c_str(), &w, &h, &comp, 3);
+    if (data == nullptr)
+        return false;
+
+    out.width  = w;
+    out.height = h;
+    out.pixels = linearizeTexels(data, w, h, srgb);
+    stbi_image_free(data);
+    return true;
 }
 
 /**

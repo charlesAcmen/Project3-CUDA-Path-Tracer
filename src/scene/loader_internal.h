@@ -41,6 +41,13 @@ int loadTextureFile(Scene& scene, const std::string& path, bool srgb = true);
 int loadTextureMemory(Scene& scene, const unsigned char* bytes, int len,
                       bool srgb);
 
+// Decode one image into a host TextureData WITHOUT touching Scene::textures
+// (thread-safe — used by the parallel glTF texture pre-pass).  `bytes`
+// non-null → decode from memory; else decode from `path`.  On success fills
+// `out` and returns true.
+bool decodeTexture(const std::string& path, const unsigned char* bytes, int len,
+                   bool srgb, TextureData& out);
+
 // Load triangles from a Wavefront OBJ file, appending to `triangles`.
 // When `scene` is non-null, the companion .mtl's image maps
 // (map_Kd / map_Bump / map_Ke) are stamped onto each face's triangles by
