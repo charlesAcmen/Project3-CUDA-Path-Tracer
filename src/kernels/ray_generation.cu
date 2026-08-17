@@ -43,7 +43,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
         // Pinhole ray direction (centre-of-lens ray, undeflected)
         glm::vec3 pinholeDir = glm::normalize(cam.view
-            - cam.right * cam.pixelLength.x * ((float)x + jitterX - (float)cam.resolution.x * 0.5f)
+            + cam.right * cam.pixelLength.x * ((float)x + jitterX - (float)cam.resolution.x * 0.5f)
             - cam.up    * cam.pixelLength.y * ((float)y + jitterY - (float)cam.resolution.y * 0.5f));
 
         if (cam.lensRadius > 0.0f) {

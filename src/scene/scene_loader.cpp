@@ -309,6 +309,8 @@ static void parseCamera(const json& data, Scene& scene)
     camera.view        = glm::normalize(camera.lookAt - camera.position);
     camera.right       = glm::normalize(
         glm::cross(camera.view, camera.up));
+    camera.up          = glm::normalize(
+        glm::cross(camera.right, camera.view));
     camera.pixelLength = glm::vec2(
         2 * xscaled / (float)camera.resolution.x,
         2 * yscaled / (float)camera.resolution.y);

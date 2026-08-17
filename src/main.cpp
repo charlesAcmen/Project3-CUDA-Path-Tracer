@@ -123,7 +123,7 @@ void saveImage()
         {
             int index = x + (y * width);
             glm::vec3 pix = renderState->image[index];
-            img.setPixel(width - 1 - x, y, pix);
+            img.setPixel(x, y, pix);
         }
     }
 
