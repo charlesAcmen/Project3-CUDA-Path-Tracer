@@ -144,16 +144,29 @@ static TextureBinding bindGltfMaterial(GltfLoadCtx& ctx,
         mat->pbr_metallic_roughness.metallic_roughness_texture, false);
     b.occlusion         = resolveGltfTextureSlot(ctx, mat->occlusion_texture, false);
     b.emissive          = resolveGltfTextureSlot(ctx, mat->emissive_texture, true);
-    // glTF's own pbrMetallicRoughness scalar defaults (cgltf fills the spec
-    // defaults — roughness 1.0, metallic 1.0, baseColorFactor (1,1,1,1) —
-    // when the file omits them).  These are fallbacks for Pbr materials whose
-    // JSON did not declare ROUGHNESS / METALLIC / an explicit color; non-glTF
-    // meshes keep the -1 sentinels.
-    b.roughnessFactor = mat->pbr_metallic_roughness.roughness_factor;
-    b.metallicFactor  = mat->pbr_metallic_roughness.metallic_factor;
-    b.baseColorFactor = glm::vec3(mat->pbr_metallic_roughness.base_color_factor[0],
-                                  mat->pbr_metallic_roughness.base_color_factor[1],
-                                  mat->pbr_metallic_roughness.base_color_factor[2]);
+    // glTF's pbrMetallicRoughness scalar factors:
+    // When an ORM texture is bound, factors act as multipliers (glTF spec default 1.0).
+    // When no ORM texture is bound, cgltf fills 1.0 by default — if factors were left at
+    // default 1.0 without an ORM texture, keep -1 sentinels so the Pbr dielectric fallback
+    // (metallic 0.0, roughness 0.5) is reachable rather than forcing untextured meshes into rough metal.
+    if (mat->has_pbr_metallic_roughness)
+    {
+        if (b.metallicRoughness >= 0)
+        {
+            b.roughnessFactor = mat->pbr_metallic_roughness.roughness_factor;
+            b.metallicFactor  = mat->pbr_metallic_roughness.metallic_factor;
+        }
+        else
+        {
+            if (mat->pbr_metallic_roughness.metallic_factor != 1.0f)
+                b.metallicFactor = mat->pbr_metallic_roughness.metallic_factor;
+            if (mat->pbr_metallic_roughness.roughness_factor != 1.0f)
+                b.roughnessFactor = mat->pbr_metallic_roughness.roughness_factor;
+        }
+        b.baseColorFactor = glm::vec3(mat->pbr_metallic_roughness.base_color_factor[0],
+                                      mat->pbr_metallic_roughness.base_color_factor[1],
+                                      mat->pbr_metallic_roughness.base_color_factor[2]);
+    }
     return b;
 }
 
