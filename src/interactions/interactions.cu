@@ -482,6 +482,12 @@ __host__ __device__ void scatterRay(
                 const float offsetSign = entering ? 1.0f : -1.0f;
                 pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
                 pathSegment.ray.direction = reflectedDir;
+                // Internal reflection / TIR happens inside the colored medium;
+                // external Fresnel reflection off the outer boundary is achromatic (uncolored).
+                if (!entering)
+                {
+                    pathSegment.color *= m.color;
+                }
             }
             else
             {
@@ -490,8 +496,9 @@ __host__ __device__ void scatterRay(
                 const float offsetSign = entering ? -1.0f : 1.0f;
                 pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
                 pathSegment.ray.direction = refractedDir;
+                // Light traverses into / out of the colored medium: apply transmission attenuation
+                pathSegment.color *= m.color;
             }
-            pathSegment.color *= m.color;
             break;
         }
         case MaterialType::Reflective:
