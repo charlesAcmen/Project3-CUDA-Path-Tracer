@@ -69,6 +69,10 @@ struct BvhHit
     glm::vec3 normal;
     int       triIndex = -1;
     glm::vec2 uv;   // interpolated texture coordinate at the hit
+    // Per-triangle tangent aligned with the texture's +U axis (world space,
+    // orthogonalized against the interpolated normal).  (0,0,0) sentinel =
+    // degenerate UVs → the shading side skips tangent-space normal mapping.
+    glm::vec3 tangent;
 };
 
 /**
@@ -139,14 +143,16 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
                 float t;
                 glm::vec3 triNormal;
                 glm::vec2 triUv;
-                if (triangleIntersectionTest(objRay, tris[triBase + j], t, triNormal, triUv))
+                glm::vec3 triTangent;
+                if (triangleIntersectionTest(objRay, tris[triBase + j], t, triNormal, triUv, triTangent))
                 {
                     if (t < result.t)
                     {
-                        result.t       = t;
-                        result.normal  = triNormal;
-                        result.uv      = triUv;
-                        result.hit     = true;
+                        result.t        = t;
+                        result.normal   = triNormal;
+                        result.uv       = triUv;
+                        result.tangent  = triTangent;
+                        result.hit      = true;
                         result.triIndex = triBase + j;
                     }
                 }

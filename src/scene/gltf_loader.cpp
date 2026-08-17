@@ -384,8 +384,9 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
 
     // Per-triangle texture slots from the primitive's glTF material.  All five
     // roles (baseColor/normal/ORM/occlusion/emissive) resolve into the global
-    // texture table and are stamped on every triangle; only baseColor is
-    // sampled by the current shading — the rest are data for future features.
+    // texture table and are stamped on every triangle.  baseColor, the ORM
+    // (metallicRoughness) channels, and the normal slot are sampled by the
+    // current shading; occlusion/emissive are data for future features.
     const TextureBinding binding = bindGltfMaterial(ctx, prim->material);
 
     const cgltf_size vertCount = posAcc->count;
