@@ -13,9 +13,10 @@
 //
 // The roles mirror glTF material slots (base / normal / metallic-roughness
 // ORM / occlusion / emissive).  The unified GGX surface samples baseColor +
-// metallicRoughness (G=roughness, B=metallic); normal/occlusion/emissive are
-// stored so future features (normal mapping, emissive maps) just sample the
-// slot that is already bound.
+// metallicRoughness (G=roughness, B=metallic); the normal slot is sampled by
+// resolveShadingNormal for tangent-space normal mapping.  occlusion/emissive
+// are stored so future features (emissive maps, AO) just sample the slot that
+// is already bound.
 struct TextureBinding
 {
     int baseColor        = -1;
@@ -124,8 +125,8 @@ struct TextureInfo
 //
 // Bundled as one struct rather than passing pixels+infos as separate kernel
 // parameters so the sampler signatures stay stable as texture roles are
-// added — a future feature (normal map, emissive map) reads its slot through
-// the same table without touching any function signature.
+// added — a future feature (emissive map) reads its slot through the same
+// table without touching any function signature.
 struct TextureTable
 {
     // Owned device pointers (cudaMalloc/cudaFree) — non-const here; samplers
@@ -241,6 +242,10 @@ struct ShadeableIntersection
   //t > 0.0f: intersection with an object
   //t < 0.0f: no intersection with an object(initial value)
   glm::vec3 surfaceNormal;
+  // Per-triangle tangent aligned with the texture's +U axis (world space,
+  // orthogonalized against the interpolated normal).  (0,0,0) sentinel =
+  // degenerate UVs → tangent-space normal mapping is skipped.
+  glm::vec3 tangent;
   int materialId;
   glm::vec2 uv;   // interpolated texture coordinate at the hit point
   TextureBinding tex;   // per-triangle texture slots (copied from the hit triangle)
