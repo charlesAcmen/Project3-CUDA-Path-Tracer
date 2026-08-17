@@ -381,6 +381,275 @@ __host__ __device__ void resolvePbrSurfaceParams(
     diffuseColor  = baseColor * (1.0f - metallic);
 }
 
+// ---- GGX per-lobe helpers (level-2 split of the Reflective/Pbr branch) ----
+// Each helper fills (scatterDir, throughput) for one lobe of the unified
+// metallic-roughness surface.  They are file-local; scatterGgxSurface owns the
+// split probability and applies the chosen (scatterDir, throughput) to the path.
+
+static __host__ __device__ void ggxScatterMirror(
+    glm::vec3& scatterDir, glm::vec3& throughput,
+    const glm::vec3& rayDir, const glm::vec3& shadingNormal,
+    float NdotV, const glm::vec3& F0)
+{
+    // Type: Reflective chrome (metallic = 1) / Pbr metallic > 0.95, smooth.
+    // Near-pure metal: a single mirror lobe — F0 ≈ baseColor
+    // and diffuseColor = baseColor·(1−metallic) is < 5% of the albedo,
+    // so virtually all energy is in the specular reflection.  Below
+    // the threshold the diffuse term is NOT negligible (e.g. metallic
+    // 0.6 → 40% diffuse albedo); collapsing those to a mirror would
+    // silently drop the diffuse lobe, so they fall through to the
+    // specular/diffuse split in scatterGgxSurface.
+    scatterDir = glm::reflect(rayDir, shadingNormal);
+    throughput = fresnelSchlickF0(NdotV, F0);
+}
+
+static __host__ __device__ void ggxScatterSmoothSpecular(
+    glm::vec3& scatterDir, glm::vec3& throughput,
+    const glm::vec3& rayDir, const glm::vec3& shadingNormal,
+    float NdotV, const glm::vec3& F0, float specProb)
+{
+    // Specular half of the smooth-dielectric split: mirror reflect weighted by
+    // Fresnel / specProb (probability compensation).  The diffuse half of the
+    // same split reuses ggxScatterDiffuse.
+    scatterDir = glm::reflect(rayDir, shadingNormal);
+    throughput = fresnelSchlickF0(NdotV, F0) / specProb;
+}
+
+static __host__ __device__ void ggxScatterRoughSpecular(
+    glm::vec3& scatterDir, glm::vec3& throughput,
+    const glm::vec3& rayDir, const glm::vec3& shadingNormal,
+    float alpha, float NdotV, const glm::vec3& F0, float specProb,
+    RngState& rng)
+{
+    // rough — specular half (prob specProb).
+    // Importance-sample the GGX half-vector H, reflect
+    // the view about it.  The NDF and the cos(N·L) cancel out of
+    // the weight (D·(N·H)/(4·(V·H)) appears in both f and pdf):
+    //   f = F·G·D/(4·(N·V)(N·L)) ,  pdf = D·(N·H)/(4·(V·H))
+    //   weight = f·(N·L)/pdf = F·G·(V·H)/((N·V)·(N·H))
+    const glm::vec3 H   = sampleGgxHalfVector(shadingNormal, alpha, rng);
+    scatterDir = glm::reflect(rayDir, H);
+    if (glm::dot(shadingNormal, scatterDir) > 0.0f)
+    {
+        const float NdotL = glm::clamp(glm::dot(shadingNormal, scatterDir), 0.0f, 1.0f);
+        const float NdotH = glm::max(glm::dot(shadingNormal, H), 1e-4f);
+        const float VdotH = glm::max(glm::dot(-rayDir, H), 0.0f);
+        const float G = smithG1Ggx(alpha, NdotV) * smithG1Ggx(alpha, NdotL);
+        const glm::vec3 F = fresnelSchlickF0(VdotH, F0);
+        throughput = F * (G * VdotH / (NdotV * NdotH)) / specProb;
+    }
+    else
+    {
+        // Below-surface sample (lobe backfacing the surface):
+        // zero weight, but scatter the mirror reflection so the
+        // path survives for Russian roulette to terminate it.
+        scatterDir = glm::reflect(rayDir, shadingNormal);
+        throughput = glm::vec3(0.0f);
+    }
+}
+
+static __host__ __device__ void ggxScatterDiffuse(
+    glm::vec3& scatterDir, glm::vec3& throughput,
+    const glm::vec3& shadingNormal, const glm::vec3& diffuseColor,
+    const glm::vec3& F_view, float specProb, RngState& rng)
+{
+    // rough — diffuse half (prob 1 − specProb).
+    // Albedo is already scaled by (1 − metallic); the per-channel
+    // (1 − F_view) complement ensures specular + diffuse conserve
+    // energy.
+    // Also serves as the diffuse half of the smooth-dielectric split.
+    scatterDir = calculateRandomDirectionInHemisphere(shadingNormal, rng);
+    throughput = diffuseColor * (glm::vec3(1.0f) - F_view) / (1.0f - specProb);
+}
+
+// ---- Per-material scatter helpers (level-1 split of scatterRay) ----------
+
+static __host__ __device__ void scatterGgxSurface(
+    PathSegment& pathSegment,
+    const glm::vec3& intersect,
+    const glm::vec3& rayDir,
+    const glm::vec3& shadingNormal,
+    const glm::vec2& uv,
+    const TextureBinding& tex,
+    const Material& m,
+    RngState& rng,
+    const TextureTable& textures)
+{
+    // Unified metallic-roughness GGX surface (legacy JSON Specular →
+    // Reflective is just the metallic=1 chrome case).  Resolve the
+    // per-hit surface params: roughness (mirror threshold below
+    // ROUGHNESS_THRESHOLD), alpha = r², conductor F0, diffuse albedo.
+    float r, metallic, alpha;
+    glm::vec3 F0, diffuseColor;
+    resolvePbrSurfaceParams(r, metallic, alpha, F0, diffuseColor, tex, textures, uv, m);
+
+    const float NdotV      = glm::clamp(glm::dot(shadingNormal, -rayDir), 1e-4f, 1.0f);
+    const glm::vec3 F_view = fresnelSchlickF0(NdotV, F0);
+    // Diffuse/specular split probability from the graze Fresnel, so a
+    // surface that is mostly specular (metal, or dielectric at grazing
+    // angles) spends most samples on the specular lobe.  A metal's
+    // diffuse lobe carries only (1−metallic) of the albedo, so as
+    // metallic rises the split is pushed toward 1.0 — a pure metal
+    // (metallic = 1 ⇒ diffuseColor = 0) spends no samples on the
+    // zero-weight diffuse branch.  The mix keeps it unbiased and
+    // firefly-free: (1−specProb) = (1−metallic)·(1−clampedProb) shrinks
+    // in lockstep with diffuseColor = baseColor·(1−metallic), so the
+    // diffuse branch weight diffuseColor·(1−F_view)/(1−specProb)
+    // = baseColor·(1−F_view)/(1−clampedProb) stays bounded and
+    // independent of metallic (a naive specProb = 1 would blow it up).
+    const float clampedProb = glm::clamp(luminance(F_view), 0.05f, 0.95f);
+    const float specProb    = glm::mix(clampedProb, 1.0f,
+                                       glm::clamp(metallic, 0.0f, 1.0f));
+
+    glm::vec3 scatterDir;
+    glm::vec3 throughput;
+
+    if (r < ROUGHNESS_THRESHOLD && metallic > PBR_MIRROR_METALLIC_THRESHOLD)
+    {
+        ggxScatterMirror(scatterDir, throughput, rayDir, shadingNormal, NdotV, F0);
+    }
+    else if (r < ROUGHNESS_THRESHOLD)
+    {
+        // Type: Pbr, metallic ≤ 0.95 (smooth dielectric / mid metal).
+        // F0 ≈ 0.04, so most energy is diffuse.  Same probabilistic
+        // split as rough surfaces — specular = mirror reflect with
+        // probability specProb, diffuse with 1−specProb.  This avoids
+        // the old shortcut that dropped ~96% of the energy for smooth
+        // dielectrics (and the mirror shortcut above dropping mid-metal
+        // diffuse energy).
+        if (rng.next(HaltonDim::PbrSplit) < specProb)
+        {
+            ggxScatterSmoothSpecular(scatterDir, throughput, rayDir, shadingNormal, NdotV, F0, specProb);
+        }
+        else
+        {
+            ggxScatterDiffuse(scatterDir, throughput, shadingNormal, diffuseColor, F_view, specProb, rng);
+        }
+    }
+    else if (rng.next(HaltonDim::PbrSplit) < specProb)   // dim 10 (prime 31): GGX split
+    {
+        ggxScatterRoughSpecular(scatterDir, throughput, rayDir, shadingNormal, alpha, NdotV, F0, specProb, rng);
+    }
+    else
+    {
+        ggxScatterDiffuse(scatterDir, throughput, shadingNormal, diffuseColor, F_view, specProb, rng);
+    }
+
+    pathSegment.color *= throughput;
+    float offsetSign = glm::dot(scatterDir, shadingNormal) > 0.0f ? 1.0f : -1.0f;
+    pathSegment.ray.origin = intersect + shadingNormal * (EPSILON * offsetSign);
+    pathSegment.ray.direction = scatterDir;
+}
+
+// Per-material helper: Fresnel-weighted Russian roulette between reflection
+// and refraction for a Refractive material.  Keys entry/exit off the TRUE
+// surface normal (never the shading normal), and offsets the origin by
+// EPSILON into the correct side of the surface.
+static __host__ __device__ void scatterRefractive(
+    PathSegment& pathSegment,
+    const glm::vec3& intersect,
+    const glm::vec3& normal,
+    const Material& m,
+    RngState& rng)
+{
+    float cosThetaI;
+    const HitSide hitSide = classifyRefraction(pathSegment.ray.direction, normal, cosThetaI);
+    const bool entering = (hitSide == HitSide::Outside);
+    // Use invIndexOfRefraction to avoid division on entry.
+    // The offset sign is keyed off the entering/exiting state rather than
+    // the new direction's dot product, which is numerically unstable near grazing angles.
+    const float etaRatio = entering ? m.invIndexOfRefraction : m.indexOfRefraction;
+    const glm::vec3 refractNormal = entering ? normal : -normal;
+
+    // etaRatio = n1/n2, already precomputed (invIOR on entry, IOR on
+    // exit) — the Fresnel functions take it directly instead of
+    // dividing by n1/n2 on the GPU.
+    // Both Fresnel functions return exactly 1.0 on total internal
+    // reflection (see fresnelSchlick / fresnelAccurate), so the roulette
+    // below normally takes the reflection branch whenever refraction is
+    // impossible.  The explicit `tir ||` below makes that unconditional.
+    //
+    // Fresnel evaluator is hardcoded to Accurate (the default renderer
+    // choice).  To switch to Schlick, change this one call — there is
+    // no runtime mode dispatch by design.
+    const float reflectance = fresnelAccurate(cosThetaI, etaRatio);
+
+    // Russian roulette: reflect with prob R, refract with prob 1-R.
+    // Throughput multiplier = (energy fraction) / (probability):
+    //   reflection:  R * color / R     = color
+    //   refraction: (1-R) * color / (1-R) = color
+    // → Fresnel factor cancels out in both branches.
+    //
+    // TIR detection from refract()'s OUTPUT — not a recomputation of k.
+    // GLM computes k = 1 - eta²(1-dot²) internally and returns a NaN
+    // vector when k < 0 (sqrt of a negative); inspecting the result
+    // catches that.  A valid refracted direction is always unit length
+    // (squared length 1.0) and NaN compares false against ANY
+    // threshold, so one check catches every degenerate shape:
+    //   valid refraction:  dot = 1.0  → !(1.0 > 0.5) = false
+    //   TIR → NaN:         dot = NaN  → !(NaN > 0.5) = true
+    //   zero vector:       dot = 0.0  → !(0.0 > 0.5) = true
+    // (glm::isnan is deliberately avoided: its CUDA branch recurses
+    // under the MSVC host pass — compiler warning C4717.)
+    glm::vec3 refractedDir = glm::refract(pathSegment.ray.direction, refractNormal, etaRatio);
+    const bool tir = !(glm::dot(refractedDir, refractedDir) > REFRACT_VALID_SQ_LEN_MIN);
+
+    if (tir || rng.next(HaltonDim::FresnelRR) < reflectance)  // dim 8 (prime 23): Fresnel roulette
+    {
+        glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
+        const float offsetSign = entering ? 1.0f : -1.0f;
+        pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
+        pathSegment.ray.direction = reflectedDir;
+        // Internal reflection / TIR happens inside the colored medium;
+        // external Fresnel reflection off the outer boundary is achromatic (uncolored).
+        if (!entering)
+        {
+            pathSegment.color *= m.color;
+        }
+    }
+    else
+    {
+        // !tir here ⇒ refractedDir is a finite unit vector; the offset
+        // pushes to the far side of the surface.
+        const float offsetSign = entering ? -1.0f : 1.0f;
+        pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
+        pathSegment.ray.direction = refractedDir;
+        // Light traverses into / out of the colored medium: apply transmission attenuation
+        pathSegment.color *= m.color;
+    }
+}
+
+// Per-material helper: pure Lambert diffuse scattering.  Albedo comes from
+// resolveBaseColor (glTF baseColor binding > JSON-declared textureId > flat color).
+static __host__ __device__ void scatterDiffuse(
+    PathSegment& pathSegment,
+    const glm::vec3& intersect,
+    const glm::vec3& shadingNormal,
+    const glm::vec2& uv,
+    const TextureBinding& tex,
+    const Material& m,
+    RngState& rng,
+    const TextureTable& textures)
+{
+    // Generate new random direction for diffuse reflection (cosine-weighted hemisphere sampling)
+    // Common mistake: offsetting along newDirection instead of normal
+    // - When newDirection is nearly parallel to the surface (grazing angle),
+    //   offset along newDirection has almost zero normal component
+    // - This causes the ray to start below the surface -> self-intersection -> shadow acne
+    glm::vec3 newDirection = calculateRandomDirectionInHemisphere(shadingNormal, rng);
+    pathSegment.ray.origin = intersect + shadingNormal * EPSILON;
+    // Apply diffuse material color (energy attenuation)
+    // multiplier = fr * cos theta/pdf(omega)
+    // where pdf(omega) = cos theta / PI
+    // BSDF of diffuse reflection: fr = R / PI
+    pathSegment.ray.direction = newDirection;
+
+    // Resolve the diffuse albedo: a per-triangle glTF baseColor binding
+    // wins over the JSON-declared Material::textureId, then over the
+    // flat material color.
+    pathSegment.color *= resolveBaseColor(tex, textures, uv, m);
+}
+
 __host__ __device__ void scatterRay(
     PathSegment & pathSegment,
     const ShadeableIntersection &hit,
@@ -390,7 +659,7 @@ __host__ __device__ void scatterRay(
 {
     // Scatter a ray according to the material's BSDF.
     // Diffuse: cosine-weighted hemisphere sampling.
-    // Reflective / Pbr: 
+    // Reflective / Pbr:
     //   Unified metallic-roughness PBR workflow.
     //   GGX microfacet NDF surface (Trowbridge-Reitz variant, Walter et al. 2007):
     //   - Smooth surfaces (r < ROUGHNESS_THRESHOLD): collapse to a mirror lobe
@@ -402,7 +671,7 @@ __host__ __device__ void scatterRay(
     //             refraction (glm::refract), with normal flipped for exit rays.
 
     // The hit record carries everything the scatter needs; unpack it here so
-    // the branch bodies below stay compact.  The exact hit point is derived
+    // the per-material helpers stay compact.  The exact hit point is derived
     // from the path ray (unit length) and hit.t — identical to what the
     // caller's getExactPointOnRay would compute, so passing it separately
     // would be redundant.
@@ -411,12 +680,6 @@ __host__ __device__ void scatterRay(
     const glm::vec2&       uv        = hit.uv;
     const TextureBinding&  tex       = hit.tex;
 
-    // Generate new random direction for diffuse reflection (cosine-weighted hemisphere sampling)
-    // Common mistake: offsetting along newDirection instead of normal
-    // - When newDirection is nearly parallel to the surface (grazing angle),
-    //   offset along newDirection has almost zero normal component
-    // - This causes the ray to start below the surface -> self-intersection -> shadow acne
-    // 
     // Opaque (double-sided) materials shade on the hit side regardless of the
     // model's winding: orient the shading normal toward the incoming ray so
     // the diffuse hemisphere / reflection lobe is on the correct side.
@@ -427,206 +690,22 @@ __host__ __device__ void scatterRay(
 
     // Offset the new ray origin off the surface by EPSILON so it cannot
     // immediately re-hit the same triangle.  The offset direction is chosen
-    // per branch below: refractive keys off the entering/exiting state
+    // per material helper below: refractive keys off the entering/exiting state
     // (numerically stable near grazing angles), reflective keys off the
     // shading-normal orientation, diffuse always pushes outward.
     switch (m.type)
     {
         case MaterialType::Refractive:
-        {
-            float cosThetaI;
-            const HitSide hitSide = classifyRefraction(pathSegment.ray.direction, normal, cosThetaI);
-            const bool entering = (hitSide == HitSide::Outside);
-            // Use invIndexOfRefraction to avoid division on entry.
-            // The offset sign is keyed off the entering/exiting state rather than
-            // the new direction's dot product, which is numerically unstable near grazing angles.
-            const float etaRatio = entering ? m.invIndexOfRefraction : m.indexOfRefraction;
-            const glm::vec3 refractNormal = entering ? normal : -normal;
-
-            // etaRatio = n1/n2, already precomputed (invIOR on entry, IOR on
-            // exit) — the Fresnel functions take it directly instead of
-            // dividing by n1/n2 on the GPU.
-            // Both Fresnel functions return exactly 1.0 on total internal
-            // reflection (see fresnelSchlick / fresnelAccurate), so the roulette
-            // below normally takes the reflection branch whenever refraction is
-            // impossible.  The explicit `tir ||` below makes that unconditional.
-            //
-            // Fresnel evaluator is hardcoded to Accurate (the default renderer
-            // choice).  To switch to Schlick, change this one call — there is
-            // no runtime mode dispatch by design.
-            const float reflectance = fresnelAccurate(cosThetaI, etaRatio);
-
-            // Russian roulette: reflect with prob R, refract with prob 1-R.
-            // Throughput multiplier = (energy fraction) / (probability):
-            //   reflection:  R * color / R     = color
-            //   refraction: (1-R) * color / (1-R) = color
-            // → Fresnel factor cancels out in both branches.
-            //
-            // TIR detection from refract()'s OUTPUT — not a recomputation of k.
-            // GLM computes k = 1 - eta²(1-dot²) internally and returns a NaN
-            // vector when k < 0 (sqrt of a negative); inspecting the result
-            // catches that.  A valid refracted direction is always unit length
-            // (squared length 1.0) and NaN compares false against ANY
-            // threshold, so one check catches every degenerate shape:
-            //   valid refraction:  dot = 1.0  → !(1.0 > 0.5) = false
-            //   TIR → NaN:         dot = NaN  → !(NaN > 0.5) = true
-            //   zero vector:       dot = 0.0  → !(0.0 > 0.5) = true
-            // (glm::isnan is deliberately avoided: its CUDA branch recurses
-            // under the MSVC host pass — compiler warning C4717.)
-            glm::vec3 refractedDir = glm::refract(pathSegment.ray.direction, refractNormal, etaRatio);
-            const bool tir = !(glm::dot(refractedDir, refractedDir) > REFRACT_VALID_SQ_LEN_MIN);
-
-            if (tir || rng.next(HaltonDim::FresnelRR) < reflectance)  // dim 8 (prime 23): Fresnel roulette
-            {
-                glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
-                const float offsetSign = entering ? 1.0f : -1.0f;
-                pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
-                pathSegment.ray.direction = reflectedDir;
-                // Internal reflection / TIR happens inside the colored medium;
-                // external Fresnel reflection off the outer boundary is achromatic (uncolored).
-                if (!entering)
-                {
-                    pathSegment.color *= m.color;
-                }
-            }
-            else
-            {
-                // !tir here ⇒ refractedDir is a finite unit vector; the offset
-                // pushes to the far side of the surface.
-                const float offsetSign = entering ? -1.0f : 1.0f;
-                pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
-                pathSegment.ray.direction = refractedDir;
-                // Light traverses into / out of the colored medium: apply transmission attenuation
-                pathSegment.color *= m.color;
-            }
+            scatterRefractive(pathSegment, intersect, normal, m, rng);
             break;
-        }
         case MaterialType::Reflective:
         case MaterialType::Pbr:
-        {
-            // Unified metallic-roughness GGX surface (legacy JSON Specular →
-            // Reflective is just the metallic=1 chrome case).  Resolve the
-            // per-hit surface params: roughness (mirror threshold below
-            // ROUGHNESS_THRESHOLD), alpha = r², conductor F0, diffuse albedo.
-            float r, metallic, alpha;
-            glm::vec3 F0, diffuseColor;
-            resolvePbrSurfaceParams(r, metallic, alpha, F0, diffuseColor, tex, textures, uv, m);
-
-            const float NdotV      = glm::clamp(glm::dot(shadingNormal, -rayDir), 1e-4f, 1.0f);
-            const glm::vec3 F_view = fresnelSchlickF0(NdotV, F0);
-            // Diffuse/specular split probability from the graze Fresnel, so a
-            // surface that is mostly specular (metal, or dielectric at grazing
-            // angles) spends most samples on the specular lobe.  A metal's
-            // diffuse lobe carries only (1−metallic) of the albedo, so as
-            // metallic rises the split is pushed toward 1.0 — a pure metal
-            // (metallic = 1 ⇒ diffuseColor = 0) spends no samples on the
-            // zero-weight diffuse branch.  The mix keeps it unbiased and
-            // firefly-free: (1−specProb) = (1−metallic)·(1−clampedProb) shrinks
-            // in lockstep with diffuseColor = baseColor·(1−metallic), so the
-            // diffuse branch weight diffuseColor·(1−F_view)/(1−specProb)
-            // = baseColor·(1−F_view)/(1−clampedProb) stays bounded and
-            // independent of metallic (a naive specProb = 1 would blow it up).
-            const float clampedProb = glm::clamp(luminance(F_view), 0.05f, 0.95f);
-            const float specProb    = glm::mix(clampedProb, 1.0f,
-                                               glm::clamp(metallic, 0.0f, 1.0f));
-
-            glm::vec3 scatterDir;
-            glm::vec3 throughput;
-
-            if (r < ROUGHNESS_THRESHOLD && metallic > PBR_MIRROR_METALLIC_THRESHOLD)
-            {
-                // Type: Reflective chrome (metallic = 1) / Pbr metallic > 0.95, smooth.
-                // Near-pure metal: a single mirror lobe — F0 ≈ baseColor
-                // and diffuseColor = baseColor·(1−metallic) is < 5% of the albedo,
-                // so virtually all energy is in the specular reflection.  Below
-                // the threshold the diffuse term is NOT negligible (e.g. metallic
-                // 0.6 → 40% diffuse albedo); collapsing those to a mirror would
-                // silently drop the diffuse lobe, so they fall through to the
-                // specular/diffuse split below.
-                scatterDir = glm::reflect(rayDir, shadingNormal);
-                throughput = fresnelSchlickF0(NdotV, F0);
-            }
-            else if (r < ROUGHNESS_THRESHOLD)
-            {
-                // Type: Pbr, metallic ≤ 0.95 (smooth dielectric / mid metal).
-                // F0 ≈ 0.04, so most energy is diffuse.  Same probabilistic
-                // split as rough surfaces — specular = mirror reflect with
-                // probability specProb, diffuse with 1−specProb.  This avoids
-                // the old shortcut that dropped ~96% of the energy for smooth
-                // dielectrics (and the mirror shortcut above dropping mid-metal
-                // diffuse energy).
-                if (rng.next(HaltonDim::PbrSplit) < specProb)
-                {
-                    scatterDir = glm::reflect(rayDir, shadingNormal);
-                    throughput = fresnelSchlickF0(NdotV, F0) / specProb;
-                }
-                else
-                {
-                    scatterDir = calculateRandomDirectionInHemisphere(shadingNormal, rng);
-                    throughput = diffuseColor * (glm::vec3(1.0f) - F_view) / (1.0f - specProb);
-                }
-            }
-            else if (rng.next(HaltonDim::PbrSplit) < specProb)   // dim 10 (prime 31): GGX split
-            {
-                // rough — specular half (prob specProb).
-                // Importance-sample the GGX half-vector H, reflect
-                // the view about it.  The NDF and the cos(N·L) cancel out of
-                // the weight (D·(N·H)/(4·(V·H)) appears in both f and pdf):
-                //   f = F·G·D/(4·(N·V)(N·L)) ,  pdf = D·(N·H)/(4·(V·H))
-                //   weight = f·(N·L)/pdf = F·G·(V·H)/((N·V)·(N·H))
-                const glm::vec3 H   = sampleGgxHalfVector(shadingNormal, alpha, rng);
-                scatterDir = glm::reflect(rayDir, H);
-                if (glm::dot(shadingNormal, scatterDir) > 0.0f)
-                {
-                    const float NdotL = glm::clamp(glm::dot(shadingNormal, scatterDir), 0.0f, 1.0f);
-                    const float NdotH = glm::max(glm::dot(shadingNormal, H), 1e-4f);
-                    const float VdotH = glm::max(glm::dot(-rayDir, H), 0.0f);
-                    const float G = smithG1Ggx(alpha, NdotV) * smithG1Ggx(alpha, NdotL);
-                    const glm::vec3 F = fresnelSchlickF0(VdotH, F0);
-                    throughput = F * (G * VdotH / (NdotV * NdotH)) / specProb;
-                }
-                else
-                {
-                    // Below-surface sample (lobe backfacing the surface):
-                    // zero weight, but scatter the mirror reflection so the
-                    // path survives for Russian roulette to terminate it.
-                    scatterDir = glm::reflect(rayDir, shadingNormal);
-                    throughput = glm::vec3(0.0f);
-                }
-            }
-            else
-            {
-                // rough — diffuse half (prob 1 − specProb).
-                // Albedo is already scaled by (1 − metallic); the per-channel
-                // (1 − F_view) complement ensures specular + diffuse conserve
-                // energy.
-                scatterDir = calculateRandomDirectionInHemisphere(shadingNormal, rng);
-                throughput = diffuseColor * (glm::vec3(1.0f) - F_view) / (1.0f - specProb);
-            }
-
-            pathSegment.color *= throughput;
-            float offsetSign = glm::dot(scatterDir, shadingNormal) > 0.0f ? 1.0f : -1.0f;
-            pathSegment.ray.origin = intersect + shadingNormal * (EPSILON * offsetSign);
-            pathSegment.ray.direction = scatterDir;
+            scatterGgxSurface(pathSegment, intersect, rayDir, shadingNormal, uv, tex, m, rng, textures);
             break;
-        }
         case MaterialType::Diffuse:
         default:
-        {
-            glm::vec3 newDirection = calculateRandomDirectionInHemisphere(shadingNormal, rng);
-            pathSegment.ray.origin = intersect + shadingNormal * EPSILON;
-            // Apply diffuse material color (energy attenuation)
-            // multiplier = fr * cos theta/pdf(omega)
-            // where pdf(omega) = cos theta / PI
-            // BSDF of diffuse reflection: fr = R / PI
-            pathSegment.ray.direction = newDirection;
-
-            // Resolve the diffuse albedo: a per-triangle glTF baseColor binding
-            // wins over the JSON-declared Material::textureId, then over the
-            // flat material color.
-            pathSegment.color *= resolveBaseColor(tex, textures, uv, m);
+            scatterDiffuse(pathSegment, intersect, shadingNormal, uv, tex, m, rng, textures);
             break;
-        }
     }
 
     // Decrement remaining bounces
