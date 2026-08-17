@@ -19,3 +19,7 @@ xhczudfu
 adb connect 192.168.1.46:5555
 https://localhost:47990
 https://192.168.1.1/
+
+# 新场景指令 (2026-08-17)
+.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_box.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/cornell_box_ABeautifulGame.json
