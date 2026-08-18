@@ -327,6 +327,30 @@ __host__ __device__ glm::vec3 resolveBaseColor(
     return albedo;
 }
 
+// Resolve the per-hit emissive radiance.  Source chain — first hit wins:
+//   glTF/OBJ emissive texture (tex.emissive, × emissiveFactor × emissiveStrength) >
+//   JSON-declared Material::textureId >
+//   flat material color m.color.
+// The glTF factor/strength multiply only when the winning slot is the glTF/OBJ
+// binding (tex.emissive), mirroring resolveBaseColor's factor rule — a JSON
+// TEXTURE has no factor of its own.  The caller owns the emittance multiplier
+// (JSON Emitting) or the additive bank (auto-glow).
+__host__ __device__ glm::vec3 resolveEmissive(
+    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const Material& m)
+{
+    int eid = tex.emissive;
+    if (eid < 0) eid = m.textureId;
+    if (eid >= 0)
+    {
+        glm::vec3 Le = sampleTexture(textures.pixels, textures.infos[eid], uv * m.uvScale);
+        if (tex.emissive >= 0)
+            Le *= tex.emissiveFactor * tex.emissiveStrength;
+        return Le;
+    }
+    return m.color;
+}
+
 // Resolve the per-hit GGX surface parameters for a Reflective / Pbr material
 // (chains documented in interactions.h).  `roughness` (r) drives the mirror
 // threshold and α; `alpha`, `F0`, `diffuseColor` feed the BRDF directly.

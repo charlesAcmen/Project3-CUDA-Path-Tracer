@@ -75,6 +75,16 @@ __host__ __device__ glm::vec3 resolveBaseColor(
     const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m);
 
+// Resolve the per-hit emissive radiance.  Source chain — first hit wins:
+//   glTF/OBJ emissive texture (tex.emissive, × emissiveFactor × emissiveStrength) >
+//   JSON-declared Material::textureId >
+//   flat material color m.color.
+// The caller scales by material.emittance for JSON Emitting light sources;
+// auto-glow (a bound emissive slot with no emittance) adds the radiance as-is.
+__host__ __device__ glm::vec3 resolveEmissive(
+    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const Material& m);
+
 // Resolve the per-hit GGX surface parameters for a Reflective / Pbr material.
 //
 // Roughness source chain — first hit wins:
