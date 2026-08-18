@@ -243,9 +243,11 @@ struct ShadeableIntersection
   //t < 0.0f: no intersection with an object(initial value)
   glm::vec3 surfaceNormal;
   // Per-triangle tangent aligned with the texture's +U axis (world space,
-  // orthogonalized against the interpolated normal).  (0,0,0) sentinel =
-  // degenerate UVs → tangent-space normal mapping is skipped.
-  glm::vec3 tangent;
+  // orthogonalized against the interpolated normal).  .xyz = unit tangent,
+  // .w = UV handedness sign (glTF TANGENT.w: +1 regular, -1 mirrored island)
+  // → shading computes B = cross(N, T)·w.  (0,0,0,0) sentinel = degenerate
+  // UVs → tangent-space normal mapping is skipped.
+  glm::vec4 tangent;
   int materialId;
   glm::vec2 uv;   // interpolated texture coordinate at the hit point
   TextureBinding tex;   // per-triangle texture slots (copied from the hit triangle)
