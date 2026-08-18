@@ -35,7 +35,7 @@ __global__ void gatherTerminatedPaths(int nPaths, glm::vec3* __restrict__ image,
         const PathSegment& path = paths[index];
         if (path.remainingBounces <= 0)
         {
-            image[path.pixelIndex] += path.color;
+            image[path.pixelIndex] += path.accumulatedRadiance;
         }
     }
 }

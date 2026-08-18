@@ -611,7 +611,7 @@ static __host__ __device__ void scatterGgxSurface(
         ggxScatterDiffuse(scatterDir, throughput, shadingNormal, diffuseColor, F_view, specProb, rng);
     }
 
-    pathSegment.color *= throughput;
+    pathSegment.throughput *= throughput;
     float offsetSign = glm::dot(scatterDir, shadingNormal) > 0.0f ? 1.0f : -1.0f;
     pathSegment.ray.origin = intersect + shadingNormal * (EPSILON * offsetSign);
     pathSegment.ray.direction = scatterDir;
@@ -680,7 +680,7 @@ static __host__ __device__ void scatterRefractive(
         // external Fresnel reflection off the outer boundary is achromatic (uncolored).
         if (!entering)
         {
-            pathSegment.color *= m.color;
+            pathSegment.throughput *= m.color;
         }
     }
     else
@@ -691,7 +691,7 @@ static __host__ __device__ void scatterRefractive(
         pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
         pathSegment.ray.direction = refractedDir;
         // Light traverses into / out of the colored medium: apply transmission attenuation
-        pathSegment.color *= m.color;
+        pathSegment.throughput *= m.color;
     }
 }
 
@@ -723,7 +723,7 @@ static __host__ __device__ void scatterDiffuse(
     // Resolve the diffuse albedo: a per-triangle glTF baseColor binding
     // wins over the JSON-declared Material::textureId, then over the
     // flat material color.
-    pathSegment.color *= resolveBaseColor(tex, textures, uv, m);
+    pathSegment.throughput *= resolveBaseColor(tex, textures, uv, m);
 }
 
 __host__ __device__ void scatterRay(

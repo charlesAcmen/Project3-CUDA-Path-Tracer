@@ -5,7 +5,7 @@
 // ====================================================================
 
 __device__ bool russianRouletteTerminate(
-    glm::vec3& color,
+    glm::vec3& throughput,
     int remainingBounces,
     int traceDepth,
     int rrMinBounces,
@@ -21,12 +21,12 @@ __device__ bool russianRouletteTerminate(
         return false;
     }
 
-    float p = fmaxf(fmaxf(color.r, color.g), color.b);
+    float p = fmaxf(fmaxf(throughput.r, throughput.g), throughput.b);
     p = fminf(fmaxf(p, RR_P_MIN), RR_P_MAX);
 
     if (rng.next(HaltonDim::PathRR) < p)  // dim 9 (prime 29): RR
     {
-        color /= p;
+        throughput /= p;
         return false;  // survived
     }
     return true; // terminated
@@ -72,7 +72,7 @@ __global__ void shadeMaterial(
                 float hitDist = glm::dot(intersectionPoint - config.cam.position, config.cam.view);
                 float focalErr = fabsf(hitDist - config.cam.focalDistance);
                 if (focalErr < config.debug.focalTolerance) {
-                    pathSegment.color = glm::vec3(0.0f, 1.0f, 0.0f);
+                    pathSegment.accumulatedRadiance = pathSegment.throughput;
                     pathSegment.remainingBounces = 0;
                     return;
                 }
@@ -97,27 +97,17 @@ __global__ void shadeMaterial(
                 // ---- Russian roulette ----
                 // Probabilistically terminate low-throughput paths after
                 // the guaranteed minimum bounce count.
-                if (russianRouletteTerminate(pathSegment.color,
+                if (russianRouletteTerminate(pathSegment.throughput,
                     pathSegment.remainingBounces, config.traceDepth,
                     config.rrMinBounces, rngScatter))
                 {
                     pathSegment.remainingBounces = 0;
                 }
-
-                // Path terminated — by Russian roulette kill or bounce budget
-                // exhaustion (remainingBounces <= 0 after scatterRay + RR).
-                // Zero out colour: only indirect illumination reaches here,
-                // where termination means no radiance to contribute.
-                if (pathSegment.remainingBounces <= 0)
-                {
-                    pathSegment.color = glm::vec3(0.0f);
-                }
             }
         }
         else
         {
-            // No intersection: background (black)
-            pathSegment.color = glm::vec3(0.0f);
+            // No intersection: background (black), no radiance contribution
             pathSegment.remainingBounces = 0;
         }
     }
