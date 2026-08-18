@@ -80,12 +80,31 @@ __global__ void shadeMaterial(
 
             if (material.emittance > 0.0f)
             {
-                // Light source hit: accumulate contribution and terminate
-                pathSegment.color *= (material.color * material.emittance);
+                // Light source hit (JSON Emitting): Le = texture·factor·strength
+                // (flat color when no emissive slot), scaled by the JSON emittance
+                // knob.  Accumulate and terminate the path.
+                pathSegment.accumulatedRadiance = pathSegment.throughput *
+                    resolveEmissive(intersection.tex, textures,
+                                    intersection.uv, material) *
+                    material.emittance;
                 pathSegment.remainingBounces = 0;
             }
             else
             {
+                // ---- Auto-glow: additive emission ----
+                // A bound emissive slot with no JSON emittance means the model
+                // glows at its own glTF-defined radiance.  Emission is ADDITIVE
+                // (Lo = Le + ∫BRDF·Li), so accumulate to pathSegment.accumulatedRadiance
+                // instead of directly writing to image.  The surface is still shaded
+                // by its BSDF.  (Terminating here would turn a mostly-black
+                // emissive map on a shaded surface black.)
+                if (intersection.tex.emissive >= 0)
+                {
+                    pathSegment.accumulatedRadiance += pathSegment.throughput *
+                        resolveEmissive(intersection.tex, textures,
+                                       intersection.uv, material);
+                }
+
                 // ---- Indirect illumination (BSDF continuation ray) ----
                 // Surface hit: scatter the ray according to the material BSDF.
                 // The hit record carries the surface normal, UV and per-triangle
