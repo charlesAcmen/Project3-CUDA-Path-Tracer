@@ -32,6 +32,22 @@
 // generic dielectric rough surface.
 #define REFLECTIVE_ROUGHNESS_DEFAULT 0.0f
 #define PBR_ROUGHNESS_DEFAULT        0.5f
+// Tangent-space normal mapping: degeneracy thresholds for the per-triangle
+// tangent.  Two INDEPENDENT failure modes with different units, tuned
+// separately (they happen to share the value 1e-8):
+//   TANGENT_DET_EPSILON — the UV determinant det = ΔU1·ΔV2 − ΔU2·ΔV1 (twice
+//     the signed area of the 2D UV triangle, uv² units).  |det| ≈ 0 → the UV
+//     triangle is degenerate and the 2×2 solve for the tangent blows up, so
+//     no tangent is emitted (triangle.h).
+//   TANGENT_EPSILON     — squared-length degeneracy for a direction vector
+//     (dimensionless): the orthogonalized tangent (triangle.h + the
+//     re-orthogonalization in resolveShadingNormal), the (0,0,0,0) sentinel,
+//     and the world-space TBN·n result.  A vector below this is (near) zero —
+//     no usable direction → normal mapping skipped.
+// (The normal-map texel length check in resolveShadingNormal uses its own
+// 1e-4f — a different magnitude, left inline.)
+#define TANGENT_DET_EPSILON 1e-8f
+#define TANGENT_EPSILON     1e-8f
 #define RR_P_MIN          0.2f
 #define RR_P_MAX          1.0f
 #define LARGE_T           1e30f       // sentinel > any valid ray–scene intersection
