@@ -381,6 +381,58 @@ __host__ __device__ void resolvePbrSurfaceParams(
     diffuseColor  = baseColor * (1.0f - metallic);
 }
 
+// Resolve the per-hit SHADING normal from a glTF normal texture (tangent
+// space).  The hit record carries the per-triangle tangent (world space,
+// from triangleIntersectionTest — orthogonalized against the smoothed
+// normal); here it is combined with the geometric normal into an
+// orthonormal TBN frame, and the sampled normal-map normal (n = 2·texel − 1,
+// glTF convention) is rotated into world space:
+//     worldN = T·n.x + B·n.y + N·n.z
+// glTF/OpenGL maps texture +V (green) to the bitangent, so B = cross(N, T),
+// scaled by the UV handedness: tangent.w (+1 regular layout, -1 mirrored
+// island) flips B so the green channel stays on the +V side even where the
+// author reused the same map with flipped U/V (e.g. DamagedHelmet's two
+// symmetric halves).
+__host__ __device__ glm::vec3 resolveShadingNormal(
+    const glm::vec3& geometricNormal,
+    const glm::vec4& tangent,
+    const TextureBinding& tex,
+    const TextureTable& textures,
+    glm::vec2 uv,
+    float uvScale)
+{
+    // No normal slot, or the (0,0,0,0) degenerate-UV sentinel → no mapping.
+    if (tex.normal < 0) return geometricNormal;
+    const glm::vec3 tVec = glm::vec3(tangent);
+    if (glm::dot(tVec, tVec) < TANGENT_EPSILON) return geometricNormal;
+
+    // Normal maps are data maps (srgb=false) — texels are raw linear bytes.
+    const glm::vec3 texel = sampleTexture(textures.pixels,
+                                          textures.infos[tex.normal],
+                                          uv * uvScale);
+    glm::vec3 n = 2.0f * texel - glm::vec3(1.0f);   // [0,1] → [-1,1]
+    const float nlen2 = glm::dot(n, n);
+    if (nlen2 < NORMAL_MAP_TEXEL_EPSILON) return geometricNormal;  // bilinear blend can shorten it
+    n *= glm::inversesqrt(nlen2);//normalize
+
+    const glm::vec3 N = geometricNormal;
+    // Re-orthogonalize the (already orthogonalized) tangent against N — the
+    // map's local frame must match the interpolated smooth normal.
+    glm::vec3 T = tVec - N * glm::dot(N, tVec);
+    const float tlen2 = glm::dot(T, T);
+    if (tlen2 < TANGENT_EPSILON) return geometricNormal;
+    T *= glm::inversesqrt(tlen2);
+    // Bitangent = cross(N, T) scaled by the UV handedness sign.  w = +1
+    // keeps the plain OpenGL convention (green → +V); w = -1 flips B so a
+    // mirrored UV island still reads its green channel correctly.
+    const glm::vec3 B = glm::cross(N, T) * tangent.w;
+
+    glm::vec3 worldN = T * n.x + B * n.y + N * n.z;
+    const float wlen2 = glm::dot(worldN, worldN);
+    if (wlen2 < TANGENT_EPSILON) return geometricNormal;
+    return worldN * glm::inversesqrt(wlen2);
+}
+
 // ---- GGX per-lobe helpers (level-2 split of the Reflective/Pbr branch) ----
 // Each helper fills (scatterDir, throughput) for one lobe of the unified
 // metallic-roughness surface.  They are file-local; scatterGgxSurface owns the
@@ -685,8 +737,24 @@ __host__ __device__ void scatterRay(
     // the diffuse hemisphere / reflection lobe is on the correct side.
     // Refraction keeps the TRUE normal — its sign (dot with the ray) is what
     // classifyRefraction uses to distinguish entry from exit.
-    const glm::vec3 rayDir        = pathSegment.ray.direction;
-    const glm::vec3 shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -normal : normal;
+    //
+    // Normal mapping (opaque only): when the hit's glTF normal slot is bound,
+    // perturb the shading normal from the tangent-space normal map.  The flip
+    // toward the ray is keyed off the GEOMETRIC front-face test(以几何法线的正反面判定)
+    // — the map's own sign must not independently flip the hemisphere, or a perturbation
+    // crossing the hemisphere boundary would create a shading seam(撕裂黑缝).
+    const glm::vec3 rayDir = pathSegment.ray.direction;
+    glm::vec3 shadingNormal;
+    if (m.type == MaterialType::Refractive)
+    {
+        shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -normal : normal;
+    }
+    else
+    {
+        const glm::vec3 perturbed =
+            resolveShadingNormal(normal, hit.tangent, tex, textures, uv, m.uvScale);
+        shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -perturbed : perturbed;
+    }
 
     // Offset the new ray origin off the surface by EPSILON so it cannot
     // immediately re-hit the same triangle.  The offset direction is chosen

@@ -97,6 +97,24 @@ __host__ __device__ void resolvePbrSurfaceParams(
     const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m);
 
+// Resolve the per-hit SHADING normal from a glTF normal texture (tangent
+// space) when one is bound.  Samples the normal slot (a data map, raw linear
+// bytes), remaps [0,1]→[-1,1] (glTF: n = 2·texel − 1), and rotates it into
+// world space via the per-triangle TBN frame:
+//     T = per-triangle tangent (orthogonalized against the geometric normal)
+//     B = cross(N, T) · tangent.w        (glTF/OpenGL +V → bitangent;
+//         tangent.w = UV handedness, +1 regular / -1 mirrored island)
+//     worldN = T·n.x + B·n.y + N·n.z
+// Returns `geometricNormal` unchanged when no normal slot is bound or the
+// tangent is the (0,0,0,0) sentinel (degenerate UVs).
+__host__ __device__ glm::vec3 resolveShadingNormal(
+    const glm::vec3& geometricNormal,
+    const glm::vec4& tangent,
+    const TextureBinding& tex,
+    const TextureTable& textures,
+    glm::vec2 uv,
+    float uvScale);
+
 /**
  * Scatter a ray with some probabilities according to the material properties.
  * For example, a diffuse surface scatters in a cosine-weighted hemisphere.

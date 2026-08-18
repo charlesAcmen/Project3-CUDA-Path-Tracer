@@ -44,10 +44,18 @@
 //     re-orthogonalization in resolveShadingNormal), the (0,0,0,0) sentinel,
 //     and the world-space TBN·n result.  A vector below this is (near) zero —
 //     no usable direction → normal mapping skipped.
-// (The normal-map texel length check in resolveShadingNormal uses its own
-// 1e-4f — a different magnitude, left inline.)
+// NORMAL_MAP_TEXEL_EPSILON — squared-length degeneracy for the sampled
+//   normal-map texel VECTOR (after the [0,1]→[-1,1] remap, before
+//   re-normalization) in resolveShadingNormal.  A bilinear blend of two
+//   nearly-opposite texels can shorten the vector toward zero; below this
+//   the perturbation is degenerate noise, so shading falls back to the
+//   geometric normal.  A DIFFERENT magnitude from TANGENT_EPSILON (1e-4 vs
+//   1e-8): the texel vector lives in normal-map data space, where even a
+//   pathological 4-texel blend rarely shortens it below ~0.1 — 1e-4 rejects
+//   only truly degenerate samples.
 #define TANGENT_DET_EPSILON 1e-8f
 #define TANGENT_EPSILON     1e-8f
+#define NORMAL_MAP_TEXEL_EPSILON 1e-4f
 #define RR_P_MIN          0.2f
 #define RR_P_MAX          1.0f
 #define LARGE_T           1e30f       // sentinel > any valid ray–scene intersection
