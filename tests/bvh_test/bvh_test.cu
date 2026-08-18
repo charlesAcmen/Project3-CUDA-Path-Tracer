@@ -182,7 +182,8 @@ bool bruteForceClosest(const Ray& ray, const std::vector<Triangle>& tris,
         float tt;
         glm::vec3 nn;
         glm::vec2 uu;
-        if (triangleIntersectionTest(ray, tris[offset + j], tt, nn, uu))
+        glm::vec4 ttg;
+        if (triangleIntersectionTest(ray, tris[offset + j], tt, nn, uu, ttg))
         {
             if (tt < t) { t = tt; nrm = nn; uv = uu; idx = offset + j; hit = true; }
         }
