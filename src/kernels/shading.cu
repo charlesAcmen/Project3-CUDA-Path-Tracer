@@ -31,7 +31,19 @@ __device__ bool russianRouletteTerminate(
     }
     return true; // terminated
 }
-
+// Helper: handle debug DOF overlay for focal plane visualization
+static __device__ void handleDebugDOFOverlay(
+    PathSegment& pathSegment,
+    const glm::vec3& intersectionPoint,
+    const ShadingConfig& config)
+{
+    float hitDist = glm::dot(intersectionPoint - config.cam.position, config.cam.view);
+    float focalErr = fabsf(hitDist - config.cam.focalDistance);
+    if (focalErr < config.debug.focalTolerance) {
+        pathSegment.accumulatedRadiance = pathSegment.throughput;
+        pathSegment.remainingBounces = 0;
+    }
+}
 __global__ void shadeMaterial(
     int iter,
     int num_paths,
@@ -69,13 +81,8 @@ __global__ void shadeMaterial(
 
             // Debug overlay: first-bounce hits on the focal plane in green.
             if (config.debug.showDOFOverlay && pathSegment.remainingBounces == config.traceDepth) {
-                float hitDist = glm::dot(intersectionPoint - config.cam.position, config.cam.view);
-                float focalErr = fabsf(hitDist - config.cam.focalDistance);
-                if (focalErr < config.debug.focalTolerance) {
-                    pathSegment.accumulatedRadiance = pathSegment.throughput;
-                    pathSegment.remainingBounces = 0;
-                    return;
-                }
+                handleDebugDOFOverlay(pathSegment, intersectionPoint, config);
+                return;
             }
 
             if (material.emittance > 0.0f)
