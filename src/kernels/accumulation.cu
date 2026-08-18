@@ -4,7 +4,7 @@
 // Accumulation & Display Kernels Implementation
 // ====================================================================
 
-__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, glm::vec3* image)
+__global__ void sendImageToPBO(uchar4* __restrict__ pbo, glm::ivec2 resolution, glm::vec3* __restrict__ image)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -26,7 +26,7 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, glm::vec3* im
     }
 }
 
-__global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment* paths)
+__global__ void gatherTerminatedPaths(int nPaths, glm::vec3* __restrict__ image, PathSegment* __restrict__ paths)
 {
     int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 

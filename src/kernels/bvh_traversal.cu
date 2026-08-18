@@ -11,10 +11,10 @@
 
 __global__ void bvhTraverse(
     int num_paths,
-    PathSegment* pathSegments,
-    ShadeableIntersection* intersections,
-    Triangle* deviceTriangles,
-    BvhNode* deviceBvhNodes)
+    PathSegment* __restrict__ pathSegments,
+    ShadeableIntersection* __restrict__ intersections,
+    Triangle* __restrict__ deviceTriangles,
+    BvhNode* __restrict__ deviceBvhNodes)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (path_index >= num_paths) return;

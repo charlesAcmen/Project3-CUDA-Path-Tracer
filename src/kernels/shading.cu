@@ -35,9 +35,9 @@ __device__ bool russianRouletteTerminate(
 __global__ void shadeMaterial(
     int iter,
     int num_paths,
-    ShadeableIntersection* shadeableIntersections,
-    PathSegment* pathSegments,
-    Material* materials,
+    ShadeableIntersection* __restrict__ shadeableIntersections,
+    PathSegment* __restrict__ pathSegments,
+    Material* __restrict__ materials,
     TextureTable textures,        // scene texture assets (pixels + slice table)
     ShadingConfig config)
 {

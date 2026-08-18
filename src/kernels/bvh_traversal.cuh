@@ -30,7 +30,7 @@
  */
 __global__ void bvhTraverse(
     int num_paths,
-    PathSegment* pathSegments,
-    ShadeableIntersection* intersections,
-    Triangle* deviceTriangles,
-    BvhNode* deviceBvhNodes);
+    PathSegment* __restrict__ pathSegments,
+    ShadeableIntersection* __restrict__ intersections,
+    Triangle* __restrict__ deviceTriangles,
+    BvhNode* __restrict__ deviceBvhNodes);

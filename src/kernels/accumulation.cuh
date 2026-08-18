@@ -18,7 +18,7 @@
  * (ACES + sRGB) by the preceding passes, so this kernel only scales to
  * [0,255] — no division here.
  */
-__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, glm::vec3* image);
+__global__ void sendImageToPBO(uchar4* __restrict__ pbo, glm::ivec2 resolution, glm::vec3* __restrict__ image);
 
 /**
  * Accumulate terminated path colours into the HDR accumulation buffer.
@@ -56,5 +56,5 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, glm::vec3* im
  *   already correctly accounted for by the Fresnel Russian-roulette weights
  *   in scatterRay; no additional correction is needed here.
  */
-__global__ void gatherTerminatedPaths(int nPaths, glm::vec3* image, PathSegment* paths);
+__global__ void gatherTerminatedPaths(int nPaths, glm::vec3* __restrict__ image, PathSegment* __restrict__ paths);
 
