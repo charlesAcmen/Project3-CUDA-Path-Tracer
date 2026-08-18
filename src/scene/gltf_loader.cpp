@@ -290,6 +290,19 @@ static TextureBinding bindGltfMaterial(GltfLoadCtx& ctx,
                                       mat->pbr_metallic_roughness.base_color_factor[1],
                                       mat->pbr_metallic_roughness.base_color_factor[2]);
     }
+    // glTF emissive intensity (see TextureBinding::emissiveFactor / Strength):
+    //   Le = emissiveTexture.rgb · emissiveFactor · KHR_materials_emissive_strength.
+    // cgltf fills emissive_factor with the spec default [0,0,0] when absent;
+    // the Khronos viewer treats a texture bound with an all-zero factor as
+    // [1,1,1] (the spec default only means "no emission", already encoded by
+    // tex.emissive < 0).  emissiveStrength defaults to 1.0 (no-op).
+    b.emissiveFactor = glm::vec3(mat->emissive_factor[0],
+                                 mat->emissive_factor[1],
+                                 mat->emissive_factor[2]);
+    if (b.emissive >= 0 && b.emissiveFactor == glm::vec3(0.0f))
+        b.emissiveFactor = glm::vec3(1.0f);
+    b.emissiveStrength = mat->has_emissive_strength
+                             ? mat->emissive_strength.emissive_strength : 1.0f;
     return b;
 }
 

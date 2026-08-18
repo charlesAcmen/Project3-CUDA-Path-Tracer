@@ -191,6 +191,15 @@ static void stampMtlTextures(const string& objPath,
         matBindings[mi].baseColor = resolveMtlTex(m.diffuse_texname, true);
         matBindings[mi].normal    = resolveMtlTex(m.bump_texname, false);
         matBindings[mi].emissive  = resolveMtlTex(m.emissive_texname, true);
+        // MTL Ke scales the emissive texture — the OBJ mirror of glTF
+        // emissiveFactor.  An all-zero Ke (tinyobj default) with a bound
+        // map_Ke means "texture as-is", the same viewer convention as glTF.
+        if (matBindings[mi].emissive >= 0)
+        {
+            glm::vec3 ke(m.emission[0], m.emission[1], m.emission[2]);
+            matBindings[mi].emissiveFactor = (ke != glm::vec3(0.0f)) ? ke
+                                                                      : glm::vec3(1.0f);
+        }
     }
 
     // Stamp per-face material onto each triangle (same face order as pushed,
