@@ -238,7 +238,8 @@ struct RenderState
 struct PathSegment
 {
     Ray ray;
-    glm::vec3 color;
+    glm::vec3 throughput;          // Path weight: product of BSDF, Fresnel, RR, etc.
+    glm::vec3 accumulatedRadiance; // Accumulated radiance: sum of emissive contributions
     int pixelIndex;
     int remainingBounces;
 };
