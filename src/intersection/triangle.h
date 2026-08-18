@@ -31,6 +31,14 @@
  * @param outNormal [out] Model's shading normal, TRUE orientation
  *                        (winding preserved, not oriented toward the ray)
  * @param outUv     [out] Interpolated texture coordinate at the hit
+ * @param outTangent [out] Per-triangle tangent aligned with the texture's
+ *                        +U axis (world space — edges are baked world space),
+ *                        orthogonalized against the interpolated normal.
+ *                        .xyz = the unit tangent; .w = UV handedness sign
+ *                        (+1 regular layout, -1 mirrored island, glTF
+ *                        TANGENT.w convention → B = cross(N, T)·w in shading).
+ *                        (0,0,0,0) sentinel = degenerate UVs / no usable
+ *                        tangent → the shading side skips normal mapping.
  * @return          true on hit (either side)
  */
 __host__ __device__ inline bool triangleIntersectionTest(
@@ -38,7 +46,8 @@ __host__ __device__ inline bool triangleIntersectionTest(
     const Triangle& tri,
     float& outT,
     glm::vec3& outNormal,
-    glm::vec2& outUv)
+    glm::vec2& outUv,
+    glm::vec4& outTangent)
 {
     // ---- Step 1: edge vectors ----
     // Translate triangle so v0 is at origin, then compute the two
@@ -122,6 +131,43 @@ __host__ __device__ inline bool triangleIntersectionTest(
     // Same barycentric weights as the normal above.  UVs live in texture
     // space, so unlike the normal there is no re-normalization step.
     outUv = (1.0f - u - v) * tri.uv0 + u * tri.uv1 + v * tri.uv2;
+
+    // ---- Step 8: per-triangle tangent (for tangent-space normal maps) ----
+    // Derive the direction in which the texture's +U axis increases, from
+    // the triangle's world-space edges and UV deltas.  Treat the triangle
+    // as a 2×2 system in the tangent plane:
+    //     e1 = ΔU1·T + ΔV1·B ,  e2 = ΔU2·T + ΔV2·B
+    //     det = ΔU1·ΔV2 − ΔU2·ΔV1
+    //     T   = (e1·ΔV2 − e2·ΔV1) / det     (world space, face plane)
+    // Executed only on hit (rare path), like the normal interpolation.
+    // UVs are texture-space, so this uses the model's own UV layout — the
+    // bake never touches them.
+    glm::vec2 du1 = tri.uv1 - tri.uv0;
+    glm::vec2 du2 = tri.uv2 - tri.uv0;
+    const float det = du1.x * du2.y - du2.x * du1.y;
+    outTangent = glm::vec4(0.0f);   // sentinel: degenerate UVs / no tangent
+    // TANGENT_DET_EPSILON guards the 2D UV triangle's area (det ≈ 0 → the solve below blows up);
+    // TANGENT_EPSILON guards the derived 3D tangent's squared length (T ∥ N).
+    if (fabsf(det) > TANGENT_DET_EPSILON)
+    {
+        glm::vec3 T = (e1 * du2.y - e2 * du1.y) * (1.0f / det);
+        // Orthogonalize against the INTERPOLATED (smoothed) normal so the
+        // TBN frame stays orthonormal under smooth shading.  A tangent that
+        // collapses to ~parallel with N (flat geometry whose UV axis aligns
+        // with the normal) keeps the sentinel.
+        T = T - outNormal * glm::dot(outNormal, T);
+        const float tlen2 = glm::dot(T, T);
+        if (tlen2 > TANGENT_EPSILON)
+        {
+            // UV handedness (glTF TANGENT.w): the sign of the UV triangle's
+            // 2D winding.  det > 0 = regular layout → w = +1; det < 0 =
+            // mirrored island (author reused the map for both halves of a
+            // symmetric mesh) → w = -1.  Shading computes
+            // B = cross(N, T)·w so the green (+V) channel stays correct.
+            const float handedness = (det < 0.0f) ? -1.0f : 1.0f;
+            outTangent = glm::vec4(T * glm::inversesqrt(tlen2), handedness);
+        }
+    }
 
     return true;
 }
