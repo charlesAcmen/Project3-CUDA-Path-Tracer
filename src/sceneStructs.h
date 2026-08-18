@@ -39,6 +39,16 @@ struct TextureBinding
     // (1,1,1) is a no-op; for non-glTF meshes it is never applied because
     // tex.baseColor < 0.
     glm::vec3 baseColorFactor{ 1.0f, 1.0f, 1.0f };
+    // glTF emissiveFactor (spec default [0,0,0] = no emission).  Applied only
+    // when the winning emissive slot is a glTF/OBJ emissive texture: the
+    // loader normalizes a missing / all-zero factor to (1,1,1) when a texture
+    // is bound (glTF viewer convention — "no emission" is already encoded by
+    // tex.emissive < 0, so an all-zero factor with a texture is meaningless).
+    glm::vec3 emissiveFactor{ 1.0f, 1.0f, 1.0f };
+    // KHR_materials_emissive_strength scalar (glTF extension, default 1.0) —
+    // the industry-standard intensity knob that boosts an LDR emissive texture
+    // past [0,1] into a real light source.  Multiplies the emissive sample.
+    float emissiveStrength = 1.0f;
 };
 
 // Triangle backed by an OBJ mesh.
