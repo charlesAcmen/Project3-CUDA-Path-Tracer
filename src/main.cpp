@@ -61,8 +61,8 @@ float ogTheta, ogPhi, ogZoom; // original orientation / reference distance
 // Camera control feel parameters (orbit + WASD fly).
 static constexpr float CAMERA_MIN_THETA      = 0.001f; // orbit latitude pole guard
 static constexpr float CAMERA_MIN_ZOOM       = 0.1f;   // min camera–target distance
-static constexpr float CAMERA_SCROLL_ZOOM_IN = 0.85f;  // scroll-up zoom multiplier
-static constexpr float CAMERA_SCROLL_ZOOM_OUT = 1.15f; // scroll-down zoom multiplier
+static constexpr float CAMERA_SCROLL_ZOOM_IN = 0.97f;  // scroll-up zoom multiplier
+static constexpr float CAMERA_SCROLL_ZOOM_OUT = 1.03f; // scroll-down zoom multiplier
 static constexpr float CAMERA_PAN_SPEED      = 0.01f;  // middle-drag pan sensitivity
 static constexpr float CAMERA_MOVE_SPEED     = 1.5f;   // WASD fly speed (× zoom, per second)
 static constexpr float CAMERA_MAX_FRAME_DT   = 0.1f;   // clamp against first-frame / lag jumps
