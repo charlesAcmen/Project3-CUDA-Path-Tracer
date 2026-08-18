@@ -64,7 +64,7 @@ static constexpr float CAMERA_MIN_ZOOM       = 0.1f;   // min camera–target di
 static constexpr float CAMERA_SCROLL_ZOOM_IN = 0.97f;  // scroll-up zoom multiplier
 static constexpr float CAMERA_SCROLL_ZOOM_OUT = 1.03f; // scroll-down zoom multiplier
 static constexpr float CAMERA_PAN_SPEED      = 0.01f;  // middle-drag pan sensitivity
-static constexpr float CAMERA_MOVE_SPEED     = 1.5f;   // WASD fly speed (× zoom, per second)
+static float g_cameraMoveSpeed     = 1.5f;   // WASD fly speed (× zoom, per second) — adjustable via ImGui
 static constexpr float CAMERA_MAX_FRAME_DT   = 0.1f;   // clamp against first-frame / lag jumps
 
 Scene* scene;
@@ -184,6 +184,10 @@ void RenderImGui()
             cam.fov.y
         );
         ImGui::InputTextMultiline("##json_cam", jsonBuf, sizeof(jsonBuf), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 4.5f), ImGuiInputTextFlags_ReadOnly);
+
+        ImGui::Separator();
+        ImGui::Text("Movement:");
+        ImGui::SliderFloat("Fly Speed", &g_cameraMoveSpeed, 0.05f, 5.0f, "%.2f");
 
         ImGui::Separator();
         ImGui::Text("DOF Debug:");
@@ -357,7 +361,7 @@ void updateCameraMovement(float dt)
 
     // Speed scales with the camera-target distance so the same key feel
     // works at both macro and micro scale (roughly zoom distance per 0.66s).
-    float speed = zoom * CAMERA_MOVE_SPEED * dt;
+    float speed = zoom * g_cameraMoveSpeed * dt;
     cam.position += glm::normalize(translate) * speed;
     camchanged = true; // resets accumulation & recomputes view/right/up/lookAt
 }
