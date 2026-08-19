@@ -39,6 +39,7 @@
  *                        TANGENT.w convention → B = cross(N, T)·w in shading).
  *                        (0,0,0,0) sentinel = degenerate UVs / no usable
  *                        tangent → the shading side skips normal mapping.
+ * @param outVertexColor [out] Interpolated vertex color at the hit (default white = no effect)
  * @return          true on hit (either side)
  */
 __host__ __device__ inline bool triangleIntersectionTest(
@@ -47,7 +48,8 @@ __host__ __device__ inline bool triangleIntersectionTest(
     float& outT,
     glm::vec3& outNormal,
     glm::vec2& outUv,
-    glm::vec4& outTangent)
+    glm::vec4& outTangent,
+    glm::vec3& outVertexColor)
 {
     // ---- Step 1: edge vectors ----
     // Translate triangle so v0 is at origin, then compute the two
@@ -131,6 +133,11 @@ __host__ __device__ inline bool triangleIntersectionTest(
     // Same barycentric weights as the normal above.  UVs live in texture
     // space, so unlike the normal there is no re-normalization step.
     outUv = (1.0f - u - v) * tri.uv0 + u * tri.uv1 + v * tri.uv2;
+
+    // ---- Step 7.5: interpolate vertex color ----
+    // Same barycentric weights.  Vertex colors are multiplied with
+    // the base color in shading (glTF COLOR_0 × baseColorTexture).
+    outVertexColor = (1.0f - u - v) * tri.c0 + u * tri.c1 + v * tri.c2;
 
     // ---- Step 8: per-triangle tangent (for tangent-space normal maps) ----
     // Derive the direction in which the texture's +U axis increases, from
