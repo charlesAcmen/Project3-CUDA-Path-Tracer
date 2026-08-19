@@ -44,6 +44,7 @@ __global__ void bvhTraverse(
         intersections[path_index].tangent       = hit.tangent;  // per-triangle tangent (for normal mapping)
         intersections[path_index].materialId    = deviceTriangles[hit.triIndex].materialId;
         intersections[path_index].uv            = hit.uv;       // interpolated texture coordinate
+        intersections[path_index].vertexColor   = hit.vertexColor; // interpolated vertex color
         intersections[path_index].tex           = deviceTriangles[hit.triIndex].tex;  // per-triangle texture slots
     }
 }
