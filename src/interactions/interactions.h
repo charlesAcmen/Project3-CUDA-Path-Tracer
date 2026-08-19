@@ -71,9 +71,10 @@ __host__ __device__ glm::vec3 sampleGgxHalfVector(const glm::vec3& normal, float
 //   glTF baseColor texture (tex.baseColor, × baseColorFactor) >
 //   JSON-declared Material::textureId >
 //   flat material color m.color.
+// Vertex colors (COLOR_0) multiply the final albedo: albedo *= vertexColor.
 __host__ __device__ glm::vec3 resolveBaseColor(
     const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
-    const Material& m);
+    const Material& m, const glm::vec3& vertexColor);
 
 // Resolve the per-hit emissive radiance.  Source chain — first hit wins:
 //   glTF/OBJ emissive texture (tex.emissive, × emissiveFactor × emissiveStrength) >
@@ -105,7 +106,7 @@ __host__ __device__ glm::vec3 resolveEmissive(
 __host__ __device__ void resolvePbrSurfaceParams(
     float& roughness, float& metallic, float& alpha, glm::vec3& F0, glm::vec3& diffuseColor,
     const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
-    const Material& m);
+    const Material& m, const glm::vec3& vertexColor);
 
 // Resolve the per-hit SHADING normal from a glTF normal texture (tangent
 // space) when one is bound.  Samples the normal slot (a data map, raw linear

@@ -301,11 +301,17 @@ __host__ __device__ glm::vec3 sampleGgxHalfVector(const glm::vec3& normal, float
 //   flat material color m.color.
 __host__ __device__ glm::vec3 resolveBaseColor(
     const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
-    const Material& m)
+    const Material& m, const glm::vec3& vertexColor)
 {
+    // Sentinel value (-1,-1,-1) means "use glTF material colors only",
+    // ignore the scene material color.  This allows CompareBaseColor and
+    // similar test scenes to work correctly when the material references
+    // a glTF mesh that should keep its own glTF material properties.
+    bool useGltfOnly = (m.color == glm::vec3(-1.0f));
+
     int bid = tex.baseColor;
     if (bid < 0) bid = m.textureId;
-    glm::vec3 albedo = m.color;
+    glm::vec3 albedo = useGltfOnly ? glm::vec3(1.0f) : m.color;
     if (bid >= 0)
     {
         albedo = sampleTexture(textures.pixels, textures.infos[bid], uv * m.uvScale);
@@ -315,7 +321,7 @@ __host__ __device__ glm::vec3 resolveBaseColor(
         if (tex.baseColor >= 0)
             albedo *= glm::vec3(tex.baseColorFactor);
     }
-    else if (tex.roughnessFactor >= 0.0f)
+    else if (tex.roughnessFactor >= 0.0f && useGltfOnly)
     {
         // glTF material whose color is factor-only (no baseColorTexture):
         // baseColorFactor IS the glTF material's own tint (e.g. the flat
@@ -324,6 +330,13 @@ __host__ __device__ glm::vec3 resolveBaseColor(
         // scene JSON color still governs plain meshes.
         albedo = glm::vec3(tex.baseColorFactor);
     }
+
+    // Multiply by vertex color (COLOR_0) when present.  glTF semantics:
+    // baseColor = (texture/factor) × vertexColor.  The vertex color
+    // defaults to (1,1,1) = no effect for meshes without COLOR_0.
+    //
+    albedo *= vertexColor;
+
     return albedo;
 }
 
@@ -357,7 +370,7 @@ __host__ __device__ glm::vec3 resolveEmissive(
 __host__ __device__ void resolvePbrSurfaceParams(
     float& roughness, float& metallic, float& alpha, glm::vec3& F0, glm::vec3& diffuseColor,
     const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
-    const Material& m)
+    const Material& m, const glm::vec3& vertexColor)
 {
     // Roughness source — first hit wins, priority is the read order:
     //   ORM texture G (per-texel) → glTF roughnessFactor → type default
@@ -397,7 +410,7 @@ __host__ __device__ void resolvePbrSurfaceParams(
     if (m.type == MaterialType::Reflective)
         baseColor = m.specular.color;
     else
-        baseColor = resolveBaseColor(tex, textures, uv, m);
+        baseColor = resolveBaseColor(tex, textures, uv, m, vertexColor);  // Pass vertexColor here
 
     roughness     = r;
     alpha         = r * r;
@@ -549,7 +562,8 @@ static __host__ __device__ void scatterGgxSurface(
     const TextureBinding& tex,
     const Material& m,
     RngState& rng,
-    const TextureTable& textures)
+    const TextureTable& textures,
+    const glm::vec3& vertexColor)
 {
     // Unified metallic-roughness GGX surface (legacy JSON Specular →
     // Reflective is just the metallic=1 chrome case).  Resolve the
@@ -557,7 +571,7 @@ static __host__ __device__ void scatterGgxSurface(
     // ROUGHNESS_THRESHOLD), alpha = r², conductor F0, diffuse albedo.
     float r, metallic, alpha;
     glm::vec3 F0, diffuseColor;
-    resolvePbrSurfaceParams(r, metallic, alpha, F0, diffuseColor, tex, textures, uv, m);
+    resolvePbrSurfaceParams(r, metallic, alpha, F0, diffuseColor, tex, textures, uv, m, vertexColor);
 
     const float NdotV      = glm::clamp(glm::dot(shadingNormal, -rayDir), 1e-4f, 1.0f);
     const glm::vec3 F_view = fresnelSchlickF0(NdotV, F0);
@@ -705,7 +719,8 @@ static __host__ __device__ void scatterDiffuse(
     const TextureBinding& tex,
     const Material& m,
     RngState& rng,
-    const TextureTable& textures)
+    const TextureTable& textures,
+    const glm::vec3& vertexColor)
 {
     // Generate new random direction for diffuse reflection (cosine-weighted hemisphere sampling)
     // Common mistake: offsetting along newDirection instead of normal
@@ -722,8 +737,8 @@ static __host__ __device__ void scatterDiffuse(
 
     // Resolve the diffuse albedo: a per-triangle glTF baseColor binding
     // wins over the JSON-declared Material::textureId, then over the
-    // flat material color.
-    pathSegment.throughput *= resolveBaseColor(tex, textures, uv, m);
+    // flat material color.  Vertex colors multiply the result.
+    pathSegment.throughput *= resolveBaseColor(tex, textures, uv, m, vertexColor);
 }
 
 __host__ __device__ void scatterRay(
@@ -785,6 +800,7 @@ __host__ __device__ void scatterRay(
     // per material helper below: refractive keys off the entering/exiting state
     // (numerically stable near grazing angles), reflective keys off the
     // shading-normal orientation, diffuse always pushes outward.
+    const glm::vec3& vertexColor = hit.vertexColor; // interpolated vertex color (COLOR_0)
     switch (m.type)
     {
         case MaterialType::Refractive:
@@ -792,11 +808,11 @@ __host__ __device__ void scatterRay(
             break;
         case MaterialType::Reflective:
         case MaterialType::Pbr:
-            scatterGgxSurface(pathSegment, intersect, rayDir, shadingNormal, uv, tex, m, rng, textures);
+            scatterGgxSurface(pathSegment, intersect, rayDir, shadingNormal, uv, tex, m, rng, textures, vertexColor);
             break;
         case MaterialType::Diffuse:
         default:
-            scatterDiffuse(pathSegment, intersect, shadingNormal, uv, tex, m, rng, textures);
+            scatterDiffuse(pathSegment, intersect, shadingNormal, uv, tex, m, rng, textures, vertexColor);
             break;
     }
 
