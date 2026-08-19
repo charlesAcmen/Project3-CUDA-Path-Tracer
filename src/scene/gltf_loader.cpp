@@ -334,16 +334,18 @@ static glm::mat4 nodeLocalMatrix(const cgltf_node* n)
     return m;   // m = T·R·S
 }
 
-// Locate the POSITION / NORMAL / TEXCOORD_0 accessors of a primitive.
-// TEXCOORD_0 is preferred (higher sets are ignored).
+// Locate the POSITION / NORMAL / TEXCOORD_0 / COLOR_0 accessors of a primitive.
+// TEXCOORD_0 and COLOR_0 are preferred (higher sets are ignored).
 static void findAttributeAccessors(const cgltf_primitive* prim,
                                    const cgltf_accessor*& posAcc,
                                    const cgltf_accessor*& nrmAcc,
-                                   const cgltf_accessor*& uvAcc)
+                                   const cgltf_accessor*& uvAcc,
+                                   const cgltf_accessor*& colAcc)
 {
     posAcc = nullptr;
     nrmAcc = nullptr;
     uvAcc  = nullptr;
+    colAcc = nullptr;
     for (cgltf_size ai = 0; ai < prim->attributes_count; ++ai)
     {
         const cgltf_attribute* attr = &prim->attributes[ai];
@@ -353,6 +355,8 @@ static void findAttributeAccessors(const cgltf_primitive* prim,
             nrmAcc = attr->data;
         else if (attr->type == cgltf_attribute_type_texcoord && attr->index == 0)
             uvAcc = attr->data;   // TEXCOORD_0 (we ignore higher sets)
+        else if (attr->type == cgltf_attribute_type_color && attr->index == 0)
+            colAcc = attr->data;   // COLOR_0 (we ignore higher sets)
     }
 }
 
@@ -384,11 +388,12 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
         return;
     }
 
-    // ---- Locate POSITION / NORMAL / TEXCOORD_0 accessors ----
+    // ---- Locate POSITION / NORMAL / TEXCOORD_0 / COLOR_0 accessors ----
     const cgltf_accessor* posAcc = nullptr;
     const cgltf_accessor* nrmAcc = nullptr;
     const cgltf_accessor* uvAcc  = nullptr;
-    findAttributeAccessors(prim, posAcc, nrmAcc, uvAcc);
+    const cgltf_accessor* colAcc  = nullptr;
+    findAttributeAccessors(prim, posAcc, nrmAcc, uvAcc, colAcc);
     if (posAcc == nullptr)
     {
         Log::warn("Scene", "glTF primitive has no POSITION accessor; skipping");
@@ -444,6 +449,27 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
             uv = unpackAccessor(uvAcc, 2);
     }
 
+    // Vertex colors (optional; default (1,1,1) = no effect).  glTF COLOR_0
+    // can be VEC3 or VEC4; we only use RGB, ignoring alpha.
+    vector<float> col;
+    if (colAcc != nullptr)
+    {
+        if (colAcc->count != vertCount)
+        {
+            Log::warn("Scene",
+                      "glTF primitive COLOR_0 count (%zu) != POSITION "
+                      "count (%zu); ignoring vertex colors",
+                      (size_t)colAcc->count, (size_t)vertCount);
+            colAcc = nullptr;
+        }
+        else
+        {
+            // Unpack colors: VEC3 -> 3 floats, VEC4 -> 4 floats (we ignore alpha)
+            int colComps = (colAcc->type == cgltf_type_vec3) ? 3 : 4;
+            col = unpackAccessor(colAcc, colComps);
+        }
+    }
+
     auto vert = [&](cgltf_size i) -> glm::vec3 {
         return glm::vec3(pos[3 * (size_t)i + 0],
                          pos[3 * (size_t)i + 1],
@@ -460,6 +486,15 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
         return glm::vec2(uv[2 * (size_t)i + 0],
                          uv[2 * (size_t)i + 1]);
     };
+    // Vertex colors are per-vertex and NOT transformed.
+    auto colAt = [&](cgltf_size i) -> glm::vec3 {
+        if (colAcc == nullptr) return glm::vec3(1.0f);  // default white = no effect
+        // Handle both VEC3 and VEC4 (ignore alpha)
+        int stride = (colAcc->type == cgltf_type_vec3) ? 3 : 4;
+        return glm::vec3(col[stride * (size_t)i + 0],
+                         col[stride * (size_t)i + 1],
+                         col[stride * (size_t)i + 2]);
+    };
 
     // Node-transform the local vertex / normal into the scene frame.
     auto vTrans = [&](cgltf_size i) -> glm::vec3 {
@@ -475,7 +510,8 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
     auto emit = [&](cgltf_size i0, cgltf_size i1, cgltf_size i2) {
         triangles.push_back(makeTri(vTrans(i0), vTrans(i1), vTrans(i2),
                                     nTrans(i0), nTrans(i1), nTrans(i2),
-                                    uvAt(i0), uvAt(i1), uvAt(i2)));
+                                    uvAt(i0), uvAt(i1), uvAt(i2),
+                                    colAt(i0), colAt(i1), colAt(i2)));
         triangles.back().tex = binding;
         ++count;
     };
