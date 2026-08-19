@@ -210,6 +210,15 @@ static void testLoadOBJ(const std::string& exeDir)
                   "tri_uv.obj -> per-corner UVs loaded from vt entries");
     }
     {
+        auto tris = loadOBJTris(exeDir, "tri_color.obj");
+        check(tris.size() == 1, "tri_color.obj -> 1 triangle");
+        if (tris.size() == 1)
+            check(tris[0].c0 == glm::vec3(1, 0, 0) &&
+                  tris[0].c1 == glm::vec3(0, 1, 0) &&
+                  tris[0].c2 == glm::vec3(0, 0, 1),
+                  "tri_color.obj -> vertex colors loaded from v entries");
+    }
+    {
         // vt exists for some corners but not the face → per-corner guard.
         auto tris = loadOBJTris(exeDir, "tri_no_vn.obj");
         check(tris.size() == 1, "tri_no_vn.obj -> 1 triangle (no vt)");

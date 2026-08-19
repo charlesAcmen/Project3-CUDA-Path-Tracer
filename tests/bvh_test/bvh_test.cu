@@ -183,7 +183,8 @@ bool bruteForceClosest(const Ray& ray, const std::vector<Triangle>& tris,
         glm::vec3 nn;
         glm::vec2 uu;
         glm::vec4 ttg;
-        if (triangleIntersectionTest(ray, tris[offset + j], tt, nn, uu, ttg))
+        glm::vec3 vc;
+        if (triangleIntersectionTest(ray, tris[offset + j], tt, nn, uu, ttg, vc))
         {
             if (tt < t) { t = tt; nrm = nn; uv = uu; idx = offset + j; hit = true; }
         }
@@ -250,6 +251,9 @@ Triangle bakeExpected(const Geom& g, const Triangle& src)
     d.uv0 = src.uv0;
     d.uv1 = src.uv1;
     d.uv2 = src.uv2;
+    d.c0 = src.c0;
+    d.c1 = src.c1;
+    d.c2 = src.c2;
     // Texture slot bindings are per-triangle and transform-free; copy through.
     d.tex = src.tex;
     return d;
@@ -280,6 +284,8 @@ bool triEqual(const Triangle& a, const Triangle& b, float eps)
         return glm::length(x - y) < 1e-4f;
     };
     if (!uvEq(a.uv0, b.uv0) || !uvEq(a.uv1, b.uv1) || !uvEq(a.uv2, b.uv2))
+        return false;
+    if (!nearVec(a.c0, b.c0, eps) || !nearVec(a.c1, b.c1, eps) || !nearVec(a.c2, b.c2, eps))
         return false;
     if (a.tex.baseColor != b.tex.baseColor || a.tex.normal != b.tex.normal ||
         a.tex.metallicRoughness != b.tex.metallicRoughness ||
@@ -321,6 +327,11 @@ bool testWorldBake()
     cube[0].tex.baseColor = 3;
     cube[0].tex.normal    = 4;
     cube[1].tex.occlusion = 5;
+    // Non-white colors prove that the world-space bake preserves COLOR_0
+    // instead of resetting it to Triangle's default white values.
+    cube[0].c0 = glm::vec3(1.0f, 0.0f, 0.0f);
+    cube[0].c1 = glm::vec3(0.0f, 1.0f, 0.0f);
+    cube[0].c2 = glm::vec3(0.0f, 0.0f, 1.0f);
     const glm::mat4 T = makeTransform({ 1, 2, 3 }, { 0.4f, 0.2f, 0.3f }, { 2, 1, 3 });
     const Geom g = makeGeom(7, 0, (int)cube.size(), T);
 
