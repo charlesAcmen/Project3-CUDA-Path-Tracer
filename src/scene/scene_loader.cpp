@@ -83,8 +83,20 @@ static void applyMaterialType(const json& p, const string& name, Material& m)
         // — the diffuse albedo, which also tints the conductor F0 by metallic.
         // Roughness and metallic parameters are resolved per-hit from mesh
         // textures (ORM) or glTF factors (or standard defaults).
-        const auto& col = p["RGB"];
-        m.color = glm::vec3(col[0], col[1], col[2]);
+        //
+        // Special case: if RGB is missing but the material references a glTF mesh,
+        // set a sentinel value so the glTF material's own colors are used.
+        if (p.contains("RGB"))
+        {
+            const auto& col = p["RGB"];
+            m.color = glm::vec3(col[0], col[1], col[2]);
+        }
+        else
+        {
+            // Missing RGB means "use glTF material colors" for glTF meshes
+            // Default to black (0,0,0) — resolveBaseColor will skip this and use glTF textures/factors
+            m.color = glm::vec3(-1.0f);  // Sentinel for "use glTF material"
+        }
         m.type = MaterialType::Pbr;
     }
     else if (typeStr == "REFRACTIVE")
