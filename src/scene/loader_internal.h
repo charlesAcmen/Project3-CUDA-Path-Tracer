@@ -25,12 +25,16 @@ namespace SceneLoader {
 
 // Shared triangle construction (OBJ + glTF).  Any vertex normal that is
 // NaN or (near-)zero-length is replaced by the geometric face normal.
-// UVs default to (0,0) when the source file provides none.
+// UVs default to (0,0) and vertex colors default to (1,1,1) = no effect
+// when the source file provides none.
 Triangle makeTri(const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
                  const glm::vec3& n0, const glm::vec3& n1, const glm::vec3& n2,
                  const glm::vec2& u0 = glm::vec2(0.0f),
                  const glm::vec2& u1 = glm::vec2(0.0f),
-                 const glm::vec2& u2 = glm::vec2(0.0f));
+                 const glm::vec2& u2 = glm::vec2(0.0f),
+                 const glm::vec3& c0 = glm::vec3(1.0f),
+                 const glm::vec3& c1 = glm::vec3(1.0f),
+                 const glm::vec3& c2 = glm::vec3(1.0f));
 
 // Load an image file (PNG/JPG via stb_image) into Scene::textures.
 // Returns the Scene::textures index (>= 0), or -1 on failure.
