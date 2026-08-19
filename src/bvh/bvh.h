@@ -75,6 +75,7 @@ struct BvhHit
     // island).  (0,0,0,0) sentinel = degenerate UVs → the shading side skips
     // tangent-space normal mapping.
     glm::vec4 tangent;
+    glm::vec3 vertexColor; // interpolated vertex color (COLOR_0), default white = no effect
 };
 
 /**
@@ -146,7 +147,8 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
                 glm::vec3 triNormal;
                 glm::vec2 triUv;
                 glm::vec4 triTangent;   // xyz + UV handedness w (glTF TANGENT.w)
-                if (triangleIntersectionTest(objRay, tris[triBase + j], t, triNormal, triUv, triTangent))
+                glm::vec3 triVertexColor; // interpolated vertex color
+                if (triangleIntersectionTest(objRay, tris[triBase + j], t, triNormal, triUv, triTangent, triVertexColor))
                 {
                     if (t < result.t)
                     {
@@ -154,6 +156,7 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
                         result.normal   = triNormal;
                         result.uv       = triUv;
                         result.tangent  = triTangent;
+                        result.vertexColor = triVertexColor;
                         result.hit      = true;
                         result.triIndex = triBase + j;
                     }
