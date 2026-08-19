@@ -43,7 +43,8 @@ namespace SceneLoader {
 Triangle makeTri(
     const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
     const glm::vec3& n0, const glm::vec3& n1, const glm::vec3& n2,
-    const glm::vec2& u0, const glm::vec2& u1, const glm::vec2& u2)
+    const glm::vec2& u0, const glm::vec2& u1, const glm::vec2& u2,
+    const glm::vec3& c0, const glm::vec3& c1, const glm::vec3& c2)
 {
     // ---- Face normal calculation (safe fallback) ----
     glm::vec3 e1 = v1 - v0;
@@ -60,7 +61,7 @@ Triangle makeTri(
     };
 
     return Triangle{ v0, v1, v2, validOr(n0), validOr(n1), validOr(n2),
-                     u0, u1, u2 };
+                     u0, u1, u2, c0, c1, c2 };
 }
 
 // -----------------------------------------------------------------------
@@ -68,11 +69,11 @@ Triangle makeTri(
 // -----------------------------------------------------------------------
 
 // Emit every triangular face of an OBJ into `triangles`.  Walks
-// tinyobjloader's index array (per-corner normal/UV guards because OBJ UVs
-// are per-corner, indexed by the same face indices).
+// tinyobjloader's index array. Normals and UVs are indexed per-corner;
+// colors are indexed per vertex.
 static void appendObjGeometry(const tinyobj::attrib_t& attrib,
                               const vector<tinyobj::shape_t>& shapes,
-                              bool hasNormals, bool hasUvs,
+                              bool hasNormals, bool hasUvs, bool hasColors,
                               vector<Triangle>& triangles, int& count)
 {
     for (const auto& shape : shapes)
@@ -150,7 +151,28 @@ static void appendObjGeometry(const tinyobj::attrib_t& attrib,
                                 attrib.texcoords[2 * (size_t)idx2.texcoord_index + 1]);
             }
 
-            triangles.push_back(makeTri(v0, v1, v2, n0, n1, n2, uv0, uv1, uv2));
+            // ---- Vertex colors (extension: `v x y z r g b`) ----
+            // tinyobjloader stores RGB alongside positions, so colors use the
+            // vertex index rather than OBJ's per-corner normal/UV indices.
+            // Missing or malformed color data stays white, which preserves
+            // the renderer's "no vertex-color modulation" default.
+            glm::vec3 c0(1.0f), c1(1.0f), c2(1.0f);
+            auto loadColor = [&](int vertexIndex, glm::vec3& color) {
+                if (hasColors && vertexIndex >= 0 &&
+                    (size_t)(3 * vertexIndex + 2) < attrib.colors.size())
+                {
+                    color = glm::vec3(
+                        attrib.colors[3 * (size_t)vertexIndex + 0],
+                        attrib.colors[3 * (size_t)vertexIndex + 1],
+                        attrib.colors[3 * (size_t)vertexIndex + 2]);
+                }
+            };
+            loadColor(idx0.vertex_index, c0);
+            loadColor(idx1.vertex_index, c1);
+            loadColor(idx2.vertex_index, c2);
+
+            triangles.push_back(makeTri(v0, v1, v2, n0, n1, n2, uv0, uv1, uv2,
+                                        c0, c1, c2));
             count++;
             index_offset += fv;
         }
@@ -267,7 +289,8 @@ pair<int, int> loadOBJ(const string& objPath,
     // (loader_test's geometry assertions) keeps scene == nullptr and skips MTL
     // texture loading entirely.
     appendObjGeometry(attrib, shapes, !attrib.normals.empty(),
-                      !attrib.texcoords.empty(), triangles, count);
+                      !attrib.texcoords.empty(), !attrib.colors.empty(),
+                      triangles, count);
     if (scene != nullptr && !materials.empty())
         stampMtlTextures(objPath, materials, shapes, (size_t)offset,
                          *scene, triangles);
