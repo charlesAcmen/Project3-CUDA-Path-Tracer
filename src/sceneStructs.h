@@ -62,6 +62,7 @@ struct Triangle {
     glm::vec3 v0, v1, v2;  // three vertex positions
     glm::vec3 n0, n1, n2;  // vertex normals (smooth shading interpolation)
     glm::vec2 uv0{ 0.0f }, uv1{ 0.0f }, uv2{ 0.0f };  // per-vertex texture coordinates (UVs)
+    glm::vec3 c0{ 1.0f }, c1{ 1.0f }, c2{ 1.0f };  // per-vertex colors (COLOR_0, default white = no effect)
     int materialId = -1;   // material index; set during the world-space bake
     TextureBinding tex;    // per-triangle glTF texture slots (all -1 unless glTF-assigned)
 };
@@ -261,5 +262,6 @@ struct ShadeableIntersection
   glm::vec4 tangent;
   int materialId;
   glm::vec2 uv;   // interpolated texture coordinate at the hit point
+  glm::vec3 vertexColor; // interpolated vertex color (COLOR_0), default white = no effect
   TextureBinding tex;   // per-triangle texture slots (copied from the hit triangle)
 };
