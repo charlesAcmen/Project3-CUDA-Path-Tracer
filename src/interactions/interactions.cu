@@ -410,7 +410,7 @@ __host__ __device__ void resolvePbrSurfaceParams(
     if (m.type == MaterialType::Reflective)
         baseColor = m.specular.color;
     else
-        baseColor = resolveBaseColor(tex, textures, uv, m, vertexColor);  // Pass vertexColor here
+        baseColor = resolveBaseColor(tex, textures, uv, m, vertexColor);  
 
     roughness     = r;
     alpha         = r * r;
