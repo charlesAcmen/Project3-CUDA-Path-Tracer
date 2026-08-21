@@ -251,13 +251,13 @@ static int resolveGltfTextureSlot(GltfLoadCtx& ctx,
     return ctx.imageToTexId[imageIdx];
 }
 
-// Resolve a glTF material's five texture slots into a TextureBinding.
+// Resolve a glTF material's five texture slots into a shared SurfaceBinding.
 // baseColor / emissive are color maps (sRGB → linearized on load); normal /
 // metallicRoughness / occlusion are data maps (raw bytes kept).
-static TextureBinding bindGltfMaterial(GltfLoadCtx& ctx,
+static SurfaceBinding bindGltfMaterial(GltfLoadCtx& ctx,
                                        const cgltf_material* mat)
 {
-    TextureBinding b;
+    SurfaceBinding b;
     if (mat == nullptr)
         return b;
     b.baseColor         = resolveGltfTextureSlot(ctx,
@@ -290,7 +290,7 @@ static TextureBinding bindGltfMaterial(GltfLoadCtx& ctx,
                                       mat->pbr_metallic_roughness.base_color_factor[1],
                                       mat->pbr_metallic_roughness.base_color_factor[2]);
     }
-    // glTF emissive intensity (see TextureBinding::emissiveFactor / Strength):
+    // glTF emissive intensity (see SurfaceBinding::emissiveFactor / Strength):
     //   Le = emissiveTexture.rgb · emissiveFactor · KHR_materials_emissive_strength.
     // cgltf fills emissive_factor with the spec default [0,0,0] when absent;
     // the Khronos viewer treats a texture bound with an all-zero factor as
@@ -400,12 +400,14 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
         return;
     }
 
-    // Per-triangle texture slots from the primitive's glTF material.  All five
-    // roles (baseColor/normal/ORM/occlusion/emissive) resolve into the global
-    // texture table and are stamped on every triangle.  baseColor, the ORM
+    // Per-primitive surface binding from the glTF material.  All five roles
+    // (baseColor/normal/ORM/occlusion/emissive) resolve into the global
+    // texture table, then the resulting binding is interned once and linked
+    // from every emitted triangle by a compact id.  baseColor, the ORM
     // (metallicRoughness) channels, and the normal slot are sampled by the
     // current shading; occlusion/emissive are data for future features.
-    const TextureBinding binding = bindGltfMaterial(ctx, prim->material);
+    const int surfaceBindingId = internSurfaceBinding(
+        ctx.scene, bindGltfMaterial(ctx, prim->material));
 
     const cgltf_size vertCount = posAcc->count;
 
@@ -603,7 +605,8 @@ static void walkNode(const cgltf_node* node, const glm::mat4& parentWorld,
  *   are skipped with a warning.
  * - Each primitive's material texture slots (baseColor / normal /
  *   metallicRoughness / occlusion / emissive) are auto-loaded into
- *   Scene::textures and stamped on the triangles as a TextureBinding.
+ *   Scene::textures and referenced by emitted triangles through a shared
+ *   SurfaceBinding id.
  *   Images load from external PNG/JPG file URIs or from the .glb binary
  *   buffer (bufferView); data: URIs warn + fall back to the material color.
  *   The scene JSON's MATERIAL still governs the shading model (an explicit

@@ -206,7 +206,7 @@ static void stampMtlTextures(const string& objPath,
         return id;
     };
 
-    vector<TextureBinding> matBindings(materials.size());
+    vector<SurfaceBinding> matBindings(materials.size());
     for (size_t mi = 0; mi < materials.size(); ++mi)
     {
         const auto& m = materials[mi];
@@ -224,7 +224,11 @@ static void stampMtlTextures(const string& objPath,
         }
     }
 
-    // Stamp per-face material onto each triangle (same face order as pushed,
+    vector<int> surfaceBindingIds(materials.size(), -1);
+    for (size_t mi = 0; mi < matBindings.size(); ++mi)
+        surfaceBindingIds[mi] = internSurfaceBinding(scene, matBindings[mi]);
+
+    // Link each face to its shared surface binding (same face order as pushed,
     // so triIndex tracks the mesh's slice starting at `offset`).
     size_t triIndex = offset;
     for (const auto& shape : shapes)
@@ -252,8 +256,8 @@ static void stampMtlTextures(const string& objPath,
  * @param triangles [out] Flat array of object-space triangles to append to
  * @param scene     Optional texture sink.  When non-null, the companion .mtl's
  *                  image maps (map_Kd / map_Bump / map_Ke) are resolved into
- *                  per-material TextureBindings and stamped onto each face's
- *                  triangles by material_id.  Null (the loader_test's 2-arg
+ *                  per-material SurfaceBindings linked to each face by
+ *                  material_id.  Null (the loader_test's 2-arg
  *                  calls) skips MTL texture loading — geometry only.
  * @return (offset, count) — the slice of `triangles` this mesh occupies
  */
