@@ -7,9 +7,11 @@
 #include <string>
 #include <vector>
 
-// Per-triangle texture binding: which image in the texture table serves each
-// role.  A value >= 0 indexes the concatenated texture array; -1 = no
-// texture for that role (use the material's own color / fall back).
+// Surface binding: which image in the texture table serves each role.  A
+// value >= 0 indexes the concatenated texture array; -1 = no texture for
+// that role (use the material's own color / fall back).  Bindings belong to
+// source primitives / OBJ face materials and are shared through a scene-wide
+// table; triangles retain only a compact surfaceBindingId.
 //
 // The roles mirror glTF material slots (base / normal / metallic-roughness
 // ORM / occlusion / emissive).  The unified GGX surface samples baseColor +
@@ -17,7 +19,7 @@
 // resolveShadingNormal for tangent-space normal mapping.  occlusion/emissive
 // are stored so future features (emissive maps, AO) just sample the slot that
 // is already bound.
-struct TextureBinding
+struct SurfaceBinding
 {
     int baseColor        = -1;
     int normal           = -1;
@@ -64,7 +66,7 @@ struct Triangle {
     glm::vec2 uv0{ 0.0f }, uv1{ 0.0f }, uv2{ 0.0f };  // per-vertex texture coordinates (UVs)
     glm::vec3 c0{ 1.0f }, c1{ 1.0f }, c2{ 1.0f };  // per-vertex colors (COLOR_0, default white = no effect)
     int materialId = -1;   // material index; set during the world-space bake
-    TextureBinding tex;    // per-triangle glTF texture slots (all -1 unless glTF-assigned)
+    int surfaceBindingId = -1; // compact link to a shared SurfaceBinding
 };
 
 struct Ray
@@ -132,7 +134,7 @@ struct TextureInfo
 // The scene's texture assets, uploaded once at init and read-only afterward.
 // `pixels` holds every image's texels concatenated into one flat LINEAR-RGB
 // buffer; `infos[count]` describes each image's slice of it.  Shading code
-// indexes it through a TextureBinding slot (>= 0), never directly.
+// indexes it through a SurfaceBinding slot (>= 0), never directly.
 //
 // Bundled as one struct rather than passing pixels+infos as separate kernel
 // parameters so the sampler signatures stay stable as texture roles are
@@ -263,5 +265,5 @@ struct ShadeableIntersection
   int materialId;
   glm::vec2 uv;   // interpolated texture coordinate at the hit point
   glm::vec3 vertexColor; // interpolated vertex color (COLOR_0), default white = no effect
-  TextureBinding tex;   // per-triangle texture slots (copied from the hit triangle)
+  SurfaceBinding surface; // resolved from the hit triangle's shared binding
 };
