@@ -69,7 +69,6 @@ __host__ __device__ glm::vec3 sampleGgxHalfVector(const glm::vec3& normal, float
 
 // Resolve the diffuse albedo.  Source chain — first hit wins:
 //   glTF baseColor texture (tex.baseColor, × baseColorFactor) >
-//   JSON-declared Material::textureId >
 //   flat material color m.color.
 // Vertex colors (COLOR_0) multiply the final albedo: albedo *= vertexColor.
 __host__ __device__ glm::vec3 resolveBaseColor(
@@ -78,7 +77,6 @@ __host__ __device__ glm::vec3 resolveBaseColor(
 
 // Resolve the per-hit emissive radiance.  Source chain — first hit wins:
 //   glTF/OBJ emissive texture (tex.emissive, × emissiveFactor × emissiveStrength) >
-//   JSON-declared Material::textureId >
 //   flat material color m.color.
 // The caller scales by material.emittance for JSON Emitting light sources;
 // auto-glow (a bound emissive slot with no emittance) adds the radiance as-is.
@@ -123,8 +121,7 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
     const glm::vec4& tangent,
     const SurfaceBinding& tex,
     const TextureTable& textures,
-    glm::vec2 uv,
-    float uvScale);
+    glm::vec2 uv);
 
 /**
  * Scatter a ray with some probabilities according to the material properties.
@@ -150,9 +147,8 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
  * It also modifies the color `color` of the ray in place.
  *
  * Texture input: the hit carries a resolved shared SurfaceBinding and a UV.
- * The Diffuse branch resolves the albedo from the
- * baseColor slot (glTF binding wins over the JSON-declared
- * Material::textureId) and samples the scene's texture table (`textures`).
+ * The Diffuse branch resolves the albedo from the mesh's baseColor slot and
+ * samples the scene's texture table (`textures`).
  * The unified GGX surface (Reflective / Pbr) additionally samples the
  * metallicRoughness slot (G = roughness, B = metallic) per-texel.  Refractive
  * materials keep their material color and ignore textures.
