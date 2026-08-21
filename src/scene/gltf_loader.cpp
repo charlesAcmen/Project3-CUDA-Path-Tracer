@@ -509,7 +509,7 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
             : glm::vec3(0.0f);   // no vertex normal → appendTriangle's face-normal fallback
     };
 
-    // Emit one triangle with the primitive's material texture slots.
+    // Emit one triangle linked to the primitive's shared surface binding.
     auto emit = [&](cgltf_size i0, cgltf_size i1, cgltf_size i2) {
         appendTriangle(positions, attrs,
                        vTrans(i0), vTrans(i1), vTrans(i2),
@@ -613,8 +613,8 @@ static void walkNode(const cgltf_node* node, const glm::mat4& parentWorld,
  *   SurfaceBinding id.
  *   Images load from external PNG/JPG file URIs or from the .glb binary
  *   buffer (bufferView); data: URIs warn + fall back to the material color.
- *   The scene JSON's MATERIAL still governs the shading model (an explicit
- *   JSON TEXTURE overrides the glTF baseColor — see parseObjects).
+ *   The scene JSON's MATERIAL still selects the renderer's BSDF; texture
+ *   roles stay with the glTF material.
  * - Draco-compressed primitives are not supported (cgltf does not decode).
  *
  * @param scene     Scene to append to (parallel geometry arrays AND textures)

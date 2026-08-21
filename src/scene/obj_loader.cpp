@@ -186,8 +186,8 @@ static void appendObjGeometry(const tinyobj::attrib_t& attrib,
     }
 }
 
-// Stamp the companion .mtl's per-material texture slots (map_Kd / map_Bump /
-// map_Ke) onto the triangles this mesh pushed, resolved by material_id.  The
+// Link the companion .mtl's per-material texture slots (map_Kd / map_Bump /
+// map_Ke) to the triangles this mesh pushed, resolved by material_id.  The
 // .mtl's flat colors (Kd/Ks/Ns) are intentionally NOT applied — the scene
 // JSON's MATERIAL governs the shading model, same as the glTF path.
 static void stampMtlTextures(const string& objPath,
@@ -247,8 +247,8 @@ static void stampMtlTextures(const string& objPath,
             if (fv != 3) { index_offset += fv; continue; }
             const int matId = shape.mesh.material_ids[f];
             if (matId >= 0 && (size_t)matId < matBindings.size() &&
-                triIndex < triangles.size())
-                triangles[triIndex].tex = matBindings[matId];
+                triIndex < attrs.size())
+                attrs[triIndex].surfaceId = surfaceBindingIds[matId];
             ++triIndex;
             index_offset += fv;
         }
