@@ -32,7 +32,7 @@ struct DeviceBuffers {
     // attributes and the shared surface binding only for the winning hit.
     TrianglePos*            deviceTrianglePositions   = nullptr;
     TriangleAttr*           deviceTriangleAttrs       = nullptr;
-    int*                    deviceTriangleMaterialIds = nullptr;
+    Surface*                deviceSurfaces            = nullptr;
     SurfaceBinding*         deviceSurfaceBindings     = nullptr;
 
     // Texture table: every scene image concatenated into one flat texel

@@ -11,7 +11,8 @@
 // value >= 0 indexes the concatenated texture array; -1 = no texture for
 // that role (use the material's own color / fall back).  Bindings belong to
 // source primitives / OBJ face materials and are shared through a scene-wide
-// table; triangles retain only a compact surfaceBindingId.
+// table while loading; the BVH bake turns those binding ids into compact
+// runtime Surface ids.
 //
 // The roles mirror glTF material slots (base / normal / metallic-roughness
 // ORM / occlusion / emissive).  The unified GGX surface samples baseColor +
@@ -53,20 +54,33 @@ struct SurfaceBinding
     float emissiveStrength = 1.0f;
 };
 
-// Triangle backed by an OBJ mesh.
-//
-// Triangles are stored in object space in the Scene's hostTriangles, then
-// baked to WORLD space by buildSceneBvh (vertices via the geom transform,
-// normals via the inverse-transpose).  The device array the traversal reads
-// is therefore world-space; materialId tags which material the triangle
-// belongs to so the shading kernel can resolve it from the hit triangle.
-struct Triangle {
-    glm::vec3 v0, v1, v2;  // three vertex positions
-    glm::vec3 n0, n1, n2;  // vertex normals (smooth shading interpolation)
-    glm::vec2 uv0{ 0.0f }, uv1{ 0.0f }, uv2{ 0.0f };  // per-vertex texture coordinates (UVs)
-    glm::vec3 c0{ 1.0f }, c1{ 1.0f }, c2{ 1.0f };  // per-vertex colors (COLOR_0, default white = no effect)
-    int materialId = -1;   // material index; set during the world-space bake
-    int surfaceBindingId = -1; // compact link to a shared SurfaceBinding
+// Runtime shading identity.  A Surface combines the scene material that
+// selects the BSDF with one immutable texture/factor binding.  The table is
+// deduplicated by (materialId, surfaceBindingId), so triangles reference a
+// single id instead of carrying a separate material id plus binding id.
+// Keeping the binding as an id avoids duplicating its larger texture metadata.
+struct Surface
+{
+    int materialId       = -1;
+    int surfaceBindingId = -1;
+};
+
+// Position-only device layout.  The traversal hot loop reads this array and
+// deliberately never touches shading attributes or surface bindings.
+struct TrianglePos {
+    glm::vec3 v0, v1, v2;// three vertex positions
+};
+
+// Non-position device layout, expanded only after a closest triangle is
+// known.  While loading, surfaceId temporarily indexes Scene::surfaceBindings.
+// buildSceneBvh overwrites it with an index into its deduplicated runtime
+// Surface table.  A source value of -1 means no texture binding; the runtime
+// Surface still carries the geom material so shading uses its JSON fallback.
+struct TriangleAttr {
+    glm::vec3 n0, n1, n2;// vertex normals (smooth shading interpolation)
+    glm::vec2 uv0{ 0.0f }, uv1{ 0.0f }, uv2{ 0.0f };// per-vertex texture coordinates (UVs)
+    glm::vec3 c0{ 1.0f }, c1{ 1.0f }, c2{ 1.0f };// per-vertex colors (COLOR_0, default white = no effect)
+    int surfaceId = -1;       // compact source-binding / runtime-surface id
 };
 
 struct Ray
@@ -115,9 +129,9 @@ struct Material
     float emittance;              // Emission strength for light sources (nonzero = emissive)
 };
 
-// One image in the scene's texture array, referenced by Material::textureId
-// (>= 0).  On the GPU all images' texels live concatenated in one flat
-// buffer; TextureInfo describes this image's slice of it.
+// One image in the scene's texture array, referenced by a SurfaceBinding
+// slot.  On the GPU all images' texels live concatenated in one flat buffer;
+// TextureInfo describes this image's slice of it.
 struct TextureInfo
 {
     int pixelOffset = 0;   // texel offset into the concatenated pixel buffer
@@ -262,7 +276,6 @@ struct HitRecord
     // island).  (0,0,0,0) sentinel = degenerate UVs → the shading side skips
     // tangent-space normal mapping.
     int triangleIndex = -1;
-    int materialId = -1;
 };
 
 // Use with a corresponding PathSegment to do:
