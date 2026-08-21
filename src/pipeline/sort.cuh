@@ -20,10 +20,10 @@
 #include <thrust/sequence.h>
 #include <thrust/execution_policy.h>
 
-// ---- Functor: extract materialId from a ShadeableIntersection ----
+// ---- Functor: extract materialId from a compact HitRecord ----
 
 struct ExtractMaterialId {
-    __device__ int operator()(const ShadeableIntersection& isect) const {
+    __device__ int operator()(const HitRecord& isect) const {
         return isect.materialId;
     }
 };
