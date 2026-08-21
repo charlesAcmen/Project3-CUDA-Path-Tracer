@@ -157,14 +157,22 @@ void RenderImGui()
 
     if (g_profiler().enabled()) {
         ImGui::Separator();
-        ImGui::Text("Per-Kernel Timing (last frame):");
-        ImGui::Text("  ComputeIntersections:  %.3f ms", g_profiler().guiData().perKernelMs[4]);
-        ImGui::Text("  ShadeMaterial:         %.3f ms", g_profiler().guiData().perKernelMs[0]);
-        ImGui::Text("  GatherTerminatedPaths: %.3f ms", g_profiler().guiData().perKernelMs[1]);
-        ImGui::Text("  SortByMaterial:        %.3f ms", g_profiler().guiData().perKernelMs[2]);
-        ImGui::Text("  CompactPaths:          %.3f ms", g_profiler().guiData().perKernelMs[3]);
-        ImGui::Text("  BloomPass:             %.3f ms", g_profiler().guiData().perKernelMs[5]);
-        ImGui::Text("  PostProcessTail:       %.3f ms", g_profiler().guiData().perKernelMs[6]);
+        ImGui::Text("Per-frame phase timing (sum across all calls):");
+        const GuiDataContainer& profGui = g_profiler().guiData();
+        const auto phaseTiming = [&](const char* name, int op) {
+            const int calls = profGui.perKernelCalls[op];
+            const float total = profGui.perKernelMs[op];
+            const float perCall = (calls > 0) ? total / calls : 0.0f;
+            ImGui::Text("  %-23s %.3f ms total | %.3f ms/call | %d calls",
+                        name, total, perCall, calls);
+        };
+        phaseTiming("ComputeIntersections",  static_cast<int>(ProfilerOp::ComputeIntersections));
+        phaseTiming("ShadeMaterial",         static_cast<int>(ProfilerOp::ShadeMaterial));
+        phaseTiming("GatherTerminatedPaths", static_cast<int>(ProfilerOp::GatherTerminatedPaths));
+        phaseTiming("SortByMaterial",        static_cast<int>(ProfilerOp::SortByMaterial));
+        phaseTiming("CompactPaths",          static_cast<int>(ProfilerOp::CompactPaths));
+        phaseTiming("BloomPass",             static_cast<int>(ProfilerOp::BloomPass));
+        phaseTiming("PostProcessTail",       static_cast<int>(ProfilerOp::PostProcessTail));
         ImGui::Text("Bounces Last Frame: %d", g_profiler().guiData().lastBounceCount);
     }
 

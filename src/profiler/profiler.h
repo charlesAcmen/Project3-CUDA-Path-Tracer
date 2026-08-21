@@ -41,7 +41,10 @@ inline constexpr int kProfilerOpCount = static_cast<int>(ProfilerOp::COUNT);
 // Profiler::updateGuiData() and read by main.cpp's ImGui panel.
 struct GuiDataContainer {
     int   TracedDepth             = 0;
+    // Per-frame sum across every invocation of an operation.  Bounce-loop
+    // phases therefore include every bounce, not one representative launch.
     float perKernelMs[kProfilerOpCount] = {};
+    int   perKernelCalls[kProfilerOpCount] = {};
     int   lastBounceCount         = 0;
 };
 

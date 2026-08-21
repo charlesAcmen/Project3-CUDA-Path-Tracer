@@ -266,6 +266,7 @@ void Profiler::updateGuiData()
     const int numOps = kProfilerOpCount;
     for (int i = 0; i < numOps; ++i) {
         m_guiData.perKernelMs[i] = 0.0f;
+        m_guiData.perKernelCalls[i] = 0;
     }
 
     // Sum up all timing records from the current iteration
@@ -274,6 +275,7 @@ void Profiler::updateGuiData()
             int idx = static_cast<int>(rec.op);
             if (idx >= 0 && idx < numOps) {
                 m_guiData.perKernelMs[idx] += rec.time_ms;
+                m_guiData.perKernelCalls[idx]++;
             }
         }
     }
