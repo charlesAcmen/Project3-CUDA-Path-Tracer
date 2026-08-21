@@ -429,7 +429,7 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
     // handles integer and normalized component types).
     vector<float> pos = unpackAccessor(posAcc, 3);
 
-    // Normals (optional; makeTri falls back to the face normal).
+    // Normals (optional; appendTriangle falls back to the face normal).
     vector<float> nrm;
     if (nrmAcc != nullptr)
         nrm = unpackAccessor(nrmAcc, 3);
@@ -506,16 +506,17 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
     auto nTrans = [&](cgltf_size i) -> glm::vec3 {
         return (nrmAcc != nullptr)
             ? glm::vec3(worldIT * glm::vec4(norm(i), 0.0f))
-            : glm::vec3(0.0f);   // no vertex normal → makeTri's face-normal fallback
+            : glm::vec3(0.0f);   // no vertex normal → appendTriangle's face-normal fallback
     };
 
     // Emit one triangle with the primitive's material texture slots.
     auto emit = [&](cgltf_size i0, cgltf_size i1, cgltf_size i2) {
-        triangles.push_back(makeTri(vTrans(i0), vTrans(i1), vTrans(i2),
-                                    nTrans(i0), nTrans(i1), nTrans(i2),
-                                    uvAt(i0), uvAt(i1), uvAt(i2),
-                                    colAt(i0), colAt(i1), colAt(i2)));
-        triangles.back().tex = binding;
+        appendTriangle(positions, attrs,
+                       vTrans(i0), vTrans(i1), vTrans(i2),
+                       nTrans(i0), nTrans(i1), nTrans(i2),
+                       uvAt(i0), uvAt(i1), uvAt(i2),
+                       colAt(i0), colAt(i1), colAt(i2));
+        attrs.back().surfaceId = surfaceBindingId;
         ++count;
     };
 
