@@ -58,15 +58,25 @@ struct Lcg
     float range(float a, float b) { return a + (b - a) * unit(); }
 };
 
-Triangle makeTriangle(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
-                      const glm::vec2& uva = glm::vec2(0.0f),
-                      const glm::vec2& uvb = glm::vec2(0.0f),
-                      const glm::vec2& uvc = glm::vec2(0.0f))
+// Mirrors the renderer's source-geometry representation: positions and
+// attributes have matching indices, without a temporary Triangle AoS.
+struct TestMesh
+{
+    std::vector<TrianglePos> positions;
+    std::vector<TriangleAttr> attrs;
+};
+
+void appendTriangle(TestMesh& mesh, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
+                    const glm::vec2& uva = glm::vec2(0.0f),
+                    const glm::vec2& uvb = glm::vec2(0.0f),
+                    const glm::vec2& uvc = glm::vec2(0.0f))
 {
     glm::vec3 n = glm::normalize(glm::cross(b - a, c - a));
-    Triangle t{ a, b, c, n, n, n };        // materialId stays -1 (source geometry)
-    t.uv0 = uva; t.uv1 = uvb; t.uv2 = uvc;
-    return t;
+    mesh.positions.push_back(TrianglePos{ a, b, c });
+    TriangleAttr attr{};
+    attr.n0 = n; attr.n1 = n; attr.n2 = n;
+    attr.uv0 = uva; attr.uv1 = uvb; attr.uv2 = uvc;
+    mesh.attrs.push_back(attr);
 }
 
 // World-space transform builder (translation → rotation XYZ → scale).
@@ -99,7 +109,7 @@ Geom makeGeom(int materialId, int triOffset, int triCount, const glm::mat4& T)
 // ---------------------------------------------------------------------
 
 // Axis-aligned cube: 8 corners, 12 triangles, outward winding.
-std::vector<Triangle> makeCube(float half = 1.0f)
+TestMesh makeCube(float half = 1.0f)
 {
     const glm::vec3 c[8] = {
         { -half, -half, -half }, {  half, -half, -half },
@@ -121,45 +131,47 @@ std::vector<Triangle> makeCube(float half = 1.0f)
         { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 },   // -z face
         { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 }    // +z face
     };
-    std::vector<Triangle> tris;
+    TestMesh mesh;
     for (const auto& f : faces)
     {
-        tris.push_back(makeTriangle(c[f[0]], c[f[1]], c[f[2]], uv[f[0]], uv[f[1]], uv[f[2]]));
-        tris.push_back(makeTriangle(c[f[0]], c[f[2]], c[f[3]], uv[f[0]], uv[f[2]], uv[f[3]]));
+        appendTriangle(mesh, c[f[0]], c[f[1]], c[f[2]], uv[f[0]], uv[f[1]], uv[f[2]]);
+        appendTriangle(mesh, c[f[0]], c[f[2]], c[f[3]], uv[f[0]], uv[f[2]], uv[f[3]]);
     }
-    return tris;
+    return mesh;
 }
 
 // Random triangle soup in a box — spatially incoherent, exercises the
 // SAH split on a noisier distribution than a clean cube.
-std::vector<Triangle> makeRandomCloud(int n, unsigned int seed)
+TestMesh makeRandomCloud(int n, unsigned int seed)
 {
     Lcg rng(seed);
-    std::vector<Triangle> tris;
+    TestMesh mesh;
     for (int i = 0; i < n; i++)
     {
         glm::vec3 a(rng.range(-3, 3), rng.range(-3, 3), rng.range(-3, 3));
         glm::vec3 b = a + glm::vec3(rng.range(-1, 1), rng.range(-1, 1), rng.range(-1, 1));
         glm::vec3 c = a + glm::vec3(rng.range(-1, 1), rng.range(-1, 1), rng.range(-1, 1));
-        tris.push_back(makeTriangle(a, b, c));
+        appendTriangle(mesh, a, b, c);
     }
-    return tris;
+    return mesh;
 }
 
 // Degenerate set: collinear (zero-area) triangles.  They never register
 // a hit (Möller-Trumbore near-parallel rejection) but their zero-volume
 // AABBs exercise the surfaceArea() guard and the degenerate-split path.
-std::vector<Triangle> makeDegenerate(int n)
+TestMesh makeDegenerate(int n)
 {
     const glm::vec3 normal(0.0f, 1.0f, 0.0f);
-    std::vector<Triangle> tris;
+    TestMesh mesh;
     for (int i = 0; i < n; i++)
     {
         const glm::vec3 p((float)i * 0.5f, 0.0f, 0.0f);
-        tris.push_back(Triangle{ p, p + glm::vec3(1, 0, 0), p + glm::vec3(2, 0, 0),
-                                 normal, normal, normal });
+        mesh.positions.push_back(TrianglePos{ p, p + glm::vec3(1, 0, 0), p + glm::vec3(2, 0, 0) });
+        TriangleAttr attr{};
+        attr.n0 = normal; attr.n1 = normal; attr.n2 = normal;
+        mesh.attrs.push_back(attr);
     }
-    return tris;
+    return mesh;
 }
 
 // ---------------------------------------------------------------------
@@ -169,7 +181,7 @@ std::vector<Triangle> makeDegenerate(int n)
 // Closest-hit linear scan over a triangle slice — the reference the BVH
 // traversal is validated against.  Also returns the hit triangle index so
 // the test can compare materialId with the BVH's triIndex.
-bool bruteForceClosest(const Ray& ray, const std::vector<Triangle>& tris,
+bool bruteForceClosest(const Ray& ray, const TestMesh& mesh,
                        int offset, int count, float& t, glm::vec3& nrm,
                        glm::vec2& uv, int& idx)
 {
@@ -180,13 +192,19 @@ bool bruteForceClosest(const Ray& ray, const std::vector<Triangle>& tris,
     for (int j = 0; j < count; j++)
     {
         float tt;
-        glm::vec3 nn;
-        glm::vec2 uu;
-        glm::vec4 ttg;
-        glm::vec3 vc;
-        if (triangleIntersectionTest(ray, tris[offset + j], tt, nn, uu, ttg, vc))
+        float u, v;
+        if (intersectTrianglePositions(ray, mesh.positions[offset + j], tt, u, v))
         {
-            if (tt < t) { t = tt; nrm = nn; uv = uu; idx = offset + j; hit = true; }
+            if (tt < t)
+            {
+                glm::vec4 tangent;
+                glm::vec3 vertexColor;
+                t = tt;
+                interpolateTriangleAttributes(mesh.positions[offset + j], mesh.attrs[offset + j],
+                                              u, v, nrm, uv, tangent, vertexColor);
+                idx = offset + j;
+                hit = true;
+            }
         }
     }
     return hit;
@@ -195,11 +213,11 @@ bool bruteForceClosest(const Ray& ray, const std::vector<Triangle>& tris,
 // Deterministic ray batch: origins on a sphere around the mesh aimed at
 // the centroid, random rays, and axis-aligned rays (zero direction
 // components) to exercise the slab test's zero-direction handling.
-std::vector<Ray> makeRayBatch(const std::vector<Triangle>& tris, unsigned int seed)
+std::vector<Ray> makeRayBatch(const std::vector<TrianglePos>& positions, unsigned int seed)
 {
     AABB bounds;
-    for (const auto& t : tris)
-        bounds.expand(t);
+    for (const TrianglePos& pos : positions)
+        bounds.expand(pos);
     const glm::vec3 center = 0.5f * (bounds.min + bounds.max);
     const float radius = glm::length(bounds.max - bounds.min) * 0.5f + 1.0f;
 
@@ -234,29 +252,25 @@ std::vector<Ray> makeRayBatch(const std::vector<Triangle>& tris, unsigned int se
 
 // Expected bake of one source triangle under a geom's transform:
 // vertices via transform (w=1), normals via invTranspose (w=0, deliberately
-// NOT re-normalized — triangleIntersectionTest normalizes the interpolated
-// result), materialId tagged.  Mirrors buildSceneBvh's bake.
-Triangle bakeExpected(const Geom& g, const Triangle& src)
+// NOT re-normalized — interpolation normalizes the final result), materialId
+// tagged separately. Mirrors buildSceneBvh's bake.
+void appendBakedExpected(TestMesh& dst, std::vector<int>& materialIds,
+                         const Geom& g, const TrianglePos& srcPos,
+                         const TriangleAttr& srcAttr)
 {
-    Triangle d;
-    d.v0         = glm::vec3(g.transform * glm::vec4(src.v0, 1.0f));
-    d.v1         = glm::vec3(g.transform * glm::vec4(src.v1, 1.0f));
-    d.v2         = glm::vec3(g.transform * glm::vec4(src.v2, 1.0f));
-    d.n0         = glm::vec3(g.invTranspose * glm::vec4(src.n0, 0.0f));
-    d.n1         = glm::vec3(g.invTranspose * glm::vec4(src.n1, 0.0f));
-    d.n2         = glm::vec3(g.invTranspose * glm::vec4(src.n2, 0.0f));
-    d.materialId = g.materialid;
+    TrianglePos pos;
+    TriangleAttr attr = srcAttr;
+    pos.v0      = glm::vec3(g.transform * glm::vec4(srcPos.v0, 1.0f));
+    pos.v1      = glm::vec3(g.transform * glm::vec4(srcPos.v1, 1.0f));
+    pos.v2      = glm::vec3(g.transform * glm::vec4(srcPos.v2, 1.0f));
+    attr.n0     = glm::vec3(g.invTranspose * glm::vec4(srcAttr.n0, 0.0f));
+    attr.n1     = glm::vec3(g.invTranspose * glm::vec4(srcAttr.n1, 0.0f));
+    attr.n2     = glm::vec3(g.invTranspose * glm::vec4(srcAttr.n2, 0.0f));
     // UVs are texture-space coordinates — the geometry transform does NOT
     // apply to them; copy through unchanged (mirrors the bake in bvh.cu).
-    d.uv0 = src.uv0;
-    d.uv1 = src.uv1;
-    d.uv2 = src.uv2;
-    d.c0 = src.c0;
-    d.c1 = src.c1;
-    d.c2 = src.c2;
-    // Texture slot bindings are per-triangle and transform-free; copy through.
-    d.tex = src.tex;
-    return d;
+    dst.positions.push_back(pos);
+    dst.attrs.push_back(attr);
+    materialIds.push_back(g.materialid);
 }
 
 bool nearVec(const glm::vec3& a, const glm::vec3& b, float eps)
@@ -264,13 +278,14 @@ bool nearVec(const glm::vec3& a, const glm::vec3& b, float eps)
     return glm::length(a - b) < eps;
 }
 
-// Two triangles are equal iff materialId matches, vertices match, the
+// Two source entries are equal iff materialId matches, vertices match, the
 // baked normals are parallel (they may be scaled by invTranspose), and the
-// texture slots + UVs match (both are copied through the bake unchanged).
-bool triEqual(const Triangle& a, const Triangle& b, float eps)
+// surface-binding ids + UVs match (both are copied through the bake unchanged).
+bool triEqual(const TrianglePos& aPos, const TriangleAttr& aAttr, int aMaterialId,
+              const TrianglePos& bPos, const TriangleAttr& bAttr, int bMaterialId, float eps)
 {
-    if (a.materialId != b.materialId) return false;
-    if (!nearVec(a.v0, b.v0, eps) || !nearVec(a.v1, b.v1, eps) || !nearVec(a.v2, b.v2, eps))
+    if (aMaterialId != bMaterialId) return false;
+    if (!nearVec(aPos.v0, bPos.v0, eps) || !nearVec(aPos.v1, bPos.v1, eps) || !nearVec(aPos.v2, bPos.v2, eps))
         return false;
     auto normalEq = [](const glm::vec3& x, const glm::vec3& y) {
         const float lx = glm::length(x), ly = glm::length(y);
@@ -278,38 +293,54 @@ bool triEqual(const Triangle& a, const Triangle& b, float eps)
         if (lx < 1e-6f || ly < 1e-6f) return false;
         return glm::dot(x / lx, y / ly) > 1.0f - 1e-5f;
     };
-    if (!normalEq(a.n0, b.n0) || !normalEq(a.n1, b.n1) || !normalEq(a.n2, b.n2))
+    if (!normalEq(aAttr.n0, bAttr.n0) || !normalEq(aAttr.n1, bAttr.n1) || !normalEq(aAttr.n2, bAttr.n2))
         return false;
     const auto uvEq = [](const glm::vec2& x, const glm::vec2& y) {
         return glm::length(x - y) < 1e-4f;
     };
-    if (!uvEq(a.uv0, b.uv0) || !uvEq(a.uv1, b.uv1) || !uvEq(a.uv2, b.uv2))
+    if (!uvEq(aAttr.uv0, bAttr.uv0) || !uvEq(aAttr.uv1, bAttr.uv1) || !uvEq(aAttr.uv2, bAttr.uv2))
         return false;
-    if (!nearVec(a.c0, b.c0, eps) || !nearVec(a.c1, b.c1, eps) || !nearVec(a.c2, b.c2, eps))
+    if (!nearVec(aAttr.c0, bAttr.c0, eps) || !nearVec(aAttr.c1, bAttr.c1, eps) || !nearVec(aAttr.c2, bAttr.c2, eps))
         return false;
-    if (a.tex.baseColor != b.tex.baseColor || a.tex.normal != b.tex.normal ||
-        a.tex.metallicRoughness != b.tex.metallicRoughness ||
-        a.tex.occlusion != b.tex.occlusion || a.tex.emissive != b.tex.emissive)
+    if (aAttr.surfaceId != bAttr.surfaceId)
         return false;
     return true;
 }
 
 // Whether `got` is a permutation of `expected` (flatten reorders but must
 // never drop, duplicate, or alter a baked triangle).
-bool sameMultiset(const std::vector<Triangle>& expected, const std::vector<Triangle>& got, float eps)
+bool sameMultiset(const TestMesh& expected, const std::vector<int>& expectedMaterialIds,
+                  const TestMesh& got, const std::vector<int>& gotMaterialIds, float eps)
 {
-    if (expected.size() != got.size()) return false;
-    std::vector<char> used(got.size(), 0);
-    for (const Triangle& e : expected)
+    if (expected.positions.size() != got.positions.size()) return false;
+    std::vector<char> used(got.positions.size(), 0);
+    for (size_t i = 0; i < expected.positions.size(); ++i)
     {
         bool found = false;
-        for (size_t j = 0; j < got.size() && !found; j++)
+        for (size_t j = 0; j < got.positions.size() && !found; j++)
         {
-            if (!used[j] && triEqual(e, got[j], eps)) { used[j] = 1; found = true; }
+            if (!used[j] && triEqual(expected.positions[i], expected.attrs[i], expectedMaterialIds[i],
+                                     got.positions[j], got.attrs[j], gotMaterialIds[j], eps))
+            { used[j] = 1; found = true; }
         }
         if (!found) return false;
     }
     return true;
+}
+
+// Convert flattened runtime Surface ids back to the source-binding ids used
+// by the bake reference, while exposing the material ids that now live only
+// in BvhBuffers::hostSurfaces.
+void unpackRuntimeSurfaces(const BvhBuffers& out, TestMesh& mesh,
+                           std::vector<int>& materialIds)
+{
+    materialIds.resize(mesh.attrs.size());
+    for (size_t i = 0; i < mesh.attrs.size(); ++i)
+    {
+        const Surface& surface = out.hostSurfaces[mesh.attrs[i].surfaceId];
+        materialIds[i] = surface.materialId;
+        mesh.attrs[i].surfaceId = surface.surfaceBindingId;
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -321,36 +352,46 @@ bool sameMultiset(const std::vector<Triangle>& expected, const std::vector<Trian
 // with materialId tagged.
 bool testWorldBake()
 {
-    std::vector<Triangle> cube = makeCube(1.0f);
-    // Stamp non-default texture slots so the bake's tex copy-through is
+    TestMesh cube = makeCube(1.0f);
+    // Stamp non-default surface-binding ids so the bake's copy-through is
     // exercised (triEqual compares them); must survive bake + flatten.
-    cube[0].tex.baseColor = 3;
-    cube[0].tex.normal    = 4;
-    cube[1].tex.occlusion = 5;
+    cube.attrs[0].surfaceId = 3;
+    cube.attrs[1].surfaceId = 5;
     // Non-white colors prove that the world-space bake preserves COLOR_0
-    // instead of resetting it to Triangle's default white values.
-    cube[0].c0 = glm::vec3(1.0f, 0.0f, 0.0f);
-    cube[0].c1 = glm::vec3(0.0f, 1.0f, 0.0f);
-    cube[0].c2 = glm::vec3(0.0f, 0.0f, 1.0f);
+    // instead of resetting it to TriangleAttr's default white values.
+    cube.attrs[0].c0 = glm::vec3(1.0f, 0.0f, 0.0f);
+    cube.attrs[0].c1 = glm::vec3(0.0f, 1.0f, 0.0f);
+    cube.attrs[0].c2 = glm::vec3(0.0f, 0.0f, 1.0f);
     const glm::mat4 T = makeTransform({ 1, 2, 3 }, { 0.4f, 0.2f, 0.3f }, { 2, 1, 3 });
-    const Geom g = makeGeom(7, 0, (int)cube.size(), T);
+    const Geom g = makeGeom(7, 0, (int)cube.positions.size(), T);
 
     std::vector<Geom> geoms{ g };
     BvhBuffers out;
-    bvh::buildSceneBvh(out, cube, geoms);
+    bvh::buildSceneBvh(out, cube.positions, cube.attrs, geoms);
 
-    if (out.hostTriangles.size() != cube.size())
+    if (out.hostTrianglePositions.size() != cube.positions.size())
     {
-        printf("FAIL bake: baked size %zu != source %zu\n", out.hostTriangles.size(), cube.size());
+        printf("FAIL bake: baked size %zu != source %zu\n", out.hostTrianglePositions.size(), cube.positions.size());
         return false;
     }
 
-    std::vector<Triangle> expected;
-    for (const Triangle& t : cube) expected.push_back(bakeExpected(g, t));
+    TestMesh expected;
+    std::vector<int> expectedMaterialIds;
+    for (size_t i = 0; i < cube.positions.size(); ++i)
+        appendBakedExpected(expected, expectedMaterialIds, g, cube.positions[i], cube.attrs[i]);
 
-    if (!sameMultiset(expected, out.hostTriangles, 1e-3f))
+    TestMesh actual{ out.hostTrianglePositions, out.hostTriangleAttrs };
+    std::vector<int> actualMaterialIds;
+    unpackRuntimeSurfaces(out, actual, actualMaterialIds);
+    if (!sameMultiset(expected, expectedMaterialIds, actual, actualMaterialIds, 1e-3f))
     {
         printf("FAIL bake: baked triangles do not match transform(source)\n");
+        return false;
+    }
+    if (out.hostSurfaces.size() != 3)
+    {
+        printf("FAIL bake: expected 3 unique (material, binding) surfaces, got %zu\n",
+               out.hostSurfaces.size());
         return false;
     }
     return true;
@@ -362,53 +403,67 @@ bool testWorldBake()
 // ignored.
 bool testMultiGeomBake()
 {
-    const std::vector<Triangle> cube  = makeCube(1.0f);
-    const std::vector<Triangle> cloud = makeRandomCloud(120, 0xABCDEFu);
+    const TestMesh cube  = makeCube(1.0f);
+    const TestMesh cloud = makeRandomCloud(120, 0xABCDEFu);
 
-    std::vector<Triangle> hostTris = cube;
-    hostTris.insert(hostTris.end(), cloud.begin(), cloud.end());
+    TestMesh hostMesh = cube;
+    hostMesh.positions.insert(hostMesh.positions.end(), cloud.positions.begin(), cloud.positions.end());
+    hostMesh.attrs.insert(hostMesh.attrs.end(), cloud.attrs.begin(), cloud.attrs.end());
 
     const glm::mat4 T0 = makeTransform({ -4, 0, 0 }, { 0, 0.5f, 0 }, { 1, 2, 1 });
     const glm::mat4 T1 = makeTransform({  3, 1, 2 }, { 0.3f, 0, 0.7f }, { 0.5f, 0.5f, 2 });
 
     std::vector<Geom> geoms(3);
-    geoms[0] = makeGeom(3, 0,            (int)cube.size(),  T0);
-    geoms[1] = makeGeom(9, (int)cube.size(), (int)cloud.size(), T1);
+    geoms[0] = makeGeom(3, 0, (int)cube.positions.size(), T0);
+    geoms[1] = makeGeom(9, (int)cube.positions.size(), (int)cloud.positions.size(), T1);
     // geoms[2] stays default (offset -1, count 0) → empty mesh, ignored.
 
     BvhBuffers out;
-    bvh::buildSceneBvh(out, hostTris, geoms);
+    bvh::buildSceneBvh(out, hostMesh.positions, hostMesh.attrs, geoms);
 
-    if (out.hostTriangles.size() != hostTris.size())
+    if (out.hostTrianglePositions.size() != hostMesh.positions.size())
     {
-        printf("FAIL multi-geom: baked size %zu != source %zu\n", out.hostTriangles.size(), hostTris.size());
+        printf("FAIL multi-geom: baked size %zu != source %zu\n", out.hostTrianglePositions.size(), hostMesh.positions.size());
         return false;
     }
 
-    std::vector<Triangle> expected;
-    for (const Triangle& t : cube)  expected.push_back(bakeExpected(geoms[0], t));
-    for (const Triangle& t : cloud) expected.push_back(bakeExpected(geoms[1], t));
+    TestMesh expected;
+    std::vector<int> expectedMaterialIds;
+    for (size_t i = 0; i < cube.positions.size(); ++i)
+        appendBakedExpected(expected, expectedMaterialIds, geoms[0], cube.positions[i], cube.attrs[i]);
+    for (size_t i = 0; i < cloud.positions.size(); ++i)
+        appendBakedExpected(expected, expectedMaterialIds, geoms[1], cloud.positions[i], cloud.attrs[i]);
 
-    if (!sameMultiset(expected, out.hostTriangles, 1e-3f))
+    TestMesh actual{ out.hostTrianglePositions, out.hostTriangleAttrs };
+    std::vector<int> actualMaterialIds;
+    unpackRuntimeSurfaces(out, actual, actualMaterialIds);
+    if (!sameMultiset(expected, expectedMaterialIds, actual, actualMaterialIds, 1e-3f))
     {
         printf("FAIL multi-geom: baked triangles do not match per-geom transforms\n");
+        return false;
+    }
+    if (out.hostSurfaces.size() != 2)
+    {
+        printf("FAIL multi-geom: expected one shared surface per material, got %zu\n",
+               out.hostSurfaces.size());
         return false;
     }
     return true;
 }
 
 // Test 3: traverseBvhClosest (near-child-first) must equal a brute-force
-// O(N) scan on the baked array — hit flag, t, normal, and the materialId
-// of the hit triangle (triIndex).  Runs over several mesh kinds ×
+// O(N) scan on the baked array.  The BVH returns only t/u/v + triIndex;
+// this test expands the winning triangle afterward and verifies that its
+// normal/UV still match the full brute-force result.  Runs over several mesh kinds ×
 // transforms, including a non-uniform scale (invTranspose normals).
-bool testTraversalVsBrute(const char* name, const std::vector<Triangle>& tris,
+bool testTraversalVsBrute(const char* name, const TestMesh& mesh,
                           const glm::mat4& T, int materialId)
 {
     std::vector<Geom> geoms(1);
-    geoms[0] = makeGeom(materialId, 0, (int)tris.size(), T);
+    geoms[0] = makeGeom(materialId, 0, (int)mesh.positions.size(), T);
 
     BvhBuffers out;
-    bvh::buildSceneBvh(out, tris, geoms);
+    bvh::buildSceneBvh(out, mesh.positions, mesh.attrs, geoms);
     if (out.hostNodes.empty())
     {
         printf("FAIL %s: no tree built\n", name);
@@ -416,14 +471,15 @@ bool testTraversalVsBrute(const char* name, const std::vector<Triangle>& tris,
     }
 
     // Rays aim at the BAKED geometry (world space), like the renderer.
-    const std::vector<Ray> rays = makeRayBatch(out.hostTriangles, 0x1234567u);
+    const std::vector<Ray> rays = makeRayBatch(out.hostTrianglePositions, 0x1234567u);
+    const TestMesh baked{ out.hostTrianglePositions, out.hostTriangleAttrs };
     for (const Ray& ray : rays)
     {
         float bt = LARGE_T; glm::vec3 bn; glm::vec2 buv; int bidx = -1;
-        const bool bhit = bruteForceClosest(ray, out.hostTriangles, 0, (int)out.hostTriangles.size(), bt, bn, buv, bidx);
+        const bool bhit = bruteForceClosest(ray, baked, 0, (int)baked.positions.size(), bt, bn, buv, bidx);
 
         const BvhHit vhit = traverseBvhClosest(ray, out.hostNodes.data(),
-                                               out.hostTriangles.data(), LARGE_T);
+                                               out.hostTrianglePositions.data(), LARGE_T);
 
         if (bhit != vhit.hit)
         {
@@ -432,26 +488,38 @@ bool testTraversalVsBrute(const char* name, const std::vector<Triangle>& tris,
         }
         if (!bhit) continue;
 
-        if (fabsf(bt - vhit.t) > 1e-3f || glm::dot(bn, vhit.normal) < 0.9999f)
-        {
-            printf("FAIL %s: t brute=%.6f bvh=%.6f dot=%.6f\n", name, bt, vhit.t, glm::dot(bn, vhit.normal));
-            return false;
-        }
-        if (glm::length(buv - vhit.uv) > 1e-3f)
-        {
-            printf("FAIL %s: uv brute=(%.4f,%.4f) bvh=(%.4f,%.4f)\n", name,
-                   buv.x, buv.y, vhit.uv.x, vhit.uv.y);
-            return false;
-        }
-        if (vhit.triIndex < 0 || vhit.triIndex >= (int)out.hostTriangles.size())
+        if (vhit.triIndex < 0 || vhit.triIndex >= (int)out.hostTrianglePositions.size())
         {
             printf("FAIL %s: triIndex %d out of range\n", name, vhit.triIndex);
             return false;
         }
-        if (out.hostTriangles[vhit.triIndex].materialId != out.hostTriangles[bidx].materialId)
+
+        glm::vec3 vn;
+        glm::vec2 vuv;
+        glm::vec4 vtangent;
+        glm::vec3 vcolor;
+        interpolateTriangleAttributes(out.hostTrianglePositions[vhit.triIndex],
+                                      out.hostTriangleAttrs[vhit.triIndex],
+                                      vhit.u, vhit.v,
+                                      vn, vuv, vtangent, vcolor);
+
+        if (fabsf(bt - vhit.t) > 1e-3f || glm::dot(bn, vn) < 0.9999f)
+        {
+            printf("FAIL %s: t brute=%.6f bvh=%.6f dot=%.6f\n", name, bt, vhit.t, glm::dot(bn, vn));
+            return false;
+        }
+        if (glm::length(buv - vuv) > 1e-3f)
+        {
+            printf("FAIL %s: uv brute=(%.4f,%.4f) bvh=(%.4f,%.4f)\n", name,
+                   buv.x, buv.y, vuv.x, vuv.y);
+            return false;
+        }
+        const int bvhMaterialId = out.hostSurfaces[out.hostTriangleAttrs[vhit.triIndex].surfaceId].materialId;
+        const int bruteMaterialId = out.hostSurfaces[out.hostTriangleAttrs[bidx].surfaceId].materialId;
+        if (bvhMaterialId != bruteMaterialId)
         {
             printf("FAIL %s: BVH materialId %d != brute %d\n", name,
-                   out.hostTriangles[vhit.triIndex].materialId, out.hostTriangles[bidx].materialId);
+                   bvhMaterialId, bruteMaterialId);
             return false;
         }
     }
@@ -471,13 +539,13 @@ bool testTraversalVsBrute(const char* name, const std::vector<Triangle>& tris,
 //       triangles), so the chunk really holds that leaf's triangles and
 //   (b) the flattened output is a bijection of the baked source, so the
 //       flatten never dropped, duplicated, or altered a triangle.
-bool testBuildStructure(const std::vector<Triangle>& tris, const glm::mat4& T, int materialId)
+bool testBuildStructure(const TestMesh& mesh, const glm::mat4& T, int materialId)
 {
     std::vector<Geom> geoms(1);
-    geoms[0] = makeGeom(materialId, 0, (int)tris.size(), T);
+    geoms[0] = makeGeom(materialId, 0, (int)mesh.positions.size(), T);
 
     BvhBuffers out;
-    bvh::buildSceneBvh(out, tris, geoms);
+    bvh::buildSceneBvh(out, mesh.positions, mesh.attrs, geoms);
     if (out.hostNodes.empty())
     {
         printf("FAIL structure: no nodes built\n");
@@ -490,16 +558,20 @@ bool testBuildStructure(const std::vector<Triangle>& tris, const glm::mat4& T, i
     // array on both sides, so it cannot see flatten bugs; the standalone
     // bake tests only cover their own inputs.  This closes that gap for
     // every structure case.
-    std::vector<Triangle> expected;
-    for (const Triangle& t : tris)
-        expected.push_back(bakeExpected(geoms[0], t));
-    if (!sameMultiset(expected, out.hostTriangles, 1e-3f))
+    TestMesh expected;
+    std::vector<int> expectedMaterialIds;
+    for (size_t i = 0; i < mesh.positions.size(); ++i)
+        appendBakedExpected(expected, expectedMaterialIds, geoms[0], mesh.positions[i], mesh.attrs[i]);
+    TestMesh actual{ out.hostTrianglePositions, out.hostTriangleAttrs };
+    std::vector<int> actualMaterialIds;
+    unpackRuntimeSurfaces(out, actual, actualMaterialIds);
+    if (!sameMultiset(expected, expectedMaterialIds, actual, actualMaterialIds, 1e-3f))
     {
         printf("FAIL structure: flattened output is not a bijection of the baked source\n");
         return false;
     }
 
-    const int total = (int)out.hostTriangles.size();
+    const int total = (int)out.hostTrianglePositions.size();
     std::vector<int> coverage(total, 0);   // cells covered by exactly one leaf ⇒ tiling
     std::vector<int> visited(out.hostNodes.size(), 0);
     std::vector<int> stack{ 0 };
@@ -552,7 +624,7 @@ bool testBuildStructure(const std::vector<Triangle>& tris, const glm::mat4& T, i
             for (int j = 0; j < cnt; j++)
             {
                 AABB tb;
-                tb.expand(out.hostTriangles[off + j]);
+                tb.expand(out.hostTrianglePositions[off + j]);
                 if (tb.min.x < n.bounds.min.x - 1e-4f || tb.max.x > n.bounds.max.x + 1e-4f ||
                     tb.min.y < n.bounds.min.y - 1e-4f || tb.max.y > n.bounds.max.y + 1e-4f ||
                     tb.min.z < n.bounds.min.z - 1e-4f || tb.max.z > n.bounds.max.z + 1e-4f)
@@ -729,12 +801,14 @@ bool testAabbEntry()
 // must miss without touching any memory.
 bool testEmptyScene()
 {
-    std::vector<Triangle> none;
+    std::vector<TrianglePos> noPositions;
+    std::vector<TriangleAttr> noAttrs;
     std::vector<Geom> geoms(1);   // default: offset -1, count 0
     BvhBuffers out;
-    bvh::buildSceneBvh(out, none, geoms);
+    bvh::buildSceneBvh(out, noPositions, noAttrs, geoms);
 
-    if (!out.hostNodes.empty() || !out.hostTriangles.empty())
+    if (!out.hostNodes.empty() || !out.hostTrianglePositions.empty() ||
+        !out.hostTriangleAttrs.empty() || !out.hostSurfaces.empty())
     {
         printf("FAIL empty: expected empty tree\n");
         return false;
@@ -762,11 +836,11 @@ int main()
     if (!testEmptyScene()) failures++;
 
     // Traversal + structure across mesh kinds and transforms.
-    const std::vector<Triangle> cube  = makeCube(1.0f);
-    const std::vector<Triangle> cloud = makeRandomCloud(120, 0xDEADBEEFu);
-    const std::vector<Triangle> degen = makeDegenerate(40);
+    const TestMesh cube  = makeCube(1.0f);
+    const TestMesh cloud = makeRandomCloud(120, 0xDEADBEEFu);
+    const TestMesh degen = makeDegenerate(40);
 
-    struct Case { const char* name; const std::vector<Triangle>& tris; glm::mat4 T; int mat; };
+    struct Case { const char* name; const TestMesh& mesh; glm::mat4 T; int mat; };
     const Case cases[] = {
         { "cube_identity",   cube,  makeTransform({ 0, 0, 0 }, { 0, 0, 0 }, { 1, 1, 1 }),      5 },
         { "cube_transform",  cube,  makeTransform({ 1, 2, 3 }, { 0.4f, 0.2f, 0.3f }, { 2, 1, 3 }), 6 },
@@ -776,8 +850,8 @@ int main()
     };
     for (const Case& c : cases)
     {
-        if (!testBuildStructure(c.tris, c.T, c.mat)) failures++;
-        if (!testTraversalVsBrute(c.name, c.tris, c.T, c.mat)) failures++;
+        if (!testBuildStructure(c.mesh, c.T, c.mat)) failures++;
+        if (!testTraversalVsBrute(c.name, c.mesh, c.T, c.mat)) failures++;
     }
 
     if (failures == 0)

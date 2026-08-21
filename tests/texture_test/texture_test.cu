@@ -137,7 +137,7 @@ static void testResolvePbrSurfaceParams()
 
     // ---- ORM bound: dielectric (B=0) — F0 = 0.04, full diffuse ----
     {
-        Material m; m.type = MaterialType::Pbr; m.uvScale = 1.0f;
+        Material m; m.type = MaterialType::Pbr;
         TextureBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
         resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
                                 glm::vec2(0.0f, 0.0f), m);
@@ -149,7 +149,7 @@ static void testResolvePbrSurfaceParams()
 
     // ---- ORM bound: metal (B=1) — F0 = baseColor, no diffuse ----
     {
-        Material m; m.type = MaterialType::Pbr; m.uvScale = 1.0f;
+        Material m; m.type = MaterialType::Pbr;
         TextureBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
         resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
                                 glm::vec2(0.5f, 0.0f), m);
@@ -160,7 +160,7 @@ static void testResolvePbrSurfaceParams()
 
     // ---- ORM bound: r below ROUGHNESS_THRESHOLD + metallic 0.5 ----
     {
-        Material m; m.type = MaterialType::Pbr; m.uvScale = 1.0f;
+        Material m; m.type = MaterialType::Pbr;
         TextureBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
         resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
                                 glm::vec2(0.5f, 0.5f), m);
@@ -174,7 +174,7 @@ static void testResolvePbrSurfaceParams()
     // ---- Unbound: glTF factors govern roughness and metallic ----
     {
         Material m; m.type = MaterialType::Pbr;
-        m.color = ALBEDO; m.uvScale = 1.0f;
+        m.color = ALBEDO;
         TextureBinding tex;
         tex.roughnessFactor = 0.9f; tex.metallicFactor = 0.7f;
         resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
@@ -190,7 +190,6 @@ static void testResolvePbrSurfaceParams()
     {
         Material m; m.type = MaterialType::Reflective;
         m.specular.color = glm::vec3(0.9f, 0.8f, 0.7f);   // chrome tint
-        m.uvScale = 1.0f;                                // no ROUGHNESS / METALLIC
         TextureBinding unbound;                          // all slots -1
         resolvePbrSurfaceParams(r, alpha, F0, diff, unbound, table,
                                 glm::vec2(0.25f, 0.25f), m);
@@ -201,7 +200,7 @@ static void testResolvePbrSurfaceParams()
     // ---- Type default: Pbr — metallic 0.0, roughness 0.5, baseColor m.color ----
     {
         Material m; m.type = MaterialType::Pbr;
-        m.color = ALBEDO; m.uvScale = 1.0f;
+        m.color = ALBEDO;
         TextureBinding unbound;
         resolvePbrSurfaceParams(r, alpha, F0, diff, unbound, table,
                                 glm::vec2(0.25f, 0.25f), m);
@@ -215,7 +214,6 @@ static void testResolvePbrSurfaceParams()
     {
         Material m; m.type = MaterialType::Pbr;
         m.color = glm::vec3(1.0f, 0.0f, 0.0f);   // would win if no texture
-        m.uvScale = 1.0f;
         TextureBinding tex; tex.baseColor = 1;
         tex.baseColorFactor = glm::vec3(0.5f, 0.5f, 0.5f);
         float rr, aa; glm::vec3 f0, dd;

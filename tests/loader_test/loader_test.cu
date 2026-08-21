@@ -6,7 +6,7 @@
  * which carry the tinyobjloader, cgltf, and stb implementations) and links
  * utils/utilities.cu for buildTransformationMatrix, so this exercises the
  * production load path.  Because the sources are in this TU, the
- * SceneLoader::makeTri / loadOBJ / loadGLTF helpers are callable directly,
+ * SceneLoader::appendTriangle / loadOBJ / loadGLTF helpers are callable directly,
  * and SceneLoader::loadFromJSON covers the JSON dispatch.
  *
  * Covers extreme cases: face-normal fallback (no NORMAL / zero NORMAL / NaN),
@@ -26,7 +26,7 @@
 // touching the root CMake build, and so the SceneLoader helpers are callable
 // directly in this TU.
 //
-// texture_loader.cpp calls stbi_load for TEXTURE images; this TU must supply
+// texture_loader.cpp calls stbi_load for glTF/MTL images; this TU must supply
 // the implementation (the main app gets it from src/stb.cpp).
 //
 // ORDER MATTERS: stb_image v2.06 keeps the implementation block OUTSIDE the
@@ -77,17 +77,25 @@ static bool isUnit(const glm::vec3& n, float eps = 1e-4f)
     return std::fabs(glm::dot(n, n) - 1.0f) < eps;
 }
 
-static glm::vec3 faceNormal(const Triangle& t)
+struct LoadedMesh
 {
-    return glm::normalize(glm::cross(t.v1 - t.v0, t.v2 - t.v0));
+    std::vector<TrianglePos> positions;
+    std::vector<TriangleAttr> attrs;
+    size_t size() const { return positions.size(); }
+    bool empty() const { return positions.empty(); }
+};
+
+static glm::vec3 faceNormal(const TrianglePos& pos)
+{
+    return glm::normalize(glm::cross(pos.v1 - pos.v0, pos.v2 - pos.v0));
 }
 
 // True when every vertex normal is unit and parallel to the geometric face
-// normal (i.e. makeTri fell back to fn).  Not valid on degenerate triangles.
-static bool normalsFollowFace(const Triangle& t, float eps = 1e-4f)
+// normal (i.e. appendTriangle fell back to fn).  Not valid on degenerate triangles.
+static bool normalsFollowFace(const TrianglePos& pos, const TriangleAttr& attr, float eps = 1e-4f)
 {
-    glm::vec3 fn = faceNormal(t);
-    for (const glm::vec3* n : { &t.n0, &t.n1, &t.n2 })
+    glm::vec3 fn = faceNormal(pos);
+    for (const glm::vec3* n : { &attr.n0, &attr.n1, &attr.n2 })
     {
         if (!isUnit(*n)) return false;
         if (std::fabs(glm::dot(*n, fn) - 1.0f) > eps) return false;
@@ -97,20 +105,18 @@ static bool normalsFollowFace(const Triangle& t, float eps = 1e-4f)
 
 // ---- Loader helpers ---------------------------------------------------
 
-static std::vector<Triangle> loadOBJTris(const std::string& exeDir,
-                                         const std::string& asset)
+static LoadedMesh loadOBJTris(const std::string& exeDir, const std::string& asset)
 {
-    std::vector<Triangle> tris;
-    SceneLoader::loadOBJ(exeDir + "/assets/" + asset, tris);
-    return tris;
+    LoadedMesh mesh;
+    SceneLoader::loadOBJ(exeDir + "/assets/" + asset, mesh.positions, mesh.attrs);
+    return mesh;
 }
 
-static std::vector<Triangle> loadGLTFTris(const std::string& exeDir,
-                                          const std::string& asset)
+static LoadedMesh loadGLTFTris(const std::string& exeDir, const std::string& asset)
 {
     Scene scene;
     SceneLoader::loadGLTF(scene, exeDir + "/assets/" + asset);
-    return scene.hostTriangles;
+    return LoadedMesh{ scene.hostTrianglePositions, scene.hostTriangleAttrs };
 }
 
 #if defined(_WIN32)
@@ -150,38 +156,39 @@ struct StderrCapture
 #endif
 
 // =====================================================================
-// Part A — makeTri unit checks
+// Part A — appendTriangle unit checks
 // =====================================================================
-static void testMakeTri()
+static void testAppendTriangle()
 {
-    std::printf("=== makeTri ===\n");
+    std::printf("=== appendTriangle ===\n");
 
-    Triangle t = SceneLoader::makeTri(
+    LoadedMesh mesh;
+    SceneLoader::appendTriangle(mesh.positions, mesh.attrs,
         glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), glm::vec3(0, 1, 0),
         glm::vec3(0, 0, 1), glm::vec3(0, 0, 1), glm::vec3(0, 0, 1));
-    check(t.n0 == glm::vec3(0, 0, 1) && t.n1 == glm::vec3(0, 0, 1) &&
-          t.n2 == glm::vec3(0, 0, 1),
+    check(mesh.attrs[0].n0 == glm::vec3(0, 0, 1) && mesh.attrs[0].n1 == glm::vec3(0, 0, 1) &&
+          mesh.attrs[0].n2 == glm::vec3(0, 0, 1),
           "valid unit normals pass through unchanged");
 
-    Triangle t0 = SceneLoader::makeTri(
+    SceneLoader::appendTriangle(mesh.positions, mesh.attrs,
         glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), glm::vec3(0, 1, 0),
         glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(0, 0, 0));
-    check(t0.n0 == glm::vec3(0, 0, 1) && t0.n1 == glm::vec3(0, 0, 1) &&
-          t0.n2 == glm::vec3(0, 0, 1) && isUnit(t0.n0),
+    check(mesh.attrs[1].n0 == glm::vec3(0, 0, 1) && mesh.attrs[1].n1 == glm::vec3(0, 0, 1) &&
+          mesh.attrs[1].n2 == glm::vec3(0, 0, 1) && isUnit(mesh.attrs[1].n0),
           "zero-length normals fall back to the face normal");
 
     glm::vec3 nanv = glm::vec3(std::numeric_limits<float>::quiet_NaN());
-    Triangle tN = SceneLoader::makeTri(
+    SceneLoader::appendTriangle(mesh.positions, mesh.attrs,
         glm::vec3(0, 0, 0), glm::vec3(1, 0, 0), glm::vec3(0, 1, 0),
         nanv, nanv, nanv);
-    check(tN.n0 == glm::vec3(0, 0, 1) && isUnit(tN.n0),
+    check(mesh.attrs[2].n0 == glm::vec3(0, 0, 1) && isUnit(mesh.attrs[2].n0),
           "NaN normals fall back to the face normal");
 
-    Triangle tD = SceneLoader::makeTri(
+    SceneLoader::appendTriangle(mesh.positions, mesh.attrs,
         glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(0, 0, 0),
         glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(0, 0, 0));
-    check(tD.n0 == glm::vec3(0, 1, 0) && tD.n1 == glm::vec3(0, 1, 0) &&
-          tD.n2 == glm::vec3(0, 1, 0),
+    check(mesh.attrs[3].n0 == glm::vec3(0, 1, 0) && mesh.attrs[3].n1 == glm::vec3(0, 1, 0) &&
+          mesh.attrs[3].n2 == glm::vec3(0, 1, 0),
           "degenerate triangle falls back to (0,1,0)");
 
     std::printf("\n");
@@ -198,24 +205,24 @@ static void testLoadOBJ(const std::string& exeDir)
         auto tris = loadOBJTris(exeDir, "tri_vn.obj");
         check(tris.size() == 1, "tri_vn.obj -> 1 triangle");
         if (tris.size() == 1)
-            check(tris[0].n0 == glm::vec3(0, 0, 1),
+            check(tris.attrs[0].n0 == glm::vec3(0, 0, 1),
                   "tri_vn.obj -> vertex normals loaded from vn entries");
     }
     {
         auto tris = loadOBJTris(exeDir, "tri_uv.obj");
         check(tris.size() == 1, "tri_uv.obj -> 1 triangle");
         if (tris.size() == 1)
-            check(tris[0].uv0 == glm::vec2(0, 0) && tris[0].uv1 == glm::vec2(1, 0) &&
-                  tris[0].uv2 == glm::vec2(0, 1),
+            check(tris.attrs[0].uv0 == glm::vec2(0, 0) && tris.attrs[0].uv1 == glm::vec2(1, 0) &&
+                  tris.attrs[0].uv2 == glm::vec2(0, 1),
                   "tri_uv.obj -> per-corner UVs loaded from vt entries");
     }
     {
         auto tris = loadOBJTris(exeDir, "tri_color.obj");
         check(tris.size() == 1, "tri_color.obj -> 1 triangle");
         if (tris.size() == 1)
-            check(tris[0].c0 == glm::vec3(1, 0, 0) &&
-                  tris[0].c1 == glm::vec3(0, 1, 0) &&
-                  tris[0].c2 == glm::vec3(0, 0, 1),
+            check(tris.attrs[0].c0 == glm::vec3(1, 0, 0) &&
+                  tris.attrs[0].c1 == glm::vec3(0, 1, 0) &&
+                  tris.attrs[0].c2 == glm::vec3(0, 0, 1),
                   "tri_color.obj -> vertex colors loaded from v entries");
     }
     {
@@ -223,15 +230,15 @@ static void testLoadOBJ(const std::string& exeDir)
         auto tris = loadOBJTris(exeDir, "tri_no_vn.obj");
         check(tris.size() == 1, "tri_no_vn.obj -> 1 triangle (no vt)");
         if (tris.size() == 1)
-            check(tris[0].uv0 == glm::vec2(0, 0) && tris[0].uv1 == glm::vec2(0, 0) &&
-                  tris[0].uv2 == glm::vec2(0, 0),
+            check(tris.attrs[0].uv0 == glm::vec2(0, 0) && tris.attrs[0].uv1 == glm::vec2(0, 0) &&
+                  tris.attrs[0].uv2 == glm::vec2(0, 0),
                   "tri_no_vn.obj -> missing vt falls back to (0,0)");
     }
     {
         auto tris = loadOBJTris(exeDir, "tri_no_vn.obj");
         check(tris.size() == 1, "tri_no_vn.obj -> 1 triangle");
         if (tris.size() == 1)
-            check(normalsFollowFace(tris[0]),
+            check(normalsFollowFace(tris.positions[0], tris.attrs[0]),
                   "tri_no_vn.obj -> face-normal fallback");
     }
     {
@@ -242,7 +249,7 @@ static void testLoadOBJ(const std::string& exeDir)
         auto tris = loadOBJTris(exeDir, "degenerate.obj");
         check(tris.size() == 1, "degenerate.obj -> 1 triangle (no crash)");
         if (tris.size() == 1)
-            check(tris[0].n0 == glm::vec3(0, 1, 0),
+            check(tris.attrs[0].n0 == glm::vec3(0, 1, 0),
                   "degenerate.obj -> fallback normal (0,1,0)");
     }
     {
@@ -250,8 +257,8 @@ static void testLoadOBJ(const std::string& exeDir)
         check(tris.size() == 1, "oob.obj -> 1 triangle (tinyobj skips OOB quad)");
     }
     {
-        std::vector<Triangle> tris;
-        auto slice = SceneLoader::loadOBJ(exeDir + "/assets/missing.obj", tris);
+        LoadedMesh tris;
+        auto slice = SceneLoader::loadOBJ(exeDir + "/assets/missing.obj", tris.positions, tris.attrs);
         check(slice.first == -1 && slice.second == 0,
               "missing.obj -> {-1, 0}");
     }
@@ -272,11 +279,13 @@ static void testLoadGLTF(const std::string& exeDir)
         if (tris.size() == 12)
         {
             bool ok = true;
-            for (const auto& t : tris)
+            for (size_t i = 0; i < tris.size(); ++i)
             {
-                for (const glm::vec3* n : { &t.n0, &t.n1, &t.n2 })
+                const TrianglePos& pos = tris.positions[i];
+                const TriangleAttr& attr = tris.attrs[i];
+                for (const glm::vec3* n : { &attr.n0, &attr.n1, &attr.n2 })
                     if (!isUnit(*n)) ok = false;
-                for (const glm::vec3* v : { &t.v0, &t.v1, &t.v2 })
+                for (const glm::vec3* v : { &pos.v0, &pos.v1, &pos.v2 })
                     if (v->x < -1.01f || v->x > 1.01f || v->y < -1.01f ||
                         v->y > 1.01f || v->z < -1.01f || v->z > 1.01f)
                         ok = false;
@@ -294,8 +303,8 @@ static void testLoadGLTF(const std::string& exeDir)
         if (tris.size() == 12)
         {
             bool ok = true;
-            for (const auto& t : tris)
-                for (const glm::vec3* n : { &t.n0, &t.n1, &t.n2 })
+            for (const TriangleAttr& attr : tris.attrs)
+                for (const glm::vec3* n : { &attr.n0, &attr.n1, &attr.n2 })
                     if (!isUnit(*n)) ok = false;
             check(ok, "cube_nonindexed.gltf -> unit normals");
         }
@@ -306,8 +315,8 @@ static void testLoadGLTF(const std::string& exeDir)
         if (tris.size() == 12)
         {
             bool ok = true;
-            for (const auto& t : tris)
-                if (!normalsFollowFace(t)) ok = false;
+            for (size_t i = 0; i < tris.size(); ++i)
+                if (!normalsFollowFace(tris.positions[i], tris.attrs[i])) ok = false;
             check(ok, "cube_nonormal.gltf -> face-normal fallback");
         }
     }
@@ -374,15 +383,15 @@ static void testLoadGLTF(const std::string& exeDir)
         auto tris = loadGLTFTris(exeDir, "degenerate.gltf");
         check(tris.size() == 1, "degenerate.gltf -> 1 triangle (no crash)");
         if (tris.size() == 1)
-            check(tris[0].n0 == glm::vec3(0, 1, 0) && tris[0].n1 == glm::vec3(0, 1, 0) &&
-                  tris[0].n2 == glm::vec3(0, 1, 0),
+            check(tris.attrs[0].n0 == glm::vec3(0, 1, 0) && tris.attrs[0].n1 == glm::vec3(0, 1, 0) &&
+                  tris.attrs[0].n2 == glm::vec3(0, 1, 0),
                   "degenerate.gltf -> fallback normal (0,1,0)");
     }
     {
         auto tris = loadGLTFTris(exeDir, "zero_normal.gltf");
         check(tris.size() == 1, "zero_normal.gltf -> 1 triangle");
         if (tris.size() == 1)
-            check(normalsFollowFace(tris[0]),
+            check(normalsFollowFace(tris.positions[0], tris.attrs[0]),
                   "zero_normal.gltf -> zero NORMALs fall back to face normal");
     }
     {
@@ -395,8 +404,8 @@ static void testLoadGLTF(const std::string& exeDir)
         if (tris.size() == 1)
             // Node carries a translation matrix of (5,5,5), which the loader
             // applies: raw verts (0,0,0)/(1,0,0)/(0,1,0) become (5,5,5)/(6,5,5)/(5,6,5).
-            check(tris[0].v0 == glm::vec3(5, 5, 5) && tris[0].v1 == glm::vec3(6, 5, 5) &&
-                  tris[0].v2 == glm::vec3(5, 6, 5),
+            check(tris.positions[0].v0 == glm::vec3(5, 5, 5) && tris.positions[0].v1 == glm::vec3(6, 5, 5) &&
+                  tris.positions[0].v2 == glm::vec3(5, 6, 5),
                   "node_transform.gltf -> node translation (5,5,5) applied to verts");
     }
     {
@@ -404,10 +413,10 @@ static void testLoadGLTF(const std::string& exeDir)
         check(tris.size() == 1, "norm_i8.gltf -> 1 triangle");
         if (tris.size() == 1)
         {
-            const glm::vec3& v1 = tris[0].v1;
-            const glm::vec3& v2 = tris[0].v2;
-            bool ok = std::fabs(tris[0].v0.x) < 1e-3f && std::fabs(tris[0].v0.y) < 1e-3f &&
-                      std::fabs(tris[0].v0.z) < 1e-3f &&
+            const glm::vec3& v1 = tris.positions[0].v1;
+            const glm::vec3& v2 = tris.positions[0].v2;
+            bool ok = std::fabs(tris.positions[0].v0.x) < 1e-3f && std::fabs(tris.positions[0].v0.y) < 1e-3f &&
+                      std::fabs(tris.positions[0].v0.z) < 1e-3f &&
                       std::fabs(v1.x - 1.0f) < 1e-3f && std::fabs(v1.y) < 1e-3f && std::fabs(v1.z) < 1e-3f &&
                       std::fabs(v2.x) < 1e-3f && std::fabs(v2.y - 1.0f) < 1e-3f && std::fabs(v2.z) < 1e-3f;
             check(ok, "norm_i8.gltf -> normalized int8 POSITION decoded");
@@ -419,9 +428,9 @@ static void testLoadGLTF(const std::string& exeDir)
         check(tris.size() == 1, "tri_uv.gltf -> 1 triangle");
         if (tris.size() == 1)
         {
-            const Triangle& t = tris[0];
-            bool ok = t.uv0 == glm::vec2(0, 0) && t.uv1 == glm::vec2(1, 0) &&
-                      t.uv2 == glm::vec2(0, 1);
+            const TriangleAttr& attr = tris.attrs[0];
+            bool ok = attr.uv0 == glm::vec2(0, 0) && attr.uv1 == glm::vec2(1, 0) &&
+                      attr.uv2 == glm::vec2(0, 1);
             check(ok, "tri_uv.gltf -> per-vertex UVs read from TEXCOORD_0");
         }
     }
@@ -433,7 +442,7 @@ static void testLoadGLTF(const std::string& exeDir)
         // baseColor (gray 128/255 ≈ 0.502 → linear ≈ 0.216).
         Scene scene;
         SceneLoader::loadGLTF(scene, exeDir + "/assets/tex_cube.gltf");
-        check(scene.hostTriangles.size() == 1, "tex_cube.gltf -> 1 triangle");
+        check(scene.hostTrianglePositions.size() == 1, "tex_cube.gltf -> 1 triangle");
         check(scene.textures.size() == 1,
               "tex_cube.gltf -> 3 slots sharing one image dedup to 1 texture");
         if (scene.textures.size() == 1)
@@ -445,9 +454,9 @@ static void testLoadGLTF(const std::string& exeDir)
                   std::fabs(td.pixels[0].b - 0.2158f) < 5e-3f,
                   "tex_cube.gltf -> baseColor linearized (gray 128 → ~0.216)");
         }
-        if (scene.hostTriangles.size() == 1)
+        if (scene.hostTriangleAttrs.size() == 1)
         {
-            const TextureBinding& b = scene.hostTriangles[0].tex;
+            const SurfaceBinding& b = scene.surfaceBindings[scene.hostTriangleAttrs[0].surfaceId];
             check(b.baseColor == 0 && b.normal == 0 && b.occlusion == 0,
                   "tex_cube.gltf -> bound slots stamped with texture id 0");
             check(b.metallicRoughness == -1 && b.emissive == -1,
@@ -459,8 +468,8 @@ static void testLoadGLTF(const std::string& exeDir)
         auto tris = loadGLTFTris(exeDir, "no_mode.gltf");
         check(tris.size() == 1, "no_mode.gltf -> 1 triangle (no UVs)");
         if (tris.size() == 1)
-            check(tris[0].uv0 == glm::vec2(0, 0) && tris[0].uv1 == glm::vec2(0, 0) &&
-                  tris[0].uv2 == glm::vec2(0, 0),
+            check(tris.attrs[0].uv0 == glm::vec2(0, 0) && tris.attrs[0].uv1 == glm::vec2(0, 0) &&
+                  tris.attrs[0].uv2 == glm::vec2(0, 0),
                   "no_mode.gltf -> missing TEXCOORD_0 falls back to (0,0)");
     }
 
@@ -481,15 +490,15 @@ static void testLoadFromJSON(const std::string& exeDir)
             check(scene.geoms[0].meshTriangleOffset == 0 &&
                   scene.geoms[0].meshTriangleCount == 12,
                   "scene_baseline: geom slice (0, 12)");
-        check(scene.hostTriangles.size() == 12, "scene_baseline: 12 host triangles");
+        check(scene.hostTrianglePositions.size() == 12, "scene_baseline: 12 host triangles");
     }
     {
         Scene scene = SceneLoader::loadFromJSON(exeDir + "/scene_glb.json");
-        check(scene.hostTriangles.size() == 12, "scene_glb: 12 host triangles");
+        check(scene.hostTrianglePositions.size() == 12, "scene_glb: 12 host triangles");
     }
     {
         Scene scene = SceneLoader::loadFromJSON(exeDir + "/scene_quad_obj.json");
-        check(scene.hostTriangles.size() == 2, "scene_quad_obj: 2 host triangles");
+        check(scene.hostTrianglePositions.size() == 2, "scene_quad_obj: 2 host triangles");
     }
     {
         Scene scene = SceneLoader::loadFromJSON(exeDir + "/scene_missing_mesh.json");
@@ -498,7 +507,7 @@ static void testLoadFromJSON(const std::string& exeDir)
             check(scene.geoms[0].meshTriangleOffset == -1 &&
                   scene.geoms[0].meshTriangleCount == 0,
                   "scene_missing_mesh: {-1, 0} slice");
-        check(scene.hostTriangles.empty(), "scene_missing_mesh: no host triangles");
+        check(scene.hostTrianglePositions.empty(), "scene_missing_mesh: no host triangles");
     }
     {
         Scene scene = SceneLoader::loadFromJSON(exeDir + "/scene_unsupported_ext.json");
@@ -512,43 +521,8 @@ static void testLoadFromJSON(const std::string& exeDir)
             check(scene.geoms[0].meshTriangleOffset == 0 && scene.geoms[0].meshTriangleCount == 3 &&
                   scene.geoms[1].meshTriangleOffset == 3 && scene.geoms[1].meshTriangleCount == 3,
                   "scene_multi: slices (0,3) and (3,3)");
-        check(scene.hostTriangles.size() == 6, "scene_multi: 6 host triangles");
+        check(scene.hostTrianglePositions.size() == 6, "scene_multi: 6 host triangles");
     }
-    {
-        // A JSON TEXTURE that cannot resolve to an image must degrade
-        // gracefully to the flat color: textureId stays -1 (no image loaded,
-        // no dangling index) rather than crash.  UV_SCALE still maps.
-        Scene scene = SceneLoader::loadFromJSON(exeDir + "/scene_texture.json");
-        check(scene.materials.size() == 1, "scene_texture: 1 material");
-        if (scene.materials.size() == 1)
-        {
-            check(scene.materials[0].textureId == -1,
-                  "scene_texture: unresolvable TEXTURE → flat color (textureId -1)");
-            check(scene.materials[0].uvScale == 2.0f,
-                  "scene_texture: UV_SCALE 2.0 → uvScale");
-        }
-        check(scene.textures.empty(),
-              "scene_texture: no image loaded for unresolvable TEXTURE");
-        check(scene.hostTriangles.size() == 12, "scene_texture: 12 host triangles");
-    }
-    {
-        // JSON TEXTURE wins over the glTF baseColor map: the object's material
-        // declares a TEXTURE while the mesh (tex_cube.gltf) carries its own glTF
-        // baseColor slot.  parseObjects must zero the slice's tex.baseColor so
-        // the shading fallback (tex.baseColor → m.textureId) resolves to the
-        // JSON TEXTURE (here flat color, since missing.png cannot load), not the
-        // model's PNG.
-        Scene scene = SceneLoader::loadFromJSON(exeDir + "/scene_texture_override.json");
-        check(scene.hostTriangles.size() == 1,
-              "scene_texture_override: 1 host triangle");
-        if (scene.hostTriangles.size() == 1)
-            check(scene.hostTriangles[0].tex.baseColor == -1,
-                  "scene_texture_override: JSON TEXTURE zeroes glTF tex.baseColor");
-        check(scene.materials.size() == 1 &&
-              scene.materials[0].textureId == -1,
-              "scene_texture_override: unresolvable JSON TEXTURE → flat color");
-    }
-
     std::printf("\n");
 }
 
@@ -770,13 +744,14 @@ static int verifyGltfSlotMapping(const std::string& path, const Scene& scene)
     for (size_t k = 0; k < scene.textures.size(); ++k)
         texHash[k] = hashTexels(scene.textures[k].pixels);
 
-    // Distinct bindings stamped on the triangles → how many triangles carry each.
+    // Distinct bindings referenced by the triangle attributes → how many triangles carry each.
     std::map<std::array<int, 5>, int> bindings;
-    for (const Triangle& t : scene.hostTriangles)
+    for (const TriangleAttr& attr : scene.hostTriangleAttrs)
     {
-        std::array<int, 5> k = { t.tex.baseColor, t.tex.normal,
-                                 t.tex.metallicRoughness, t.tex.occlusion,
-                                 t.tex.emissive };
+        const SurfaceBinding& binding = scene.surfaceBindings[attr.surfaceId];
+        std::array<int, 5> k = { binding.baseColor, binding.normal,
+                                 binding.metallicRoughness, binding.occlusion,
+                                 binding.emissive };
         ++bindings[k];
     }
 
@@ -898,7 +873,7 @@ static int sweepGltfRoot(const std::string& root)
         std::printf("%-70s %s  tris=%-8d tex=%-3d slot=%s\n",
                     p.filename().string().c_str(),
                     ok ? "ok " : "FAIL",
-                    (int)scene.hostTriangles.size(),
+                    (int)scene.hostTrianglePositions.size(),
                     (int)scene.textures.size(),
                     slotFails > 0 ? "FAIL" : "ok");
     };
@@ -942,7 +917,7 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    testMakeTri();
+    testAppendTriangle();
     testLoadOBJ(exeDir);
     testLoadGLTF(exeDir);
     testLoadFromJSON(exeDir);
