@@ -241,7 +241,7 @@ glm::vec3 bakePoint(const glm::mat4& transform, const glm::vec3& p)
 
 // Transform a vertex normal from object to world space via the
 // inverse-transpose (the correct normal transform under non-uniform scale).
-// Deliberately NOT re-normalized here: triangleIntersectionTest normalizes
+// Deliberately NOT re-normalized here: attribute interpolation normalizes
 // the interpolated result, which reproduces the old per-hit
 // inverse-transpose + normalize (recordWorldNormal) exactly by linearity.
 glm::vec3 bakeNormal(const glm::mat4& invTranspose, const glm::vec3& n){
