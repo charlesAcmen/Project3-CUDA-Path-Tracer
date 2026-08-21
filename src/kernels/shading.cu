@@ -1,4 +1,5 @@
 #include "shading.cuh"
+#include "intersection/triangle.h"  // interpolateTriangleAttributes
 
 // ====================================================================
 // Shading Kernel Implementation
@@ -87,13 +88,40 @@ __global__ void shadeMaterial(
                 return;
             }
 
+            // Expand the complete shading state only for this final closest
+            // triangle.  During BVH traversal, all other candidate hits carry
+            // only t/u/v and are therefore unable to trigger these attribute
+            // loads and interpolations.  The split layout keeps positions out
+            // of the normal/UV/color fetch and resolves the shared surface
+            // binding only for this selected triangle.  The Surface table
+            // combines this geom's material id with the source binding id,
+            // removing the former per-triangle device array.
+            const TrianglePos& trianglePos = deviceTrianglePositions[hit.triangleIndex];
+            const TriangleAttr& triangleAttr = deviceTriangleAttrs[hit.triangleIndex];
+            const Surface& surfaceRef = deviceSurfaces[triangleAttr.surfaceId];
+            const Material& material = materials[surfaceRef.materialId];
+            const SurfaceBinding emptySurface;
+            const SurfaceBinding& surface =
+                (surfaceRef.surfaceBindingId >= 0 && deviceSurfaceBindings != nullptr)
+                ? deviceSurfaceBindings[surfaceRef.surfaceBindingId]
+                : emptySurface;
+            ShadeableIntersection intersection{};
+            intersection.t          = hit.t;
+            intersection.materialId = surfaceRef.materialId;
+            interpolateTriangleAttributes(trianglePos, triangleAttr, hit.u, hit.v,
+                                          intersection.surfaceNormal,
+                                          intersection.uv,
+                                          intersection.tangent,
+                                          intersection.vertexColor);
+            intersection.surface = surface;
+
             if (material.emittance > 0.0f)
             {
                 // Light source hit (JSON Emitting): Le = texture·factor·strength
                 // (flat color when no emissive slot), scaled by the JSON emittance
                 // knob.  Accumulate and terminate the path.
                 pathSegment.accumulatedRadiance = pathSegment.throughput *
-                    resolveEmissive(intersection.tex, textures,
+                    resolveEmissive(intersection.surface, textures,
                                     intersection.uv, material) *
                     material.emittance;
                 pathSegment.remainingBounces = 0;
@@ -107,10 +135,10 @@ __global__ void shadeMaterial(
                 // instead of directly writing to image.  The surface is still shaded
                 // by its BSDF.  (Terminating here would turn a mostly-black
                 // emissive map on a shaded surface black.)
-                if (intersection.tex.emissive >= 0)
+                if (intersection.surface.emissive >= 0)
                 {
                     pathSegment.accumulatedRadiance += pathSegment.throughput *
-                        resolveEmissive(intersection.tex, textures,
+                        resolveEmissive(intersection.surface, textures,
                                        intersection.uv, material);
                 }
 
