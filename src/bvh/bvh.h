@@ -11,7 +11,7 @@
 // query per ray — no per-mesh loop, no ray transformation.
 //
 // Triangle layout: leaves reference a contiguous chunk [left, right) of
-// the triangle array.  buildSceneBvh's flatten pass（展平阶段）REORDERS triangles
+// the parallel triangle arrays.  buildSceneBvh's flatten pass（展平阶段）REORDERS entries
 // into leaf-contiguous runs （同一个叶子节点所包含的三角形在内存中连续存放）, so a leaf's
 // chunk is a sequential memory access — cache-friendly instead of
 // scattered leaf-index reads into the original scene-order array.
@@ -19,8 +19,8 @@
 
 #include "aabb.h"
 #include "constants.h"               // RAY_EPSILON, LARGE_T
-#include "sceneStructs.h"            // Ray, Triangle, Geom
-#include "intersection/triangle.h"   // triangleIntersectionTest
+#include "sceneStructs.h"            // Ray, TrianglePos, TriangleAttr, Geom
+#include "intersection/triangle.h"   // intersectTrianglePositions
 
 #include <vector>
 
@@ -44,24 +44,28 @@ struct BvhNode
 };
 
 // Host build output + device upload for the single scene-wide BVH.
-// hostTriangles holds the REORDERED, WORLD-space flat triangle array
-// (baked + flattened) — uploaded to the renderer as deviceTriangles.
+// The arrays are REORDERED world-space output of the flatten pass.  Traversal
+// receives positions only; shading receives attrs and the deduplicated Surface
+// table.  Every position/attribute index refers to the same triangle.
 struct BvhBuffers
 {
     // Device-side buffers (allocated in uploadToDevice, freed in freeDevice)
     BvhNode*  deviceNodes   = nullptr;
-    std::vector<BvhNode>  hostNodes;      // construction output
-    std::vector<Triangle> hostTriangles;  // reordered world-space triangles
+    std::vector<BvhNode>     hostNodes;      // construction output
+    std::vector<TrianglePos> hostTrianglePositions;
+    std::vector<TriangleAttr> hostTriangleAttrs;
+    std::vector<Surface>     hostSurfaces;
 };
 
 // Result of a closest-hit BVH traversal.
 // `hit` is true only when a triangle was found with t < the caller's far
 // plane (maxT); `t` is that closest distance and `normal` its shading
 // normal (world space — triangles are baked).  `triIndex` is the index of
-// the hit triangle into `tris`, so the caller can resolve per-triangle
-// data (e.g. materialId).  `uv` is the hit's interpolated texture
-// coordinate (barycentric-weighted from the triangle's corner UVs).  On a
-// miss `hit` stays false and `t` keeps maxT.
+// the hit triangle into `tris`, and `u` / `v` are its Moller-Trumbore(莫勒-特朗博尔)
+// barycentric coordinates (the third weight is 1-u-v).  The shading normal,
+// UV, tangent, vertex color, and texture binding are deliberately expanded
+// only once, after traversal has selected this closest triangle.  On a miss
+// `hit` stays false and `t` keeps maxT.
 struct BvhHit
 {
     bool      hit   = false;
