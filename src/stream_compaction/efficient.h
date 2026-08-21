@@ -18,16 +18,12 @@ namespace StreamCompaction {
          *                 per-frame cudaMalloc / cudaFree).
          * scanScratch  - hierarchical block-sum scratch space; used only by the
          *                 shared-memory path.
-         * flagBuffer   - uint8_t boolean flags (shared-memory uint8 fast path).
-         *                 Separated from scanBuffer so that scan loads are 4x
-         *                 smaller while scan stores stay int-sized.
          * scanBlockSize / scanBlockElements - auto-detected optimal block
          *                 dimensions for the templated shared-memory scan kernels.
          */
         struct CompactionWorkspace {
             int*     scanBuffer        = nullptr;
             int*     scanScratch       = nullptr;
-            unsigned char* flagBuffer  = nullptr;   // uint8_t
             size_t   scanBufferInts    = 0;
             size_t   scanScratchInts   = 0;
             int      maxElements       = 0;
@@ -69,7 +65,7 @@ namespace StreamCompaction {
 
         /**
          * Compacts PathSegment arrays using shared memory scan across multiple blocks.
-         * Removes terminated paths (remainingBounces <= 0) from the array.
+         * Keeps entries whose caller-provided activity mask is non-zero.
          *
          * Implements work-efficient stream compaction using shared memory
          * as described in GPU Gems 3, Chapter 39. Performs per-block exclusive
@@ -80,8 +76,14 @@ namespace StreamCompaction {
          * @param n           Number of PathSegments in dev_idata
          * @param dev_odata   Device pointer to output array (must be pre-allocated)
          * @param dev_idata   Device pointer to input array
+         * @param activityMask Required uint8 activity mask produced by the
+         *                     stage that decided each path's liveness.
          * @returns           Number of active paths remaining after compaction
          */
-        int compactPathSegmentsSharedMemory(int n, PathSegment *dev_odata, const PathSegment *dev_idata);
+        int compactPathSegmentsSharedMemory(
+            int n,
+            PathSegment *dev_odata,
+            const PathSegment *dev_idata,
+            const unsigned char *activityMask);
     }
 }

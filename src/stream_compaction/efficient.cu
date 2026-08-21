@@ -65,12 +65,6 @@ namespace StreamCompaction {
                 s_compactionWorkspace.scanBufferInts * sizeof(int));
             checkCUDAError("cudaMalloc scanBuffer failed");
 
-            // uint8_t flag buffer - shared-mem uint8 fast path
-            cudaMalloc(
-                reinterpret_cast<void**>(&s_compactionWorkspace.flagBuffer),
-                static_cast<size_t>(maxElements) * sizeof(unsigned char));
-            checkCUDAError("cudaMalloc flagBuffer failed");
-
             // Hierarchical block-sum scratch - shared-mem path
             if (s_compactionWorkspace.scanScratchInts > 0)
             {
@@ -85,9 +79,6 @@ namespace StreamCompaction {
         {
             cudaFree(s_compactionWorkspace.scanBuffer);
             s_compactionWorkspace.scanBuffer = nullptr;
-
-            cudaFree(s_compactionWorkspace.flagBuffer);
-            s_compactionWorkspace.flagBuffer = nullptr;
 
             cudaFree(s_compactionWorkspace.scanScratch);
             s_compactionWorkspace.scanScratch = nullptr;
@@ -143,12 +134,6 @@ namespace StreamCompaction {
             flags[index] = (paths[index].remainingBounces > 0) ? 1 : 0;
         }
 
-        __global__ void kernMapPathSegmentToBooleanU8(int n, unsigned char *flags, const PathSegment *paths) {
-            int index = threadIdx.x + (blockIdx.x * blockDim.x);
-            if (index >= n) return;
-            flags[index] = (paths[index].remainingBounces > 0) ? 1 : 0;
-        }
-
         __global__ void kernScatterPathSegment(int n, PathSegment *odata,
                 const PathSegment *idata, const int *indices) {
             int index = threadIdx.x + (blockIdx.x * blockDim.x);
@@ -158,12 +143,12 @@ namespace StreamCompaction {
             }
         }
 
-        __global__ void kernScatterPathSegmentU8(int n, PathSegment *odata,
+        __global__ void kernScatterPathSegmentByMask(int n, PathSegment *odata,
                 const PathSegment *idata, const int *indices,
-                const unsigned char *flags) {
+                const unsigned char *activityMask) {
             int index = threadIdx.x + (blockIdx.x * blockDim.x);
             if (index >= n) return;
-            if (flags[index]) {
+            if (activityMask[index]) {
                 odata[indices[index]] = idata[index];
             }
         }
