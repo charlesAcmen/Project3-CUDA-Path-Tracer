@@ -11,10 +11,10 @@
 
 #include "scene/loader_internal.h"
 
-#include "constants.h"        // RAY_EPSILON (face-normal fallback in makeTri)
+#include "constants.h"        // RAY_EPSILON (face-normal fallback in appendTriangle)
 #include "utils/logger.h"
 
-#include <cmath>              // isnan / sqrt (makeTri)
+#include <cmath>              // isnan / sqrt (appendTriangle)
 #include <filesystem>
 #include <unordered_map>
 #include <vector>
@@ -28,7 +28,7 @@ namespace SceneLoader {
 // -----------------------------------------------------------------------
 
 /**
- * Build a Triangle from three vertices and three vertex normals.
+ * Append one split triangle from three vertices and three vertex normals.
  *
  * Shared by loadOBJ and loadGLTF.  Any vertex normal that is NaN or has
  * (near-)zero length is replaced by the geometric face normal — the same
@@ -40,7 +40,8 @@ namespace SceneLoader {
  * @param u0,u1,u2  Corner UVs (texture space); default (0,0) when the
  *                  source file provides none
  */
-Triangle makeTri(
+void appendTriangle(
+    vector<TrianglePos>& positions, vector<TriangleAttr>& attrs,
     const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
     const glm::vec3& n0, const glm::vec3& n1, const glm::vec3& n2,
     const glm::vec2& u0, const glm::vec2& u1, const glm::vec2& u2,
@@ -60,8 +61,12 @@ Triangle makeTri(
         return (std::isnan(len2) || len2 < RAY_EPSILON) ? fn : n;
     };
 
-    return Triangle{ v0, v1, v2, validOr(n0), validOr(n1), validOr(n2),
-                     u0, u1, u2, c0, c1, c2 };
+    positions.push_back({ v0, v1, v2 });
+    TriangleAttr attr;
+    attr.n0 = validOr(n0); attr.n1 = validOr(n1); attr.n2 = validOr(n2);
+    attr.uv0 = u0; attr.uv1 = u1; attr.uv2 = u2;
+    attr.c0 = c0; attr.c1 = c1; attr.c2 = c2;
+    attrs.push_back(attr);
 }
 
 // -----------------------------------------------------------------------
@@ -129,7 +134,7 @@ static void appendObjGeometry(const tinyobj::attrib_t& attrib,
             }
             else
             {
-                // No vertex normals in OBJ → makeTri falls back to the face normal.
+                // No vertex normals in OBJ → appendTriangle falls back to the face normal.
                 n0 = n1 = n2 = glm::vec3(0.0f);
             }
 
@@ -171,8 +176,8 @@ static void appendObjGeometry(const tinyobj::attrib_t& attrib,
             loadColor(idx1.vertex_index, c1);
             loadColor(idx2.vertex_index, c2);
 
-            triangles.push_back(makeTri(v0, v1, v2, n0, n1, n2, uv0, uv1, uv2,
-                                        c0, c1, c2));
+            appendTriangle(positions, attrs, v0, v1, v2, n0, n1, n2,
+                           uv0, uv1, uv2, c0, c1, c2);
             count++;
             index_offset += fv;
         }
