@@ -3,7 +3,7 @@
 // ====================================================================
 // Material Sorting Pipeline
 //
-// Sorts path segments by their intersection's materialId so that
+// Sorts path segments by the materialId resolved from each hit's Surface so that
 // same-material paths become contiguous before shadeMaterial runs.
 //
 // Why this helps:
@@ -15,25 +15,37 @@
 // ====================================================================
 
 #include "sceneStructs.h"
+#include "kernels/kernel_config.h"
 #include <thrust/sort.h>
 #include <thrust/gather.h>
 #include <thrust/sequence.h>
 #include <thrust/execution_policy.h>
 
-// ---- Functor: extract materialId from a compact HitRecord ----
+// Resolve the sort key only when material sorting is enabled.  Traversal
+// otherwise remains position-only and HitRecord stays independent of material
+// storage.  Misses retain -1, matching the old sorting behavior.
+__global__ void buildMaterialSortKeys(
+    int numPaths,
+    const HitRecord* __restrict__ intersections,
+    const TriangleAttr* __restrict__ triangleAttrs,
+    const Surface* __restrict__ surfaces,
+    int* __restrict__ sortKeys)
+{
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numPaths) return;
 
-struct ExtractMaterialId {
-    __device__ int operator()(const HitRecord& isect) const {
-        return isect.materialId;
-    }
-};
+    const HitRecord& hit = intersections[idx];
+    sortKeys[idx] = (hit.triangleIndex >= 0 && triangleAttrs != nullptr && surfaces != nullptr)
+        ? surfaces[triangleAttrs[hit.triangleIndex].surfaceId].materialId
+        : -1;
+}
 
 /**
  * Permute g_dev.paths and g_dev.intersections so that paths with the
  * same materialId become contiguous.
  *
  * Algorithm (Thrust-based, ping-pong via g_dev.pathsCompacted):
- *   1. thrust::transform   — extract materialId → sortKeys
+ *   1. buildMaterialSortKeys — resolve hit surface → materialId key
  *   2. thrust::sequence    — sortIndices = [0, 1, 2, ..., n-1]
  *   3. thrust::sort_by_key — sortIndices maps sorted_pos → original_pos
  *   4. thrust::gather      — reorder paths       into pathsCompacted
@@ -48,11 +60,10 @@ static void sortPathsByMaterial(int num_paths)
     if (!g_opts.sortByMaterial) return;
     if (num_paths <= 1) return;
 
-    // 1. Extract sort keys (materialId from each intersection)
-    thrust::transform(thrust::device,
-        g_dev.intersections, g_dev.intersections + num_paths,
-        g_dev.sortKeys,
-        ExtractMaterialId());
+    // 1. Resolve material keys through TriangleAttr.surfaceId → Surface.
+    LAUNCH_KERNEL_AUTO(buildMaterialSortKeys, num_paths,
+        num_paths, g_dev.intersections, g_dev.deviceTriangleAttrs,
+        g_dev.deviceSurfaces, g_dev.sortKeys);
 
     // 2. Initialise permutation: [0, 1, 2, ..., n-1]
     thrust::sequence(thrust::device,
