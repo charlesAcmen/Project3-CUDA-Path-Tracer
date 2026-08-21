@@ -79,8 +79,6 @@ __global__ void shadeMaterial(
             RngState rngScatter = makeRngState(iter, pathSegment.pixelIndex,
                 bounceNum * MAX_DRAWS_PER_BOUNCE, config.rngMode);
 
-            const Material& material = materials[hit.materialId];
-
             glm::vec3 intersectionPoint = getExactPointOnRay(pathSegment.ray, hit.t);
 
             // Debug overlay: first-bounce hits on the focal plane in green.

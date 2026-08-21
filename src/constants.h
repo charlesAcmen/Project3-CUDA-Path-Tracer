@@ -74,8 +74,3 @@
 constexpr int kBvhMaxDepth      = 24;   // max tree depth
 constexpr int kBvhLeafSize      = 4;    // max triangles per leaf
 constexpr int kMaxBvhStackDepth = 64;   // explicit-stack capacity
-
-// ---- Texture sampling sentinels ----
-// Material::textureId selects where the diffuse albedo comes from:
-//   < 0  → plain material.color (flat color)
-//   >= 0 → index into the device texture table
