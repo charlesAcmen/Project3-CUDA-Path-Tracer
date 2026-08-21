@@ -52,18 +52,20 @@ int loadTextureMemory(Scene& scene, const unsigned char* bytes, int len,
 bool decodeTexture(const std::string& path, const unsigned char* bytes, int len,
                    bool srgb, TextureData& out);
 
-// Load triangles from a Wavefront OBJ file, appending to `triangles`.
+// Load triangles from a Wavefront OBJ file, appending matched position and
+// attribute records.
 // When `scene` is non-null, the companion .mtl's image maps
 // (map_Kd / map_Bump / map_Ke) are stamped onto each face's triangles by
 // material_id.  Returns (offset, count) — the slice this mesh occupies
 // (offset -1 on failure).
 std::pair<int, int> loadOBJ(const std::string& objPath,
-                            std::vector<Triangle>& triangles,
+                            std::vector<TrianglePos>& positions,
+                            std::vector<TriangleAttr>& attrs,
                             Scene* scene = nullptr);
 
 // Load triangles from a glTF 2.0 file (.gltf JSON or .glb binary), walking
 // the scene graph and applying accumulated node transforms.  Returns
-// (offset, count) — the slice of scene.hostTriangles this file occupies.
+// (offset, count) — the slice of Scene's parallel geometry arrays this file occupies.
 std::pair<int, int> loadGLTF(Scene& scene, const std::string& gltfPath);
 
 } // namespace SceneLoader
