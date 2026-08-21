@@ -59,17 +59,14 @@ static __device__ void handleDebugDOFOverlay(
 __global__ void shadeMaterial(
     int iter,
     int num_paths,
-    HitRecord* __restrict__ hitRecords,
-    PathSegment* __restrict__ pathSegments,
-    Material* __restrict__ materials,
-    const TrianglePos* __restrict__ deviceTrianglePositions,
-    const TriangleAttr* __restrict__ deviceTriangleAttrs,
-    const Surface* __restrict__ deviceSurfaces,
-    const SurfaceBinding* __restrict__ deviceSurfaceBindings,
-    TextureTable textures,        // scene texture assets (pixels + slice table)
     ShadingConfig config,
-    unsigned char* __restrict__ pathActivityFlags)
+    ShadingSceneView scene,
+    ShadingBufferView buffers)
 {
+    const HitRecord* __restrict__ hitRecords = buffers.hitRecords;
+    PathSegment* __restrict__ pathSegments = buffers.pathSegments;
+    unsigned char* __restrict__ pathActivityFlags = buffers.pathActivityFlags;
+
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_paths)
     {
@@ -110,14 +107,14 @@ __global__ void shadeMaterial(
             // binding only for this selected triangle.  The Surface table
             // combines this geom's material id with the source binding id,
             // removing the former per-triangle device array.
-            const TrianglePos& trianglePos = deviceTrianglePositions[hit.triangleIndex];
-            const TriangleAttr& triangleAttr = deviceTriangleAttrs[hit.triangleIndex];
-            const Surface& surfaceRef = deviceSurfaces[triangleAttr.surfaceId];
-            const Material& material = materials[surfaceRef.materialId];
+            const TrianglePos& trianglePos = scene.trianglePositions[hit.triangleIndex];
+            const TriangleAttr& triangleAttr = scene.triangleAttrs[hit.triangleIndex];
+            const Surface& surfaceRef = scene.surfaces[triangleAttr.surfaceId];
+            const Material& material = scene.materials[surfaceRef.materialId];
             const SurfaceBinding emptySurface;
             const SurfaceBinding& surface =
-                (surfaceRef.surfaceBindingId >= 0 && deviceSurfaceBindings != nullptr)
-                ? deviceSurfaceBindings[surfaceRef.surfaceBindingId]
+                (surfaceRef.surfaceBindingId >= 0 && scene.surfaceBindings != nullptr)
+                ? scene.surfaceBindings[surfaceRef.surfaceBindingId]
                 : emptySurface;
             ShadeableIntersection intersection{};
             intersection.t          = hit.t;
@@ -135,7 +132,7 @@ __global__ void shadeMaterial(
                 // (flat color when no emissive slot), scaled by the JSON emittance
                 // knob.  Accumulate and terminate the path.
                 pathSegment.accumulatedRadiance = pathSegment.throughput *
-                    resolveEmissive(intersection.surface, textures,
+                    resolveEmissive(intersection.surface, scene.textures,
                                     intersection.uv, material) *
                     material.emittance;
                 pathSegment.remainingBounces = 0;
@@ -152,7 +149,7 @@ __global__ void shadeMaterial(
                 if (intersection.surface.emissive >= 0)
                 {
                     pathSegment.accumulatedRadiance += pathSegment.throughput *
-                        resolveEmissive(intersection.surface, textures,
+                        resolveEmissive(intersection.surface, scene.textures,
                                        intersection.uv, material);
                 }
 
@@ -162,7 +159,7 @@ __global__ void shadeMaterial(
                 // texture binding, so the diffuse branch can sample the texture
                 // table; scatterRay derives the exact hit point from hit.t.
                 scatterRay(pathSegment, intersection, material,
-                    rngScatter, textures);
+                    rngScatter, scene.textures);
 
                 // ---- Russian roulette ----
                 // Probabilistically terminate low-throughput paths after

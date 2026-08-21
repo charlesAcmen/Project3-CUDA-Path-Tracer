@@ -15,6 +15,28 @@
 #include "rng/rng.h"
 #include "constants.h"
 
+// Read-only scene resources consumed together by the shading stage.
+// DeviceBuffers owns these allocations; this view only exposes the subset
+// required by shadeMaterial.
+struct ShadingSceneView
+{
+    const Material* materials;
+    const TrianglePos* trianglePositions;
+    const TriangleAttr* triangleAttrs;
+    const Surface* surfaces;
+    const SurfaceBinding* surfaceBindings;
+    TextureTable textures;
+};
+
+// Per-launch shading inputs and outputs.  Keeping these separate from the
+// scene view makes the kernel's read/write boundary visible at the call site.
+struct ShadingBufferView
+{
+    const HitRecord* hitRecords;
+    PathSegment* pathSegments;
+    unsigned char* pathActivityFlags;
+};
+
 /**
  * Russian roulette — probabilistically terminate low-throughput paths
  * without introducing bias.
@@ -79,14 +101,7 @@ __device__ bool russianRouletteTerminate(
 __global__ void shadeMaterial(
     int iter,
     int num_paths,
-    HitRecord* __restrict__ hitRecords,
-    PathSegment* __restrict__ pathSegments,
-    Material* __restrict__ materials,
-    const TrianglePos* __restrict__ deviceTrianglePositions,
-    const TriangleAttr* __restrict__ deviceTriangleAttrs,
-    const Surface* __restrict__ deviceSurfaces,
-    const SurfaceBinding* __restrict__ deviceSurfaceBindings,
-    TextureTable textures,        // scene texture assets (pixels + slice table)
     ShadingConfig config,
-    unsigned char* __restrict__ pathActivityFlags = nullptr);
+    ShadingSceneView scene,
+    ShadingBufferView buffers);
 
