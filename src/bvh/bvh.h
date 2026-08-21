@@ -5,8 +5,8 @@
 //
 // Single world-space BVH over ALL mesh triangles.  buildSceneBvh (bvh.cu)
 // bakes every mesh's triangles to world space (vertices via the geom
-// transform, normals via the inverse-transpose) and tags each with its
-// materialId, then builds ONE tree over the combined array (exhaustive SAH,
+// transform, normals via the inverse-transpose) and assigns each its shared
+// Surface id, then builds ONE tree over the combined array (exhaustive SAH,
 // 穷举表面积启发式算法分割建树).  The traversal kernel runs one closest-hit
 // query per ray — no per-mesh loop, no ray transformation.
 //
