@@ -408,7 +408,7 @@ __host__ __device__ void resolvePbrSurfaceParams(
 
 // Resolve the per-hit SHADING normal from a glTF normal texture (tangent
 // space).  The hit record carries the per-triangle tangent (world space,
-// from triangleIntersectionTest — orthogonalized against the smoothed
+// from deferred triangle-attribute interpolation — orthogonalized against the smoothed
 // normal); here it is combined with the geometric normal into an
 // orthonormal TBN frame, and the sampled normal-map normal (n = 2·texel − 1,
 // glTF convention) is rotated into world space:
