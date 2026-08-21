@@ -66,6 +66,11 @@ __global__ void shadeMaterial(
     const HitRecord* __restrict__ hitRecords = buffers.hitRecords;
     PathSegment* __restrict__ pathSegments = buffers.pathSegments;
     unsigned char* __restrict__ pathActivityFlags = buffers.pathActivityFlags;
+    const Material* __restrict__ materials = scene.materials;
+    const TrianglePos* __restrict__ trianglePositions = scene.trianglePositions;
+    const TriangleAttr* __restrict__ triangleAttrs = scene.triangleAttrs;
+    const Surface* __restrict__ surfaces = scene.surfaces;
+    const SurfaceBinding* __restrict__ surfaceBindings = scene.surfaceBindings;
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_paths)
@@ -107,14 +112,14 @@ __global__ void shadeMaterial(
             // binding only for this selected triangle.  The Surface table
             // combines this geom's material id with the source binding id,
             // removing the former per-triangle device array.
-            const TrianglePos& trianglePos = scene.trianglePositions[hit.triangleIndex];
-            const TriangleAttr& triangleAttr = scene.triangleAttrs[hit.triangleIndex];
-            const Surface& surfaceRef = scene.surfaces[triangleAttr.surfaceId];
-            const Material& material = scene.materials[surfaceRef.materialId];
+            const TrianglePos& trianglePos = trianglePositions[hit.triangleIndex];
+            const TriangleAttr& triangleAttr = triangleAttrs[hit.triangleIndex];
+            const Surface& surfaceRef = surfaces[triangleAttr.surfaceId];
+            const Material& material = materials[surfaceRef.materialId];
             const SurfaceBinding emptySurface;
             const SurfaceBinding& surface =
-                (surfaceRef.surfaceBindingId >= 0 && scene.surfaceBindings != nullptr)
-                ? scene.surfaceBindings[surfaceRef.surfaceBindingId]
+                (surfaceRef.surfaceBindingId >= 0 && surfaceBindings != nullptr)
+                ? surfaceBindings[surfaceRef.surfaceBindingId]
                 : emptySurface;
             ShadeableIntersection intersection{};
             intersection.t          = hit.t;
