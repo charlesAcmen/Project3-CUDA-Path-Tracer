@@ -64,7 +64,7 @@ static constexpr float CAMERA_MIN_ZOOM       = 0.1f;   // min camera–target di
 static constexpr float CAMERA_SCROLL_ZOOM_IN = 0.97f;  // scroll-up zoom multiplier
 static constexpr float CAMERA_SCROLL_ZOOM_OUT = 1.03f; // scroll-down zoom multiplier
 static constexpr float CAMERA_PAN_SPEED      = 0.01f;  // middle-drag pan sensitivity
-static float g_cameraMoveSpeed     = 1.5f;   // WASD fly speed (× zoom, per second) — adjustable via ImGui
+static float g_cameraMoveSpeed     = 0.5f;   // WASD fly speed (× zoom, per second) — adjustable via ImGui
 static constexpr float CAMERA_MAX_FRAME_DT   = 0.1f;   // clamp against first-frame / lag jumps
 
 Scene* scene;
