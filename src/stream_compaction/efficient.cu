@@ -102,7 +102,8 @@ namespace StreamCompaction {
         template <int BLOCK_SIZE, typename FlagType>
         static void scanExclusiveSharedMemoryDevice(
             int n, int* dev_odata, const FlagType* dev_idata,
-            int* dev_scratch, size_t scratchInts);
+            int* dev_scratch, size_t scratchInts,
+            bool addBlockOffsets);
 
         // ========================================================================
         // Non-Template Kernels (global-memory scan + map/scatter)
@@ -143,14 +144,23 @@ namespace StreamCompaction {
             }
         }
 
-        __global__ void kernScatterPathSegmentByMask(int n, PathSegment *odata,
-                const PathSegment *idata, const int *indices,
-                const unsigned char *activityMask) {
-            int index = threadIdx.x + (blockIdx.x * blockDim.x);
+        __global__ void kernAddOffsetsAndScatterPathSegmentByMask(
+            int n, PathSegment *odata, const PathSegment *idata,
+            int *localIndices, const int *blockOffsets,
+            const unsigned char *activityMask, int scanBlockElements)
+        {
+            int index = blockIdx.x * blockDim.x + threadIdx.x;
             if (index >= n) return;
-            if (activityMask[index]) {
-                odata[indices[index]] = idata[index];
-            }
+
+            // Scatter uses one consecutive element per thread so PathSegment
+            // loads remain coalesced.  Its CUDA launch blocks need not match
+            // the scan blocks; derive the owning scan block from the index.
+            int scanBlock = index / scanBlockElements;
+            int blockOffset = (n > scanBlockElements) ? blockOffsets[scanBlock] : 0;
+            int finalIndex = localIndices[index] + blockOffset;
+
+            if (activityMask[index]) odata[finalIndex] = idata[index];
+            if (index == n - 1) localIndices[index] = finalIndex;
         }
 
         // ========================================================================
@@ -256,7 +266,8 @@ namespace StreamCompaction {
         template <int BLOCK_SIZE, typename FlagType>
         static void scanExclusiveSharedMemoryDevice(
             int n, int *dev_odata, const FlagType *dev_idata,
-            int *dev_scratch, size_t scratchInts)
+            int *dev_scratch, size_t scratchInts,
+            bool addBlockOffsets)
         {
             constexpr int ELEMENTS = 2 * BLOCK_SIZE;
 
@@ -286,12 +297,16 @@ namespace StreamCompaction {
                     dev_blockSums,    // odata
                     dev_blockSums,    // idata (same buffer = in-place)
                     childScratch,
-                    childScratchInts);
+                    childScratchInts,
+                    true);
 
                 // Add per-block offsets
-                kernAddBlockOffsets<BLOCK_SIZE><<<numBlocks, BLOCK_SIZE>>>(
-                    n, dev_odata, dev_blockSums);
-                checkCUDAError("kernAddBlockOffsets failed");
+                if (addBlockOffsets)
+                {
+                    kernAddBlockOffsets<BLOCK_SIZE><<<numBlocks, BLOCK_SIZE>>>(
+                        n, dev_odata, dev_blockSums);
+                    checkCUDAError("kernAddBlockOffsets failed");
+                }
             }
         }
 
@@ -400,20 +415,23 @@ namespace StreamCompaction {
                 case 512:
                     scanExclusiveSharedMemoryDevice<512, unsigned char>(
                         n, dev_indices, activityMask,
-                        ws.scanScratch, ws.scanScratchInts);
+                        ws.scanScratch, ws.scanScratchInts, false);
                     break;
                 case 256:
                 default:
                     scanExclusiveSharedMemoryDevice<256, unsigned char>(
                         n, dev_indices, activityMask,
-                        ws.scanScratch, ws.scanScratchInts);
+                        ws.scanScratch, ws.scanScratchInts, false);
                     break;
             }
 
-            // Step 2: Scatter active PathSegments to compacted output.
-            LAUNCH_KERNEL_AUTO(kernScatterPathSegmentByMask, n,
-                n, dev_odata, dev_idata, dev_indices, activityMask);
-            checkCUDAError("kernScatterPathSegmentByMask failed");
+            // Step 2: Apply the top-level block offsets while scattering.  The
+            // final indices are not materialized back to global memory; only
+            // the last one is retained for the survivor-count readback below.
+            LAUNCH_KERNEL_AUTO(kernAddOffsetsAndScatterPathSegmentByMask, n,
+                n, dev_odata, dev_idata, dev_indices, ws.scanScratch,
+                activityMask, ws.scanBlockElements);
+            checkCUDAError("kernAddOffsetsAndScatterPathSegmentByMask failed");
 
             // Count survivors
             unsigned char lastFlag;
