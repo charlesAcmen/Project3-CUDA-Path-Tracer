@@ -27,9 +27,13 @@ struct DeviceBuffers {
     glm::vec3*              bloomBufB           = nullptr;  // horizontal blur output (HDR ping-pong)
     float*                  bloomWeights        = nullptr;  // 1D Gaussian kernel weights (device)
 
-    // World-space mesh triangles (baked + REORDERED into leaf-contiguous
-    // chunks by the BVH build), uploaded from BvhBuffers::hostTriangles.
-    Triangle*               deviceTriangles     = nullptr;
+    // World-space mesh data (baked + REORDERED into leaf-contiguous chunks
+    // by the BVH build).  Traversal reads positions only; shading expands
+    // attributes and the shared surface binding only for the winning hit.
+    TrianglePos*            deviceTrianglePositions   = nullptr;
+    TriangleAttr*           deviceTriangleAttrs       = nullptr;
+    int*                    deviceTriangleMaterialIds = nullptr;
+    SurfaceBinding*         deviceSurfaceBindings     = nullptr;
 
     // Texture table: every scene image concatenated into one flat texel
     // buffer, with one TextureInfo per image telling the sampler where its
