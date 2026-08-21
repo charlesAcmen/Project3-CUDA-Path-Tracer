@@ -47,7 +47,7 @@ static __device__ void handleDebugDOFOverlay(
 __global__ void shadeMaterial(
     int iter,
     int num_paths,
-    ShadeableIntersection* __restrict__ shadeableIntersections,
+    HitRecord* __restrict__ hitRecords,
     PathSegment* __restrict__ pathSegments,
     Material* __restrict__ materials,
     TextureTable textures,        // scene texture assets (pixels + slice table)
@@ -67,17 +67,17 @@ __global__ void shadeMaterial(
             return;
         }
 
-        const ShadeableIntersection& intersection = shadeableIntersections[idx];
+        const HitRecord& hit = hitRecords[idx];
 
-        if (intersection.t > 0.0f)
+        if (hit.t > 0.0f && hit.triangleIndex >= 0)
         {
             int bounceNum = config.traceDepth - pathSegment.remainingBounces;
             RngState rngScatter = makeRngState(iter, pathSegment.pixelIndex,
                 bounceNum * MAX_DRAWS_PER_BOUNCE, config.rngMode);
 
-            const Material& material = materials[intersection.materialId];
+            const Material& material = materials[hit.materialId];
 
-            glm::vec3 intersectionPoint = getExactPointOnRay(pathSegment.ray, intersection.t);
+            glm::vec3 intersectionPoint = getExactPointOnRay(pathSegment.ray, hit.t);
 
             // Debug overlay: first-bounce hits on the focal plane in green.
             if (config.debug.showDOFOverlay && pathSegment.remainingBounces == config.traceDepth) {

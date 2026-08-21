@@ -247,9 +247,31 @@ struct PathSegment
     int remainingBounces;
 };
 
+// Compact, device-wide closest-hit result.  The BVH traversal stores only
+// what is necessary to identify the nearest triangle and reconstruct its
+// barycentric surface point later in shading.  This buffer is read/written
+// every bounce and can also be gathered by material sorting, so keeping the
+// record small avoids moving normal/UV/tangent/texture data for every path.
+//
+// materialId is deliberately stored beside the compact hit record: material
+// sorting needs a contiguous key array and must not random-read attributes
+// merely to extract that key.  triangleIndex == -1 and t < 0 represent a miss.
+struct HitRecord
+{
+    float t = -1.0f;       // parametric distance along the ray; < 0 = miss
+    float u = 0.0f;        // Moller-Trumbore barycentric coordinate for v1
+    float v = 0.0f;        // Moller-Trumbore barycentric coordinate for v2
+    int triangleIndex = -1;
+    int materialId = -1;
+};
+
 // Use with a corresponding PathSegment to do:
 // 1) color contribution computation
 // 2) BSDF evaluation: generate a new ray
+//
+// Unlike HitRecord, this is NOT stored as a screen-sized GPU buffer.  Shading
+// expands the winning triangle into this full surface state only for the path
+// currently being evaluated, then hands it to scatterRay.
 struct ShadeableIntersection
 {
   float t;// parametric distance along the ray
