@@ -33,11 +33,22 @@ struct Scene {
     // scenes with no textures.
     std::vector<TextureData> textures;
 
+    // Source primitive / OBJ-face surface inputs.  A triangle stores only an
+    // index into this table, so the same glTF material binding is not copied
+    // once per triangle.  The loader interns equal bindings in source order.
+    //(intern:驻留一份在内存，避免重复存储；in source order:按照源文件顺序)
+    std::vector<SurfaceBinding> surfaceBindings;
+
     // Flat array of all mesh triangles (object-space).  Each mesh
     // geometry references a contiguous slice via
     // Geom::meshTriangleOffset / ::meshTriangleCount.
     std::vector<Triangle> hostTriangles;
 };
+
+// Return the stable scene-local id for a source surface binding.  Exact
+// equality is intentional: all fields originate from parsed asset values and
+// are copied unchanged; approximate matching could merge distinct materials.
+int internSurfaceBinding(Scene& scene, const SurfaceBinding& binding);
 
 // ---- Scene Statistics -------------------------------------------------
 // Lightweight descriptor of scene complexity.  Useful for startup
