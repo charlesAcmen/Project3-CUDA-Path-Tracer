@@ -3,9 +3,9 @@
 //
 // Parses the scene JSON's Materials / Objects / Camera sections.  Mesh FILE
 // entries dispatch to the OBJ / glTF loaders in obj_loader.cpp /
-// gltf_loader.cpp; texture loading lives in texture_loader.cpp.  This TU no
-// longer includes tinyobjloader / cgltf / stb — the loader implementation
-// macros are defined in the per-format loader TUs.
+// gltf_loader.cpp.  Texture images come from glTF or companion MTL files;
+// this TU no longer includes tinyobjloader / cgltf / stb — the loader
+// implementation macros are defined in the per-format loader TUs.
 // ====================================================================
 
 #include "scene/scene_loader.h"
@@ -120,61 +120,20 @@ static void applyMaterialType(const json& p, const string& name, Material& m)
     }
 }
 
-// Parse one material's optional TEXTURE slot (image path relative to the
-// scene JSON) into `m.textureId`, deduping by resolved path.
-static void applyMaterialTexture(const json& p,
-                                 const filesystem::path& jsonDir,
-                                 Scene& scene,
-                                 unordered_map<string, int>& textureCache,
-                                 Material& m)
-{
-    // TEXTURE: image path relative to the scene JSON.  Resolves to
-    // Material::textureId: -1 = flat color (default; an unreadable image
-    // falls back here with an error logged), >= 0 = index into
-    // Scene::textures.  This is the diffuse albedo source for Diffuse and
-    // Pbr surfaces (resolveBaseColor: glTF baseColor binding wins, else the
-    // JSON TEXTURE, else the flat color); other material types keep their
-    // color.
-    if (p.contains("TEXTURE"))
-    {
-        const string tex = p["TEXTURE"].get<string>();
-        const string texPath = (jsonDir / tex).generic_string();
-        const auto it = textureCache.find(texPath);
-        if (it != textureCache.end())
-        {
-            m.textureId = it->second;
-        }
-        else
-        {
-            m.textureId = loadTextureFile(scene, texPath);
-            if (m.textureId >= 0)
-                textureCache[texPath] = m.textureId;
-        }
-        m.uvScale = p.value("UV_SCALE", 1.0f);
-    }
-}
-
 /**
  * Parse the "Materials" section into Scene::materials.
  *
  * @param data         Parsed scene JSON
- * @param scene        Scene to append materials to (also the texture sink)
- * @param jsonDir      Directory of the scene JSON — relative TEXTURE paths
- *                     resolve against it (same as mesh FILE paths)
+ * @param scene        Scene to append materials to
  * @param MatNameToID  [out] Map from material name -> index into
  *                     Scene::materials; parseObjects resolves each object's
  *                     MATERIAL field through it.
  */
 static void parseMaterials(
     const json& data, Scene& scene,
-    const filesystem::path& jsonDir,
     unordered_map<string, uint32_t>& MatNameToID)
 {
     // ---- Materials ----------------------------------------------------
-    // Dedup texture files by resolved path: two materials referencing the
-    // same image share one TextureData (and one device slice).
-    unordered_map<string, int> textureCache;
-
     const auto& materialsData = data["Materials"];
     for (const auto& item : materialsData.items())
     {
@@ -184,9 +143,7 @@ static void parseMaterials(
         newMaterial.indexOfRefraction = 1.0f;
         newMaterial.invIndexOfRefraction = 1.0f;
 
-        // Material TYPE + optional JSON TEXTURE.
         applyMaterialType(p, name, newMaterial);
-        applyMaterialTexture(p, jsonDir, scene, textureCache, newMaterial);
 
         MatNameToID[name] = scene.materials.size();
         scene.materials.emplace_back(newMaterial);
@@ -258,23 +215,6 @@ static void parseObjects(
 
         newGeom.meshTriangleOffset = slice.first;
         newGeom.meshTriangleCount  = slice.second;
-
-        // An explicit JSON TEXTURE on the object's material wins over the
-        // model's glTF baseColor map (the scene author overrides the
-        // asset's own albedo).  Zero the slice's tex.baseColor so the
-        // shading fallback chain (tex.baseColor → m.textureId) resolves
-        // to the JSON-declared image.
-        if (slice.first >= 0 && slice.second > 0)
-        {
-            const string matName = p["MATERIAL"].get<string>();
-            if (data["Materials"].contains(matName) &&
-                data["Materials"][matName].contains("TEXTURE"))
-            {
-                for (int i = slice.first;
-                     i < slice.first + slice.second; ++i)
-                    scene.hostTriangles[i].tex.baseColor = -1;
-            }
-        }
 
         newGeom.transform = utilityCore::buildTransformationMatrix(
             newGeom.translation, newGeom.rotation, newGeom.scale);
@@ -365,7 +305,7 @@ Scene loadFromJSON(const std::string& jsonName)
     // Parse the sections in dependency order: materials first (objects
     // reference them by name), then objects (geometries), then the camera.
     unordered_map<string, uint32_t> MatNameToID;
-    parseMaterials(data, scene, jsonDir, MatNameToID);
+    parseMaterials(data, scene, MatNameToID);
     parseObjects(data, scene, jsonDir, MatNameToID);
     parseCamera(data, scene);
 

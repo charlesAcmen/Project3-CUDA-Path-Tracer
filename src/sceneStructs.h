@@ -113,12 +113,6 @@ struct Material
     float indexOfRefraction;      // IOR of the refractive material, e.g. 1.5 for glass
     float invIndexOfRefraction;   // Precomputed inverse IOR to avoid GPU division
     float emittance;              // Emission strength for light sources (nonzero = emissive)
-
-    // Texture mapping.  textureId selects the image to sample in the
-    // shading step; -1 = no texture (use `color`), >= 0 = index into the
-    // scene's texture array.
-    int   textureId = -1;
-    float uvScale   = 1.0f;       // UV repeat scale (1 = one tile over [0,1])
 };
 
 // One image in the scene's texture array, referenced by Material::textureId

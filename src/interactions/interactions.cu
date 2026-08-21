@@ -297,7 +297,6 @@ __host__ __device__ glm::vec3 sampleGgxHalfVector(const glm::vec3& normal, float
 
 // Resolve the diffuse albedo.  Source chain — first hit wins:
 //   glTF baseColor texture (tex.baseColor, × baseColorFactor) >
-//   JSON-declared Material::textureId >
 //   flat material color m.color.
 __host__ __device__ glm::vec3 resolveBaseColor(
     const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
@@ -309,17 +308,11 @@ __host__ __device__ glm::vec3 resolveBaseColor(
     // a glTF mesh that should keep its own glTF material properties.
     bool useGltfOnly = (m.color == glm::vec3(-1.0f));
 
-    int bid = tex.baseColor;
-    if (bid < 0) bid = m.textureId;
     glm::vec3 albedo = useGltfOnly ? glm::vec3(1.0f) : m.color;
-    if (bid >= 0)
+    if (tex.baseColor >= 0)
     {
-        albedo = sampleTexture(textures.pixels, textures.infos[bid], uv * m.uvScale);
-        // glTF semantics: baseColor = texture.rgb · baseColorFactor.  The
-        // factor applies only when the winning slot is the glTF baseColor
-        // binding (tex.baseColor), not a JSON-declared TEXTURE.
-        if (tex.baseColor >= 0)
-            albedo *= glm::vec3(tex.baseColorFactor);
+        albedo = sampleTexture(textures.pixels, textures.infos[tex.baseColor], uv);
+        albedo *= glm::vec3(tex.baseColorFactor);
     }
     else if (tex.roughnessFactor >= 0.0f && useGltfOnly)
     {
@@ -342,23 +335,18 @@ __host__ __device__ glm::vec3 resolveBaseColor(
 
 // Resolve the per-hit emissive radiance.  Source chain — first hit wins:
 //   glTF/OBJ emissive texture (tex.emissive, × emissiveFactor × emissiveStrength) >
-//   JSON-declared Material::textureId >
 //   flat material color m.color.
-// The glTF factor/strength multiply only when the winning slot is the glTF/OBJ
-// binding (tex.emissive), mirroring resolveBaseColor's factor rule — a JSON
-// TEXTURE has no factor of its own.  The caller owns the emittance multiplier
-// (JSON Emitting) or the additive bank (auto-glow).
+// The caller owns the emittance multiplier (JSON Emitting) or the additive
+// bank (auto-glow).
 __host__ __device__ glm::vec3 resolveEmissive(
     const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m)
 {
-    int eid = tex.emissive;
-    if (eid < 0) eid = m.textureId;
-    if (eid >= 0)
+    if (tex.emissive >= 0)
     {
-        glm::vec3 Le = sampleTexture(textures.pixels, textures.infos[eid], uv * m.uvScale);
-        if (tex.emissive >= 0)
-            Le *= tex.emissiveFactor * tex.emissiveStrength;
+        glm::vec3 Le = sampleTexture(textures.pixels,
+                                     textures.infos[tex.emissive], uv);
+        Le *= tex.emissiveFactor * tex.emissiveStrength;
         return Le;
     }
     return m.color;
@@ -385,7 +373,7 @@ __host__ __device__ void resolvePbrSurfaceParams(
         // a glTF material (plain OBJ) — treat as factor 1.
         const glm::vec3 orm = sampleTexture(textures.pixels,
                                             textures.infos[tex.metallicRoughness],
-                                            uv * m.uvScale);
+                                            uv);
         const float rFactor = (tex.roughnessFactor >= 0.0f) ? tex.roughnessFactor : 1.0f;
         const float mFactor = (tex.metallicFactor  >= 0.0f) ? tex.metallicFactor  : 1.0f;
         metallic = glm::clamp(orm.z * mFactor, 0.0f, 1.0f);  // B = metallic × factor
@@ -435,8 +423,7 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
     const glm::vec4& tangent,
     const SurfaceBinding& tex,
     const TextureTable& textures,
-    glm::vec2 uv,
-    float uvScale)
+    glm::vec2 uv)
 {
     // No normal slot, or the (0,0,0,0) degenerate-UV sentinel → no mapping.
     if (tex.normal < 0) return geometricNormal;
@@ -446,7 +433,7 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
     // Normal maps are data maps (srgb=false) — texels are raw linear bytes.
     const glm::vec3 texel = sampleTexture(textures.pixels,
                                           textures.infos[tex.normal],
-                                          uv * uvScale);
+                                          uv);
     glm::vec3 n = 2.0f * texel - glm::vec3(1.0f);   // [0,1] → [-1,1]
     const float nlen2 = glm::dot(n, n);
     if (nlen2 < NORMAL_MAP_TEXEL_EPSILON) return geometricNormal;  // bilinear blend can shorten it
@@ -710,7 +697,7 @@ static __host__ __device__ void scatterRefractive(
 }
 
 // Per-material helper: pure Lambert diffuse scattering.  Albedo comes from
-// resolveBaseColor (glTF baseColor binding > JSON-declared textureId > flat color).
+// resolveBaseColor (mesh baseColor binding > flat material color).
 static __host__ __device__ void scatterDiffuse(
     PathSegment& pathSegment,
     const glm::vec3& intersect,
@@ -735,9 +722,8 @@ static __host__ __device__ void scatterDiffuse(
     // BSDF of diffuse reflection: fr = R / PI
     pathSegment.ray.direction = newDirection;
 
-    // Resolve the diffuse albedo: a per-triangle glTF baseColor binding
-    // wins over the JSON-declared Material::textureId, then over the
-    // flat material color.  Vertex colors multiply the result.
+    // Resolve the diffuse albedo from the mesh's baseColor binding, falling
+    // back to the flat material color.  Vertex colors multiply the result.
     pathSegment.throughput *= resolveBaseColor(tex, textures, uv, m, vertexColor);
 }
 
@@ -791,7 +777,7 @@ __host__ __device__ void scatterRay(
     else
     {
         const glm::vec3 perturbed =
-            resolveShadingNormal(normal, hit.tangent, tex, textures, uv, m.uvScale);
+            resolveShadingNormal(normal, hit.tangent, tex, textures, uv);
         shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -perturbed : perturbed;
     }
 
