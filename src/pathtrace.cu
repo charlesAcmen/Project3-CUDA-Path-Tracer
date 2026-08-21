@@ -274,6 +274,7 @@ void pathtraceResetAccumulation()
     // which rebuilt the BVH and re-uploaded the whole scene on every frame
     // while the camera was being dragged.
     if (!hst_scene) return;
+    g_profiler().resetForNewAccumulation();
     const int pixelcount = hst_scene->state.camera.resolution.x *
                            hst_scene->state.camera.resolution.y;
     cudaMemset(g_dev.image, 0, pixelcount * sizeof(glm::vec3));

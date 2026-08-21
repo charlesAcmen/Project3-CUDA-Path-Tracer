@@ -112,6 +112,7 @@ public:
     // ---- Lifecycle ----
     void init(const ProfilerConfig& cfg);
     void shutdown();   // writes CSVs, frees cudaEvents
+    void resetForNewAccumulation(); // discard samples from the previous camera/settings epoch
 
     // ---- Per-frame context ----
     void beginIteration(int iter);

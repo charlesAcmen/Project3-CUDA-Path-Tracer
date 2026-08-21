@@ -143,6 +143,26 @@ void Profiler::shutdown()
     m_frameTimes.clear();
 }
 
+void Profiler::resetForNewAccumulation()
+{
+    if (!m_cfg.enabled) return;
+
+    // Camera or runtime-setting changes restart iteration numbering at one.
+    // Records from the previous accumulation therefore cannot share the same
+    // profiling epoch: updateGuiData() would otherwise sum every historical
+    // record with the repeated iteration number, and the exported CSVs would
+    // mix measurements from different camera states.
+    m_timingRecords.clear();
+    m_pathCounts.clear();
+    m_frameTimes.clear();
+
+    m_currentIteration = 0;
+    m_cpuTiming = false;
+    s_lastBounce = -1;
+    s_lastPathCount = 0;
+    m_guiData = {};
+}
+
 // ---------------------------------------------------------------------------
 // Per-frame context
 // ---------------------------------------------------------------------------
