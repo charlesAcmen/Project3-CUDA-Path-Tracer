@@ -118,6 +118,11 @@ void pathtraceInit(Scene* scene)
 
     cudaMalloc(&g_dev.pathsCompacted, pixelcount * sizeof(PathSegment));
 
+    // Pipeline-owned shading output: one byte per path, consumed by the
+    // shared-memory mask-based compaction stage.
+    cudaMalloc(&g_dev.pathActivityFlags,
+               static_cast<size_t>(pixelcount) * sizeof(unsigned char));
+
     cudaMalloc(&g_dev.materials, scene->materials.size() * sizeof(Material));
     cudaMemcpy(g_dev.materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
 
@@ -231,6 +236,8 @@ void pathtraceFree()
     cudaFree(g_dev.image);
     cudaFree(g_dev.paths);
     cudaFree(g_dev.pathsCompacted);
+    cudaFree(g_dev.pathActivityFlags);
+    g_dev.pathActivityFlags = nullptr;
     cudaFree(g_dev.materials);
     cudaFree(g_dev.intersections);
     cudaFree(g_dev.sortKeys);
@@ -346,6 +353,10 @@ void pathtrace(uchar4* pbo, int iter)
     int  depth     = 0;
     int  num_paths = pixelcount;
     bool done      = false;
+    unsigned char* pathActivityFlags =
+        (g_opts.compactMethod == CompactMethod::SharedMem)
+        ? g_dev.pathActivityFlags
+        : nullptr;
 
     // ---- 2. Bounce loop -------------------------------------------------
     while (!done)
@@ -381,7 +392,8 @@ void pathtrace(uchar4* pbo, int iter)
             g_dev.deviceTrianglePositions, g_dev.deviceTriangleAttrs,
             g_dev.deviceSurfaces, g_dev.deviceSurfaceBindings,
             g_dev.textures,
-            shadingCfg);
+            shadingCfg,
+            pathActivityFlags);
         prof.gpuStop(ProfilerOp::ShadeMaterial);
 
         bool allDead = compactActivePaths(num_paths);
