@@ -37,7 +37,7 @@ namespace bvh {
 namespace {
 
 // Centroid of the triangle projected onto the requested axis.
-float centroidComponent(const Triangle& t, int axis)
+float centroidComponent(const TrianglePos& t, int axis)
 {
     const glm::vec3 c = (t.v0 + t.v1 + t.v2) * (1.0f / 3.0f);
     return axis == 0 ? c.x : (axis == 1 ? c.y : c.z);
@@ -50,9 +50,11 @@ float centroidComponent(const Triangle& t, int axis)
 struct BvhBuildContext
 {
     std::vector<BvhNode>*         nodes;     // construction output (hostNodes)
-    const std::vector<Triangle>*  tris;      // source triangles (world-space bake, read-only)
-    std::vector<int>*             order;     // permutable triangle indices
-    std::vector<Triangle>*        dstTris;   // reordered output (hostTriangles)
+    const std::vector<TrianglePos>*  positions;   // source positions (world-space bake, read-only)
+    const std::vector<TriangleAttr>* attrs;       // source shading attributes, same indexing
+    std::vector<int>*                order;       // permutable triangle indices
+    std::vector<TrianglePos>*        dstPositions;
+    std::vector<TriangleAttr>*       dstAttrs;
     int triOffset = 0;   // base index into the triangle array (0: single tree over all triangles)
 };
 
@@ -75,7 +77,7 @@ int buildRecursive(BvhBuildContext& ctx,
 {
     // Unpack the context into local names so the body reads as before.
     std::vector<BvhNode>&        nodes     = *ctx.nodes;
-    const std::vector<Triangle>& tris      = *ctx.tris;
+    const std::vector<TrianglePos>& positions = *ctx.positions;
     std::vector<int>&            order     = *ctx.order;
     const int triOffset = ctx.triOffset;
 
@@ -83,7 +85,7 @@ int buildRecursive(BvhBuildContext& ctx,
 
     AABB bounds;
     for (int i = begin; i < end; i++)
-        bounds.expand(tris[order[i]]);   // access the triangle by its index in the order array
+        bounds.expand(positions[order[i]]);   // access the triangle by its index in the order array
 
     const int nodeIndex = (int)nodes.size();
     nodes.push_back(BvhNode{});
@@ -126,21 +128,21 @@ int buildRecursive(BvhBuildContext& ctx,
         // Sort the range by triangle centroid along this axis (ascending).
         std::sort(order.begin() + begin, order.begin() + end,
             [&](int lhs, int rhs) {
-                return centroidComponent(tris[lhs], axis) < centroidComponent(tris[rhs], axis);
+                return centroidComponent(positions[lhs], axis) < centroidComponent(positions[rhs], axis);
             });
 
         pref[0] = AABB();
-        pref[0].expand(tris[order[begin]]);
+        pref[0].expand(positions[order[begin]]);
         for (int k = 1; k < n; k++)
         {
             pref[k] = pref[k - 1];//copy the previous AABB
-            pref[k].expand(tris[order[begin + k]]);//expand the AABB to include the next triangle
+            pref[k].expand(positions[order[begin + k]]);//expand the AABB to include the next triangle
         }
         suff[n] = AABB();
         for (int k = n - 1; k >= 0; k--)
         {
             suff[k] = suff[k + 1];
-            suff[k].expand(tris[order[begin + k]]);
+            suff[k].expand(positions[order[begin + k]]);
         }
 
         for (int k = 1; k < n; k++)
@@ -170,7 +172,7 @@ int buildRecursive(BvhBuildContext& ctx,
     // partitions it into two contiguous halves (both non-empty).
     std::sort(order.begin() + begin, order.begin() + end,
         [&](int lhs, int rhs) {
-            return centroidComponent(tris[lhs], bestAxis) < centroidComponent(tris[rhs], bestAxis);
+            return centroidComponent(positions[lhs], bestAxis) < centroidComponent(positions[rhs], bestAxis);
         });
 
     // Run the recursion to completion FIRST, then write the child indices
@@ -201,8 +203,10 @@ void flattenRecursive(BvhBuildContext& ctx,
 {
     std::vector<BvhNode>&        nodes   = *ctx.nodes;
     const std::vector<int>&      order   = *ctx.order;
-    const std::vector<Triangle>& srcTris = *ctx.tris;
-    std::vector<Triangle>&       dstTris = *ctx.dstTris;
+    const std::vector<TrianglePos>& srcPositions = *ctx.positions;
+    const std::vector<TriangleAttr>& srcAttrs = *ctx.attrs;
+    std::vector<TrianglePos>& dstPositions = *ctx.dstPositions;
+    std::vector<TriangleAttr>& dstAttrs = *ctx.dstAttrs;
     const int triOffset = ctx.triOffset;
 
     BvhNode& node = nodes[nodeIndex];
@@ -211,7 +215,12 @@ void flattenRecursive(BvhBuildContext& ctx,
         const int orderStart = node.leafTriOffset() - triOffset;   // offset into the mesh's order array
         const int count      = node.leafTriCount();
         for (int j = 0; j < count; j++)
-            dstTris[dstBase + cursor + j] = srcTris[order[orderStart + j]];
+        {
+            const int srcIndex = order[orderStart + j];
+            const int dstIndex = dstBase + cursor + j;
+            dstPositions[dstIndex] = srcPositions[srcIndex];
+            dstAttrs[dstIndex] = srcAttrs[srcIndex];
+        }
         node.left = dstBase + cursor;   // now points into the reordered buffer
         cursor += count;
     }
@@ -240,15 +249,18 @@ glm::vec3 bakeNormal(const glm::mat4& invTranspose, const glm::vec3& n){
 }
 
 void buildMeshBvh(BvhBuffers& out,
-                  const std::vector<Triangle>& hostTris)
+                  const std::vector<TrianglePos>& positions,
+                  const std::vector<TriangleAttr>& attrs)
 {
-    const int triCount = (int)hostTris.size();
+    const int triCount = (int)positions.size();
     if (triCount <= 0) return;   // no triangles → no nodes
 
     BvhBuildContext ctx;
     ctx.nodes     = &out.hostNodes;
-    ctx.tris      = &hostTris;
-    ctx.dstTris   = &out.hostTriangles;
+    ctx.positions = &positions;
+    ctx.attrs = &attrs;
+    ctx.dstPositions = &out.hostTrianglePositions;
+    ctx.dstAttrs = &out.hostTriangleAttrs;
     ctx.triOffset = 0;   // single tree over the whole array
 
     std::vector<int> order(triCount);
@@ -260,44 +272,52 @@ void buildMeshBvh(BvhBuffers& out,
 
     // Flatten: write the reordered triangles and fix the leaves to reference
     // the contiguous chunks.
-    const int dstBase = (int)out.hostTriangles.size();
-    out.hostTriangles.resize(dstBase + triCount);
+    const int dstBase = (int)out.hostTrianglePositions.size();
+    out.hostTrianglePositions.resize(dstBase + triCount);
+    out.hostTriangleAttrs.resize(dstBase + triCount);
     int cursor = 0;
     flattenRecursive(ctx, root, dstBase, cursor);
 }
 
 void buildSceneBvh(BvhBuffers& out,
-                   const std::vector<Triangle>& hostTris,
+                   const std::vector<TrianglePos>& positions,
+                   const std::vector<TriangleAttr>& attrs,
                    const std::vector<Geom>& geoms)
 {
     out.hostNodes.clear();
-    out.hostTriangles.clear();
+    out.hostTrianglePositions.clear();
+    out.hostTriangleAttrs.clear();
+    out.hostSurfaces.clear();
 
-    // 1. Bake every mesh's triangles from object space to world space and tag
-    //    each with its materialId.  Vertices use the model transform; normals
-    //    use the inverse-transpose (the normal transform the old kernel
-    //    applied per hit).
-    std::vector<Triangle> worldTris;
-    worldTris.reserve(hostTris.size());
+    // 1. Bake every mesh's triangles from object space to world space and map
+    //    each (materialId, source binding) pair to one shared Surface.
+    //    Vertices use the model transform; normals use the inverse-transpose
+    //    (the normal transform the old kernel applied per hit).
+    std::vector<TrianglePos> worldPositions;
+    std::vector<TriangleAttr> worldAttrs;
+    worldPositions.reserve(positions.size());
+    worldAttrs.reserve(attrs.size());
     for (const Geom& g : geoms)
     {
         if (g.meshTriangleCount <= 0) continue;
         for (int i = 0; i < g.meshTriangleCount; i++)
         {
-            const Triangle& src = hostTris[g.meshTriangleOffset + i];
-            Triangle dst;
-            dst.v0         = bakePoint(g.transform, src.v0);
-            dst.v1         = bakePoint(g.transform, src.v1);
-            dst.v2         = bakePoint(g.transform, src.v2);
-            dst.n0         = bakeNormal(g.invTranspose, src.n0);
-            dst.n1         = bakeNormal(g.invTranspose, src.n1);
-            dst.n2         = bakeNormal(g.invTranspose, src.n2);
-            dst.materialId = g.materialid;
+            const int srcIndex = g.meshTriangleOffset + i;
+            const TrianglePos& srcPos = positions[srcIndex];
+            const TriangleAttr& srcAttr = attrs[srcIndex];
+            TrianglePos dstPos;
+            TriangleAttr dstAttr;
+            dstPos.v0 = bakePoint(g.transform, srcPos.v0);
+            dstPos.v1 = bakePoint(g.transform, srcPos.v1);
+            dstPos.v2 = bakePoint(g.transform, srcPos.v2);
+            dstAttr.n0 = bakeNormal(g.invTranspose, srcAttr.n0);
+            dstAttr.n1 = bakeNormal(g.invTranspose, srcAttr.n1);
+            dstAttr.n2 = bakeNormal(g.invTranspose, srcAttr.n2);
             // UVs are texture-space coordinates — the geometry transform does
             // NOT apply to them; copy through unchanged.
-            dst.uv0 = src.uv0;
-            dst.uv1 = src.uv1;
-            dst.uv2 = src.uv2;
+            dstAttr.uv0 = srcAttr.uv0;
+            dstAttr.uv1 = srcAttr.uv1;
+            dstAttr.uv2 = srcAttr.uv2;
             // Vertex colors are geometry attributes, so they survive the
             // world-space bake unchanged.  Omitting this copy silently turns
             // COLOR_0 into Triangle's white defaults before GPU upload.
@@ -313,7 +333,7 @@ void buildSceneBvh(BvhBuffers& out,
     }
 
     // 2. ONE tree over the combined world-space array.
-    buildMeshBvh(out, worldTris);
+    buildMeshBvh(out, worldPositions, worldAttrs);
 }
 
 void uploadToDevice(BvhBuffers& b)

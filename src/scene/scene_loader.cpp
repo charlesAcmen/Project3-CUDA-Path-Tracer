@@ -243,7 +243,7 @@ static void parseObjects(
         pair<int, int> slice = {-1, 0};
         if (ext == ".obj")
         {
-            slice = loadOBJ(meshPath, scene.hostTriangles, &scene);
+            slice = loadOBJ(meshPath, scene.hostTrianglePositions, scene.hostTriangleAttrs, &scene);
         }
         else if (ext == ".gltf" || ext == ".glb")
         {

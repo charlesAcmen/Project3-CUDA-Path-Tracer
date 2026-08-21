@@ -42,6 +42,6 @@ SceneStats computeSceneStats(const Scene& scene)
     }
     
     s.numMaterials = (int)scene.materials.size();
-    s.numTriangles = (int)scene.hostTriangles.size();
+    s.numTriangles = (int)scene.hostTrianglePositions.size();
     return s;
 }

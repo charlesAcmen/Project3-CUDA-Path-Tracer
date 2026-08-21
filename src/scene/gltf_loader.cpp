@@ -378,7 +378,8 @@ static vector<float> unpackAccessor(const cgltf_accessor* acc, int comps)
 static void appendPrimitiveTriangles(const cgltf_primitive* prim,
                                      const glm::mat4& world,
                                      const glm::mat4& worldIT,
-                                     vector<Triangle>& triangles, int& count,
+                                     vector<TrianglePos>& positions,
+                                     vector<TriangleAttr>& attrs, int& count,
                                      GltfLoadCtx& ctx)
 {
     if (prim->type != cgltf_primitive_type_triangles)

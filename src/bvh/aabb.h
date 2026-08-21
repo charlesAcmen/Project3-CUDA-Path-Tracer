@@ -8,7 +8,7 @@
 // serves the CPU build/test harness and the GPU traversal kernel.
 // ====================================================================
 
-#include "sceneStructs.h"   // Triangle
+#include "sceneStructs.h"   // TrianglePos
 #include "constants.h"      // RAY_EPSILON
 
 #include <glm/glm.hpp>
@@ -28,7 +28,7 @@ struct AABB
         max = glm::max(max, p);//compare by component and take the maximum
     }
 
-    __host__ __device__ inline void expand(const Triangle& t)
+    __host__ __device__ inline void expand(const TrianglePos& t)
     {
         expand(t.v0);
         expand(t.v1);
