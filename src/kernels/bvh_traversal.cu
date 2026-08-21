@@ -12,8 +12,8 @@
 __global__ void bvhTraverse(
     int num_paths,
     PathSegment* __restrict__ pathSegments,
-    ShadeableIntersection* __restrict__ intersections,
-    Triangle* __restrict__ deviceTriangles,
+    HitRecord* __restrict__ intersections,
+    const TrianglePos* __restrict__ deviceTrianglePositions,
     BvhNode* __restrict__ deviceBvhNodes)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -22,7 +22,7 @@ __global__ void bvhTraverse(
     const PathSegment& pathSegment = pathSegments[path_index];
 
     // Guard: a scene with no triangles produces no tree.
-    if (deviceBvhNodes == nullptr || deviceTriangles == nullptr)
+    if (deviceBvhNodes == nullptr || deviceTrianglePositions == nullptr)
     {
         intersections[path_index].t = -1.0f;
         return;
@@ -31,7 +31,7 @@ __global__ void bvhTraverse(
     // ---- Single closest-hit traversal over the whole scene ----
     // Root is node 0; LARGE_T far plane (the traversal tightens it).
     const BvhHit hit = traverseBvhClosest(pathSegment.ray, deviceBvhNodes,
-                                          deviceTriangles, LARGE_T);
+                                          deviceTrianglePositions, LARGE_T);
 
     if (!hit.hit)
     {

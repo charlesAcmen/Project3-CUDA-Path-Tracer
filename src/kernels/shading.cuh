@@ -57,7 +57,7 @@ __device__ bool russianRouletteTerminate(
  *   each warp).  Sorting paths by materialId before launching this kernel
  *   groups same-material paths together, dramatically reducing divergence.
  *
- *   Register pressure is high — ShadeableIntersection + PathSegment +
+ *   Register pressure is high — expanded shadeable state + PathSegment +
  *   Material + RNG state per thread.  High register count lowers SM
  *   occupancy.  This is driven by the live values (path state, material
  *   and RNG must coexist through the branchy scatter logic) and is
@@ -76,6 +76,10 @@ __global__ void shadeMaterial(
     HitRecord* __restrict__ hitRecords,
     PathSegment* __restrict__ pathSegments,
     Material* __restrict__ materials,
+    const TrianglePos* __restrict__ deviceTrianglePositions,
+    const TriangleAttr* __restrict__ deviceTriangleAttrs,
+    const Surface* __restrict__ deviceSurfaces,
+    const SurfaceBinding* __restrict__ deviceSurfaceBindings,
     TextureTable textures,        // scene texture assets (pixels + slice table)
     ShadingConfig config);
 

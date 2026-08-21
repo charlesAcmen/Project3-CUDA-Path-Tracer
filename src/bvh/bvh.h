@@ -96,14 +96,14 @@ struct BvhHit
  *
  * @param objRay        Ray in world space (triangles are world-space baked)
  * @param nodes         Node array (device or host); nullptr → miss
- * @param tris          Triangle array (leaf chunks reference into it)
+ * @param tris          Position array (leaf chunks reference into it)
  * @param maxT          Far plane: only hits with t < maxT are reported.
  * @return              BvhHit — hit = true only if a triangle with t < maxT
  */
 __host__ __device__ inline BvhHit traverseBvhClosest(
     const Ray& objRay,
     const BvhNode* nodes,
-    const Triangle* tris,
+    const TrianglePos* tris,
     float maxT)
 {
     BvhHit result;
@@ -211,16 +211,18 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
 namespace bvh
 {
     // Build ONE BVH over the whole triangle array, appending nodes to
-    // out.hostNodes and the flattened (leaf-contiguous) world-space
-    // triangles to out.hostTriangles.  The tree's root is always node 0;
+    // out.hostNodes and the flattened (leaf-contiguous) world-space parallel
+    // arrays.  The tree's root is always node 0;
     // an empty array produces no nodes at all.
     void buildMeshBvh(BvhBuffers& out,
-                      const std::vector<Triangle>& hostTris);
+                      const std::vector<TrianglePos>& positions,
+                      const std::vector<TriangleAttr>& attrs);
 
     // Bake every mesh's triangles to world space (tagging materialId), build
     // the single scene-wide BVH, and fill out.hostNodes/hostTriangles.
     void buildSceneBvh(BvhBuffers& out,
-                       const std::vector<Triangle>& hostTris,
+                       const std::vector<TrianglePos>& positions,
+                       const std::vector<TriangleAttr>& attrs,
                        const std::vector<Geom>& geoms);
 
     // Upload the host node buffer to device memory.

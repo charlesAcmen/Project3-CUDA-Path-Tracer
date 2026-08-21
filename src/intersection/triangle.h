@@ -44,7 +44,7 @@
  */
 __host__ __device__ inline bool triangleIntersectionTest(
     const Ray& ray,
-    const Triangle& tri,
+    const TrianglePos& tri,
     float& outT,
     glm::vec3& outNormal,
     glm::vec2& outUv,

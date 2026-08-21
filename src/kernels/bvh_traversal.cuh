@@ -24,13 +24,13 @@
  *
  * \param num_paths         Number of active paths
  * \param pathSegments      Active-path buffer
- * \param intersections     [out] Closest-hit result per path
- * \param deviceTriangles   World-space flat triangle array (REORDERED by the BVH build)
+ * \param intersections     [out] Compact closest-hit record per path
+ * \param deviceTrianglePositions   World-space position array (REORDERED by the BVH build)
  * \param deviceBvhNodes    Node array (device, built on host)
  */
 __global__ void bvhTraverse(
     int num_paths,
     PathSegment* __restrict__ pathSegments,
-    ShadeableIntersection* __restrict__ intersections,
-    Triangle* __restrict__ deviceTriangles,
+    HitRecord* __restrict__ intersections,
+    const TrianglePos* __restrict__ deviceTrianglePositions,
     BvhNode* __restrict__ deviceBvhNodes);

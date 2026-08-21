@@ -187,7 +187,7 @@ static void stampMtlTextures(const string& objPath,
                              const vector<tinyobj::material_t>& materials,
                              const vector<tinyobj::shape_t>& shapes,
                              size_t offset, Scene& scene,
-                             vector<Triangle>& triangles)
+                             vector<TriangleAttr>& attrs)
 {
     unordered_map<string, int> texCache;   // dedup by resolved texture path
     const filesystem::path objDir = filesystem::path(objPath).parent_path();
