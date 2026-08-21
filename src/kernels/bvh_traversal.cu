@@ -39,12 +39,10 @@ __global__ void bvhTraverse(
     }
     else
     {
-        intersections[path_index].t            = hit.t;
-        intersections[path_index].surfaceNormal = hit.normal;   // world space (baked)
-        intersections[path_index].tangent       = hit.tangent;  // per-triangle tangent (for normal mapping)
-        intersections[path_index].materialId    = deviceTriangles[hit.triIndex].materialId;
-        intersections[path_index].uv            = hit.uv;       // interpolated texture coordinate
-        intersections[path_index].vertexColor   = hit.vertexColor; // interpolated vertex color
-        intersections[path_index].tex           = deviceTriangles[hit.triIndex].tex;  // per-triangle texture slots
+        record.t             = hit.t;
+        record.u             = hit.u;
+        record.v             = hit.v;
+        record.triangleIndex = hit.triIndex;
+        intersections[path_index] = record;
     }
 }

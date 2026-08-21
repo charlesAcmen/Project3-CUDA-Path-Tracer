@@ -23,33 +23,26 @@
 #include "constants.h"
 
 /**
- * Double-sided ray–triangle intersection (Möller-Trumbore).
+ * Position-only, double-sided ray–triangle intersection (Möller-Trumbore).
  *
  * @param ray       Ray in object space
- * @param tri       Triangle in object space
+ * @param tri       Position-only triangle data in object space
  * @param outT      [out] Distance along ray to hit
- * @param outNormal [out] Model's shading normal, TRUE orientation
- *                        (winding preserved, not oriented toward the ray)
- * @param outUv     [out] Interpolated texture coordinate at the hit
- * @param outTangent [out] Per-triangle tangent aligned with the texture's
- *                        +U axis (world space — edges are baked world space),
- *                        orthogonalized against the interpolated normal.
- *                        .xyz = the unit tangent; .w = UV handedness sign
- *                        (+1 regular layout, -1 mirrored island, glTF
- *                        TANGENT.w convention → B = cross(N, T)·w in shading).
- *                        (0,0,0,0) sentinel = degenerate UVs / no usable
- *                        tangent → the shading side skips normal mapping.
- * @param outVertexColor [out] Interpolated vertex color at the hit (default white = no effect)
+ * @param outU      [out] Barycentric coordinate for tri.v1
+ * @param outV      [out] Barycentric coordinate for tri.v2
+ *
+ * The hot BVH loop calls this function and keeps only t/u/v for the closest
+ * triangle.  Expanding normals, UVs, vertex colors and tangents is deferred
+ * until traversal has selected that triangle, avoiding repeated work for
+ * farther hits that cannot become the final closest hit.
  * @return          true on hit (either side)
  */
-__host__ __device__ inline bool triangleIntersectionTest(
+__host__ __device__ inline bool intersectTrianglePositions(
     const Ray& ray,
     const TrianglePos& tri,
     float& outT,
-    glm::vec3& outNormal,
-    glm::vec2& outUv,
-    glm::vec4& outTangent,
-    glm::vec3& outVertexColor)
+    float& outU,
+    float& outV)
 {
     // ---- Step 1: edge vectors ----
     // Translate triangle so v0 is at origin, then compute the two

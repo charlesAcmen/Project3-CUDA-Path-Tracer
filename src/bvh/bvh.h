@@ -140,19 +140,18 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
             for (int j = 0; j < triCount; j++)
             {
                 float t;
-                glm::vec3 triNormal;
-                glm::vec2 triUv;
-                glm::vec4 triTangent;   // xyz + UV handedness w (glTF TANGENT.w)
-                glm::vec3 triVertexColor; // interpolated vertex color
-                if (triangleIntersectionTest(objRay, tris[triBase + j], t, triNormal, triUv, triTangent, triVertexColor))
+                float u;
+                float v;
+                // The hot traversal loop needs only positions plus t/u/v.
+                // Interpolating normals, UVs, colors and tangents here would
+                // repeat that work for any hit later replaced by a closer one.
+                if (intersectTrianglePositions(objRay, tris[triBase + j], t, u, v))
                 {
                     if (t < result.t)
                     {
                         result.t        = t;
-                        result.normal   = triNormal;
-                        result.uv       = triUv;
-                        result.tangent  = triTangent;
-                        result.vertexColor = triVertexColor;
+                        result.u        = u;
+                        result.v        = v;
                         result.hit      = true;
                         result.triIndex = triBase + j;
                     }
