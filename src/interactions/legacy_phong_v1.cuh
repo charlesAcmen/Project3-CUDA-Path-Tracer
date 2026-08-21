@@ -115,7 +115,7 @@ inline __host__ __device__ bool resolveGlossyExponent(
     {
         const glm::vec3 orm = sampleTexture(textures.pixels,
                                             textures.infos[tex.metallicRoughness],
-                                            uv * m.uvScale);
+                                            uv);
         metallic = orm.z;                                  // B = metallic (reserved)
         r        = glm::clamp(orm.y, 0.0f, 1.0f);          // G = roughness
     }
