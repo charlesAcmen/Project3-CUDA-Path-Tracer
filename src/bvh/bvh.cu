@@ -10,7 +10,7 @@
 // World-space bake: buildSceneBvh transforms every mesh's triangles from
 // object space to world space (vertices via the geom's `transform`, vertex
 // normals via `invTranspose` — the same normal transform the old kernel
-// applied per hit) and tags each material/binding pair to a shared
+// applied per hit) and resolves each material/binding pair to a shared
 // Surface.  One tree is then
 // built over the COMBINED world-space array, so the GPU kernel runs a
 // single closest-hit traversal per ray with no per-mesh loop or ray
@@ -321,15 +321,33 @@ void buildSceneBvh(BvhBuffers& out,
             dstAttr.uv2 = srcAttr.uv2;
             // Vertex colors are geometry attributes, so they survive the
             // world-space bake unchanged.  Omitting this copy silently turns
-            // COLOR_0 into Triangle's white defaults before GPU upload.
-            dst.c0 = src.c0;
-            dst.c1 = src.c1;
-            dst.c2 = src.c2;
-            // The compact id links this triangle to an immutable(不可写), shared
-            // surface binding.  It is transform-free and survives the world
-            // bake and flatten unchanged.
-            dst.surfaceBindingId = src.surfaceBindingId;
-            worldTris.push_back(dst);
+            // COLOR_0 into TriangleAttr's white defaults before GPU upload.
+            dstAttr.c0 = srcAttr.c0;
+            dstAttr.c1 = srcAttr.c1;
+            dstAttr.c2 = srcAttr.c2;
+            // Source attributes point at Scene::surfaceBindings.  Convert that
+            // source binding plus this geom's material into one deduplicated
+            // runtime Surface before the triangle reaches device memory.
+            const int sourceBindingId = srcAttr.surfaceId;
+            int surfaceId = -1;
+            for (size_t s = 0; s < out.hostSurfaces.size(); ++s)
+            {
+                const Surface& candidate = out.hostSurfaces[s];
+                if (candidate.materialId == g.materialid &&
+                    candidate.surfaceBindingId == sourceBindingId)
+                {
+                    surfaceId = (int)s;
+                    break;
+                }
+            }
+            if (surfaceId < 0)
+            {
+                out.hostSurfaces.push_back(Surface{ g.materialid, sourceBindingId });
+                surfaceId = (int)out.hostSurfaces.size() - 1;
+            }
+            dstAttr.surfaceId = surfaceId;
+            worldPositions.push_back(dstPos);
+            worldAttrs.push_back(dstAttr);
         }
     }
 
