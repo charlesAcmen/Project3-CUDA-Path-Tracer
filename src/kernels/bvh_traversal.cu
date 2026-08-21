@@ -21,10 +21,14 @@ __global__ void bvhTraverse(
 
     const PathSegment& pathSegment = pathSegments[path_index];
 
+    // Start from a complete miss record so sorting never sees stale data from
+    // a previous bounce.
+    HitRecord record;
+
     // Guard: a scene with no triangles produces no tree.
     if (deviceBvhNodes == nullptr || deviceTrianglePositions == nullptr)
     {
-        intersections[path_index].t = -1.0f;
+        intersections[path_index] = record;
         return;
     }
 
@@ -35,7 +39,7 @@ __global__ void bvhTraverse(
 
     if (!hit.hit)
     {
-        intersections[path_index].t = -1.0f;
+        intersections[path_index] = record;
     }
     else
     {
