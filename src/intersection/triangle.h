@@ -101,10 +101,48 @@ __host__ __device__ inline bool intersectTrianglePositions(
         return false;
 
     outT = t;
+    outU = u;
+    outV = v;
+
+    return true;
+}
+
+/**
+ * Expand the non-position attributes of a known closest triangle from its
+ * Moller-Trumbore barycentric coordinates.  This preserves the model's TRUE
+ * normal orientation: opaque shading reorients it later, while refraction
+ * needs the original sign to classify entering versus exiting.
+ * @param outNormal [out] Model's shading normal, TRUE orientation
+ *                        (winding preserved, not oriented toward the ray)
+ * @param outTangent [out] Per-triangle tangent aligned with the texture's
+ *                        +U axis (world space — edges are baked world space),
+ *                        orthogonalized against the interpolated normal.
+ *                        .xyz = the unit tangent; .w = UV handedness sign
+ *                        (+1 regular layout, -1 mirrored island, glTF
+ *                        TANGENT.w convention → B = cross(N, T)·w in shading).
+ *                        (0,0,0,0) sentinel = degenerate UVs / no usable
+ *                        tangent → the shading side skips normal mapping.
+ * @param outVertexColor [out] Interpolated vertex color at the hit (default white = no effect)
+ */
+__host__ __device__ inline void interpolateTriangleAttributes(
+    const TrianglePos& pos,
+    const TriangleAttr& attr,
+    float u,
+    float v,
+    glm::vec3& outNormal,
+    glm::vec2& outUv,
+    glm::vec4& outTangent,
+    glm::vec3& outVertexColor)
+{
+    // Rebuild the two edges once for the winning triangle.  The traversal
+    // already used these for position-only intersection; keeping them out of
+    // HitRecord avoids retaining per-candidate temporary state in memory.
+    glm::vec3 e1 = pos.v1 - pos.v0;
+    glm::vec3 e2 = pos.v2 - pos.v0;
 
     // ---- Step 6: interpolate vertex normal (smooth shading) ----
-    // Executed ONLY on hit (rare path), zero overhead during traversal!
-    glm::vec3 interp = (1.0f - u - v) * tri.n0 + u * tri.n1 + v * tri.n2;
+    // Executed only for the final closest hit, after traversal is complete.
+    glm::vec3 interp = (1.0f - u - v) * attr.n0 + u * attr.n1 + v * attr.n2;
     float len2 = glm::dot(interp, interp);
     if (len2 > RAY_EPSILON)
     {
@@ -114,7 +152,7 @@ __host__ __device__ inline bool intersectTrianglePositions(
     {
         glm::vec3 geoNormal = glm::cross(e1, e2);
         float geoLen2 = glm::dot(geoNormal, geoNormal);
-        outNormal = (geoLen2 > RAY_EPSILON) ? geoNormal * glm::inversesqrt(geoLen2) : tri.n0;
+        outNormal = (geoLen2 > RAY_EPSILON) ? geoNormal * glm::inversesqrt(geoLen2) : attr.n0;
     }
 
     // Report the model's TRUE shading normal.  Opaque materials orient it
@@ -125,12 +163,12 @@ __host__ __device__ inline bool intersectTrianglePositions(
     // ---- Step 7: interpolate the texture coordinate ----
     // Same barycentric weights as the normal above.  UVs live in texture
     // space, so unlike the normal there is no re-normalization step.
-    outUv = (1.0f - u - v) * tri.uv0 + u * tri.uv1 + v * tri.uv2;
+    outUv = (1.0f - u - v) * attr.uv0 + u * attr.uv1 + v * attr.uv2;
 
     // ---- Step 7.5: interpolate vertex color ----
     // Same barycentric weights.  Vertex colors are multiplied with
     // the base color in shading (glTF COLOR_0 × baseColorTexture).
-    outVertexColor = (1.0f - u - v) * tri.c0 + u * tri.c1 + v * tri.c2;
+    outVertexColor = (1.0f - u - v) * attr.c0 + u * attr.c1 + v * attr.c2;
 
     // ---- Step 8: per-triangle tangent (for tangent-space normal maps) ----
     // Derive the direction in which the texture's +U axis increases, from
@@ -142,8 +180,8 @@ __host__ __device__ inline bool intersectTrianglePositions(
     // Executed only on hit (rare path), like the normal interpolation.
     // UVs are texture-space, so this uses the model's own UV layout — the
     // bake never touches them.
-    glm::vec2 du1 = tri.uv1 - tri.uv0;
-    glm::vec2 du2 = tri.uv2 - tri.uv0;
+    glm::vec2 du1 = attr.uv1 - attr.uv0;
+    glm::vec2 du2 = attr.uv2 - attr.uv0;
     const float det = du1.x * du2.y - du2.x * du1.y;
     outTangent = glm::vec4(0.0f);   // sentinel: degenerate UVs / no tangent
     // TANGENT_DET_EPSILON guards the 2D UV triangle's area (det ≈ 0 → the solve below blows up);
@@ -169,5 +207,4 @@ __host__ __device__ inline bool intersectTrianglePositions(
         }
     }
 
-    return true;
 }
