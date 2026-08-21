@@ -124,18 +124,42 @@ void pathtraceInit(Scene* scene)
     checkCUDAError("copy materials");
 
     // ---- Mesh triangles + BVH ----
-    // Always build the per-mesh BVHs (cheap: scenes are a few thousand
-    // triangles) and upload the REORDERED flat triangle array as
-    // deviceTriangles.  The reorder is within each mesh only; 
+    // Always build the scene-wide BVH (cheap: scenes are a few thousand
+    // triangles) and upload its REORDERED split layout.  The reorder spans
+    // the combined scene tree; traversal receives positions, while shading
+    // receives attributes plus shared Surface and source-binding tables.
     {
-        bvh::buildSceneBvh(g_dev.bvh, scene->hostTriangles, scene->geoms);
+        bvh::buildSceneBvh(g_dev.bvh, scene->hostTrianglePositions,
+                           scene->hostTriangleAttrs, scene->geoms);
 
-        const int n = (int)g_dev.bvh.hostTriangles.size();
+        const int n = (int)g_dev.bvh.hostTrianglePositions.size();
         if (n > 0)
         {
-            cudaMalloc(&g_dev.deviceTriangles, n * sizeof(Triangle));
-            cudaMemcpy(g_dev.deviceTriangles, g_dev.bvh.hostTriangles.data(),
-                       n * sizeof(Triangle), cudaMemcpyHostToDevice);
+            cudaMalloc(&g_dev.deviceTrianglePositions, n * sizeof(TrianglePos));
+            cudaMemcpy(g_dev.deviceTrianglePositions,
+                       g_dev.bvh.hostTrianglePositions.data(),
+                       n * sizeof(TrianglePos), cudaMemcpyHostToDevice);
+            cudaMalloc(&g_dev.deviceTriangleAttrs, n * sizeof(TriangleAttr));
+            cudaMemcpy(g_dev.deviceTriangleAttrs, g_dev.bvh.hostTriangleAttrs.data(),
+                       n * sizeof(TriangleAttr), cudaMemcpyHostToDevice);
+        }
+
+        if (!g_dev.bvh.hostSurfaces.empty())
+        {
+            cudaMalloc(&g_dev.deviceSurfaces,
+                       g_dev.bvh.hostSurfaces.size() * sizeof(Surface));
+            cudaMemcpy(g_dev.deviceSurfaces, g_dev.bvh.hostSurfaces.data(),
+                       g_dev.bvh.hostSurfaces.size() * sizeof(Surface),
+                       cudaMemcpyHostToDevice);
+        }
+
+        if (!scene->surfaceBindings.empty())
+        {
+            cudaMalloc(&g_dev.deviceSurfaceBindings,
+                       scene->surfaceBindings.size() * sizeof(SurfaceBinding));
+            cudaMemcpy(g_dev.deviceSurfaceBindings, scene->surfaceBindings.data(),
+                       scene->surfaceBindings.size() * sizeof(SurfaceBinding),
+                       cudaMemcpyHostToDevice);
         }
 
         bvh::uploadToDevice(g_dev.bvh);   // node + meta buffers (null if no meshes)
@@ -166,8 +190,8 @@ void pathtraceInit(Scene* scene)
         }
     }
 
-    cudaMalloc(&g_dev.intersections, pixelcount * sizeof(ShadeableIntersection));
-    cudaMemset(g_dev.intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+    cudaMalloc(&g_dev.intersections, pixelcount * sizeof(HitRecord));
+    cudaMemset(g_dev.intersections, 0, pixelcount * sizeof(HitRecord));
 
     StreamCompaction::Efficient::initCompactionWorkspace(maxPaddedPathCount);
 
@@ -190,7 +214,7 @@ void pathtraceInit(Scene* scene)
     // early-returns when g_opts.sortByMaterial is false at runtime.
     cudaMalloc(&g_dev.sortKeys, pixelcount * sizeof(int));
     cudaMalloc(&g_dev.sortIndices, pixelcount * sizeof(int));
-    cudaMalloc(&g_dev.intersectionsSorted, pixelcount * sizeof(ShadeableIntersection));
+    cudaMalloc(&g_dev.intersectionsSorted, pixelcount * sizeof(HitRecord));
 
     s_initialized = true;
 
@@ -216,8 +240,14 @@ void pathtraceFree()
     cudaFree(g_dev.bloomBufA);     // bloom ping-pong buffer A
     cudaFree(g_dev.bloomBufB);     // bloom ping-pong buffer B
     cudaFree(g_dev.bloomWeights);  // bloom Gaussian weight buffer
-    cudaFree(g_dev.deviceTriangles);
-    g_dev.deviceTriangles = nullptr;
+    cudaFree(g_dev.deviceTrianglePositions);
+    g_dev.deviceTrianglePositions = nullptr;
+    cudaFree(g_dev.deviceTriangleAttrs);
+    g_dev.deviceTriangleAttrs = nullptr;
+    cudaFree(g_dev.deviceSurfaces);
+    g_dev.deviceSurfaces = nullptr;
+    cudaFree(g_dev.deviceSurfaceBindings);
+    g_dev.deviceSurfaceBindings = nullptr;
     cudaFree(g_dev.textures.pixels);
     g_dev.textures.pixels = nullptr;
     cudaFree(g_dev.textures.infos);
@@ -285,7 +315,7 @@ static void updateGuiAfterFrame(Profiler& prof) {
 //   1. generateRayFromCamera  — primary rays → PathSegment buffer
 //   2. Bounce loop (up to traceDepth):
 //        bvhTraverse          — BVH ray ↔ scene intersection
-//        [sortPathsByMaterial] — group by materialId          (optional)
+//        [sortPathsByMaterial] — group by resolved materialId (optional)
 //        shadeMaterial         — BSDF eval, scatter / emit
 //        [compactActivePaths]  — remove dead paths            (optional)
 //   3. finalGather             — accumulate remaining colors
@@ -326,7 +356,8 @@ void pathtrace(uchar4* pbo, int iter)
         LAUNCH_KERNEL_AUTO(bvhTraverse, num_paths,
             num_paths, g_dev.paths,
             g_dev.intersections,
-            g_dev.deviceTriangles, g_dev.bvh.deviceNodes);
+            g_dev.deviceTrianglePositions,
+            g_dev.bvh.deviceNodes);
         prof.gpuStop(ProfilerOp::ComputeIntersections);
         checkCUDAError("trace one bounce");
         depth++;
@@ -346,6 +377,8 @@ void pathtrace(uchar4* pbo, int iter)
         LAUNCH_KERNEL_AUTO(shadeMaterial, num_paths,
             iter, num_paths,
             g_dev.intersections, g_dev.paths, g_dev.materials,
+            g_dev.deviceTrianglePositions, g_dev.deviceTriangleAttrs,
+            g_dev.deviceSurfaces, g_dev.deviceSurfaceBindings,
             g_dev.textures,
             shadingCfg);
         prof.gpuStop(ProfilerOp::ShadeMaterial);
