@@ -102,7 +102,7 @@ inline __host__ __device__ glm::vec3 samplePhongSpecularDir(
  */
 inline __host__ __device__ bool resolveGlossyExponent(
     float& exponent, float& invExpPlusOne, float& metallic,
-    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m)
 {
     // Roughness source — first hit wins, priority is the read order:
@@ -161,7 +161,7 @@ inline __host__ __device__ void scatterPhongReflectiveV1(
     PathSegment& pathSegment,
     const glm::vec3& intersect,
     const glm::vec3& shadingNormal,
-    const TextureBinding& tex,
+    const SurfaceBinding& tex,
     const TextureTable& textures,
     glm::vec2 uv,
     const Material& m,

@@ -304,9 +304,10 @@ void buildSceneBvh(BvhBuffers& out,
             dst.c0 = src.c0;
             dst.c1 = src.c1;
             dst.c2 = src.c2;
-            // Texture slot bindings are per-triangle and transform-free; copy
-            // through unchanged (the device triangles are flattened copies).
-            dst.tex = src.tex;
+            // The compact id links this triangle to an immutable(不可写), shared
+            // surface binding.  It is transform-free and survives the world
+            // bake and flatten unchanged.
+            dst.surfaceBindingId = src.surfaceBindingId;
             worldTris.push_back(dst);
         }
     }

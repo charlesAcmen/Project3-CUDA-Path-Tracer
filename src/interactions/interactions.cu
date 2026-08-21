@@ -300,7 +300,7 @@ __host__ __device__ glm::vec3 sampleGgxHalfVector(const glm::vec3& normal, float
 //   JSON-declared Material::textureId >
 //   flat material color m.color.
 __host__ __device__ glm::vec3 resolveBaseColor(
-    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m, const glm::vec3& vertexColor)
 {
     // Sentinel value (-1,-1,-1) means "use glTF material colors only",
@@ -349,7 +349,7 @@ __host__ __device__ glm::vec3 resolveBaseColor(
 // TEXTURE has no factor of its own.  The caller owns the emittance multiplier
 // (JSON Emitting) or the additive bank (auto-glow).
 __host__ __device__ glm::vec3 resolveEmissive(
-    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m)
 {
     int eid = tex.emissive;
@@ -369,7 +369,7 @@ __host__ __device__ glm::vec3 resolveEmissive(
 // threshold and α; `alpha`, `F0`, `diffuseColor` feed the BRDF directly.
 __host__ __device__ void resolvePbrSurfaceParams(
     float& roughness, float& metallic, float& alpha, glm::vec3& F0, glm::vec3& diffuseColor,
-    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m, const glm::vec3& vertexColor)
 {
     // Roughness source — first hit wins, priority is the read order:
@@ -433,7 +433,7 @@ __host__ __device__ void resolvePbrSurfaceParams(
 __host__ __device__ glm::vec3 resolveShadingNormal(
     const glm::vec3& geometricNormal,
     const glm::vec4& tangent,
-    const TextureBinding& tex,
+    const SurfaceBinding& tex,
     const TextureTable& textures,
     glm::vec2 uv,
     float uvScale)
@@ -559,7 +559,7 @@ static __host__ __device__ void scatterGgxSurface(
     const glm::vec3& rayDir,
     const glm::vec3& shadingNormal,
     const glm::vec2& uv,
-    const TextureBinding& tex,
+    const SurfaceBinding& tex,
     const Material& m,
     RngState& rng,
     const TextureTable& textures,
@@ -716,7 +716,7 @@ static __host__ __device__ void scatterDiffuse(
     const glm::vec3& intersect,
     const glm::vec3& shadingNormal,
     const glm::vec2& uv,
-    const TextureBinding& tex,
+    const SurfaceBinding& tex,
     const Material& m,
     RngState& rng,
     const TextureTable& textures,
@@ -769,7 +769,7 @@ __host__ __device__ void scatterRay(
     const glm::vec3        intersect = pathSegment.ray.origin + hit.t * pathSegment.ray.direction;
     const glm::vec3        normal    = hit.surfaceNormal;
     const glm::vec2&       uv        = hit.uv;
-    const TextureBinding&  tex       = hit.tex;
+    const SurfaceBinding&  tex       = hit.surface;
 
     // Opaque (double-sided) materials shade on the hit side regardless of the
     // model's winding: orient the shading normal toward the incoming ray so

@@ -73,7 +73,7 @@ __host__ __device__ glm::vec3 sampleGgxHalfVector(const glm::vec3& normal, float
 //   flat material color m.color.
 // Vertex colors (COLOR_0) multiply the final albedo: albedo *= vertexColor.
 __host__ __device__ glm::vec3 resolveBaseColor(
-    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m, const glm::vec3& vertexColor);
 
 // Resolve the per-hit emissive radiance.  Source chain — first hit wins:
@@ -83,7 +83,7 @@ __host__ __device__ glm::vec3 resolveBaseColor(
 // The caller scales by material.emittance for JSON Emitting light sources;
 // auto-glow (a bound emissive slot with no emittance) adds the radiance as-is.
 __host__ __device__ glm::vec3 resolveEmissive(
-    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m);
 
 // Resolve the per-hit GGX surface parameters for a Reflective / Pbr material.
@@ -105,7 +105,7 @@ __host__ __device__ glm::vec3 resolveEmissive(
 // The ORM texture is a data map (srgb=false), so G/B are already linear [0,1].
 __host__ __device__ void resolvePbrSurfaceParams(
     float& roughness, float& metallic, float& alpha, glm::vec3& F0, glm::vec3& diffuseColor,
-    const TextureBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m, const glm::vec3& vertexColor);
 
 // Resolve the per-hit SHADING normal from a glTF normal texture (tangent
@@ -121,7 +121,7 @@ __host__ __device__ void resolvePbrSurfaceParams(
 __host__ __device__ glm::vec3 resolveShadingNormal(
     const glm::vec3& geometricNormal,
     const glm::vec4& tangent,
-    const TextureBinding& tex,
+    const SurfaceBinding& tex,
     const TextureTable& textures,
     glm::vec2 uv,
     float uvScale);
@@ -149,8 +149,8 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
  * This method applies its changes to the Ray parameter `ray` in place.
  * It also modifies the color `color` of the ray in place.
  *
- * Texture input: the hit record carries the per-triangle TextureBinding
- * (`hit.tex`) and a UV.  The Diffuse branch resolves the albedo from the
+ * Texture input: the hit carries a resolved shared SurfaceBinding and a UV.
+ * The Diffuse branch resolves the albedo from the
  * baseColor slot (glTF binding wins over the JSON-declared
  * Material::textureId) and samples the scene's texture table (`textures`).
  * The unified GGX surface (Reflective / Pbr) additionally samples the
