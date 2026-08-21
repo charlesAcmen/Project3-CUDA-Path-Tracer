@@ -69,6 +69,12 @@ __device__ bool russianRouletteTerminate(
  *
  *   Material array access is uncoalesced when materialId varies across
  *   threads in a warp — material sorting also mitigates this.
+ *
+ * `pathActivityFlags` is an optional semantic output of shading: each byte
+ * reports whether the corresponding path remains active after emission,
+ * misses, scattering, and Russian roulette.  Shading does not depend on any
+ * compaction implementation; the host pipeline may connect this mask to a
+ * downstream consumer or pass nullptr when it is not needed.
  */
 __global__ void shadeMaterial(
     int iter,
@@ -81,5 +87,6 @@ __global__ void shadeMaterial(
     const Surface* __restrict__ deviceSurfaces,
     const SurfaceBinding* __restrict__ deviceSurfaceBindings,
     TextureTable textures,        // scene texture assets (pixels + slice table)
-    ShadingConfig config);
+    ShadingConfig config,
+    unsigned char* __restrict__ pathActivityFlags = nullptr);
 

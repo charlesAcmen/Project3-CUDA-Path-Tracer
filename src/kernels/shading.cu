@@ -5,6 +5,17 @@
 // Shading Kernel Implementation
 // ====================================================================
 
+static __device__ __forceinline__ void writePathActivity(
+    unsigned char* activityFlags,
+    int idx,
+    const PathSegment& pathSegment)
+{
+    if (activityFlags != nullptr)
+    {
+        activityFlags[idx] = pathSegment.remainingBounces > 0 ? 1 : 0;
+    }
+}
+
 __device__ bool russianRouletteTerminate(
     glm::vec3& throughput,
     int remainingBounces,
@@ -56,7 +67,8 @@ __global__ void shadeMaterial(
     const Surface* __restrict__ deviceSurfaces,
     const SurfaceBinding* __restrict__ deviceSurfaceBindings,
     TextureTable textures,        // scene texture assets (pixels + slice table)
-    ShadingConfig config)
+    ShadingConfig config,
+    unsigned char* __restrict__ pathActivityFlags)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_paths)
@@ -69,6 +81,7 @@ __global__ void shadeMaterial(
         // accumulate emission repeatedly, blowing out the image.
         if (pathSegment.remainingBounces <= 0)
         {
+            writePathActivity(pathActivityFlags, idx, pathSegment);
             return;
         }
 
@@ -85,6 +98,7 @@ __global__ void shadeMaterial(
             // Debug overlay: first-bounce hits on the focal plane in green.
             if (config.debug.showDOFOverlay && pathSegment.remainingBounces == config.traceDepth) {
                 handleDebugDOFOverlay(pathSegment, intersectionPoint, config);
+                writePathActivity(pathActivityFlags, idx, pathSegment);
                 return;
             }
 
@@ -166,5 +180,7 @@ __global__ void shadeMaterial(
             // No intersection: background (black), no radiance contribution
             pathSegment.remainingBounces = 0;
         }
+
+        writePathActivity(pathActivityFlags, idx, pathSegment);
     }
 }

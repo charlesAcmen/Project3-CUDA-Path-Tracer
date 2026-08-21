@@ -15,6 +15,7 @@ struct DeviceBuffers {
     glm::vec3*              image               = nullptr;
     PathSegment*            paths               = nullptr;
     PathSegment*            pathsCompacted      = nullptr;
+    unsigned char*          pathActivityFlags   = nullptr;  // shading output consumed by mask-based compaction
     Material*               materials           = nullptr;
     HitRecord*              intersections       = nullptr;
     int*                    sortKeys            = nullptr;

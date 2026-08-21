@@ -38,8 +38,13 @@ static int compactCoreGlobalMem(int n, PathSegment* dst, const PathSegment* src)
     return StreamCompaction::Efficient::compactPathSegments(n, dst, src);
 }
 
-static int compactCoreSharedMem(int n, PathSegment* dst, const PathSegment* src) {
-    return StreamCompaction::Efficient::compactPathSegmentsSharedMemory(n, dst, src);
+static int compactCoreSharedMem(
+    int n,
+    PathSegment* dst,
+    const PathSegment* src,
+    const unsigned char* activityFlags) {
+    return StreamCompaction::Efficient::compactPathSegmentsSharedMemory(
+        n, dst, src, activityFlags);
 }
 
 /**
@@ -83,7 +88,9 @@ static bool compactActivePaths(int& num_paths)
     } else if (g_opts.compactMethod == CompactMethod::Thrust) {
         survivors = compactCoreThrust(num_paths, g_dev.pathsCompacted, g_dev.paths);
     } else if (g_opts.compactMethod == CompactMethod::SharedMem) {
-        survivors = compactCoreSharedMem(num_paths, g_dev.pathsCompacted, g_dev.paths);
+        survivors = compactCoreSharedMem(
+            num_paths, g_dev.pathsCompacted, g_dev.paths,
+            g_dev.pathActivityFlags);
     }
     prof.cpuStop(ProfilerOp::CompactPaths);
 
