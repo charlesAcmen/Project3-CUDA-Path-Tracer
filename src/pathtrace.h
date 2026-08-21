@@ -16,10 +16,10 @@ struct DeviceBuffers {
     PathSegment*            paths               = nullptr;
     PathSegment*            pathsCompacted      = nullptr;
     Material*               materials           = nullptr;
-    ShadeableIntersection*  intersections       = nullptr;
+    HitRecord*              intersections       = nullptr;
     int*                    sortKeys            = nullptr;
     int*                    sortIndices         = nullptr;
-    ShadeableIntersection*  intersectionsSorted = nullptr;
+    HitRecord*              intersectionsSorted = nullptr;
     glm::vec3*              imageDisplay        = nullptr;  // LDR [0,1] post-processed display output
 
     // Bloom post-processing buffers
