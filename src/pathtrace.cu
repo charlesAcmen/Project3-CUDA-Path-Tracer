@@ -385,15 +385,25 @@ void pathtrace(uchar4* pbo, int iter)
             traceDepth, hst_scene->state.rrMinBounces,
             g_opts.rngMode, cam, hst_scene->state.debug
         };
+        ShadingSceneView shadingScene = {
+            g_dev.materials,
+            g_dev.deviceTrianglePositions,
+            g_dev.deviceTriangleAttrs,
+            g_dev.deviceSurfaces,
+            g_dev.deviceSurfaceBindings,
+            g_dev.textures
+        };
+        ShadingBufferView shadingBuffers = {
+            g_dev.intersections,
+            g_dev.paths,
+            pathActivityFlags
+        };
         prof.gpuStart(ProfilerOp::ShadeMaterial);
         LAUNCH_KERNEL_AUTO(shadeMaterial, num_paths,
             iter, num_paths,
-            g_dev.intersections, g_dev.paths, g_dev.materials,
-            g_dev.deviceTrianglePositions, g_dev.deviceTriangleAttrs,
-            g_dev.deviceSurfaces, g_dev.deviceSurfaceBindings,
-            g_dev.textures,
             shadingCfg,
-            pathActivityFlags);
+            shadingScene,
+            shadingBuffers);
         prof.gpuStop(ProfilerOp::ShadeMaterial);
 
         bool allDead = compactActivePaths(num_paths);
