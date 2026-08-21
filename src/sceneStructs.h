@@ -261,6 +261,12 @@ struct HitRecord
     float t = -1.0f;       // parametric distance along the ray; < 0 = miss
     float u = 0.0f;        // Moller-Trumbore barycentric coordinate for v1
     float v = 0.0f;        // Moller-Trumbore barycentric coordinate for v2
+    // interpolated texture coordinate at the hit
+    // Per-triangle tangent aligned with the texture's +U axis (world space,
+    // orthogonalized against the interpolated normal).  .xyz = unit tangent,
+    // .w = UV handedness sign (glTF TANGENT.w: +1 regular, -1 mirrored
+    // island).  (0,0,0,0) sentinel = degenerate UVs → the shading side skips
+    // tangent-space normal mapping.
     int triangleIndex = -1;
     int materialId = -1;
 };

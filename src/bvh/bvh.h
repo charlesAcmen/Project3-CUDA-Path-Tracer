@@ -59,8 +59,7 @@ struct BvhBuffers
 
 // Result of a closest-hit BVH traversal.
 // `hit` is true only when a triangle was found with t < the caller's far
-// plane (maxT); `t` is that closest distance and `normal` its shading
-// normal (world space — triangles are baked).  `triIndex` is the index of
+// plane (maxT); `t` is that closest distance.  `triIndex` is the index of
 // the hit triangle into `tris`, and `u` / `v` are its Moller-Trumbore(莫勒-特朗博尔)
 // barycentric coordinates (the third weight is 1-u-v).  The shading normal,
 // UV, tangent, vertex color, and texture binding are deliberately expanded
@@ -70,16 +69,9 @@ struct BvhHit
 {
     bool      hit   = false;
     float     t     = LARGE_T;
-    glm::vec3 normal;
     int       triIndex = -1;
-    glm::vec2 uv;   // interpolated texture coordinate at the hit
-    // Per-triangle tangent aligned with the texture's +U axis (world space,
-    // orthogonalized against the interpolated normal).  .xyz = unit tangent,
-    // .w = UV handedness sign (glTF TANGENT.w: +1 regular, -1 mirrored
-    // island).  (0,0,0,0) sentinel = degenerate UVs → the shading side skips
-    // tangent-space normal mapping.
-    glm::vec4 tangent;
-    glm::vec3 vertexColor; // interpolated vertex color (COLOR_0), default white = no effect
+    float     u     = 0.0f;
+    float     v     = 0.0f;
 };
 
 /**
