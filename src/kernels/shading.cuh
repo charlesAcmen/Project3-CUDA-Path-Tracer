@@ -73,7 +73,7 @@ __device__ bool russianRouletteTerminate(
 __global__ void shadeMaterial(
     int iter,
     int num_paths,
-    ShadeableIntersection* __restrict__ shadeableIntersections,
+    HitRecord* __restrict__ hitRecords,
     PathSegment* __restrict__ pathSegments,
     Material* __restrict__ materials,
     TextureTable textures,        // scene texture assets (pixels + slice table)
