@@ -369,58 +369,56 @@ namespace StreamCompaction {
         // ========================================================================
 
         int compactPathSegmentsSharedMemory(
-            int n, PathSegment *dev_odata, const PathSegment *dev_idata)
+            int n,
+            PathSegment *dev_odata,
+            const PathSegment *dev_idata,
+            const unsigned char *activityMask)
         {
             if (n <= 0)
             {
                 return 0;
             }
 
+            assert(activityMask != nullptr);
+
             CompactionWorkspace& ws = s_compactionWorkspace;
-            if (ws.flagBuffer == nullptr ||
-                ws.scanBuffer  == nullptr ||
+            if (ws.scanBuffer  == nullptr ||
                 ws.scanScratch == nullptr ||
                 ws.maxElements < n)
             {
                 return 0;  // workspace not initialized or too small
             }
 
-            unsigned char* dev_flags   = ws.flagBuffer;
-            int*           dev_indices = ws.scanBuffer;
+            int* dev_indices = ws.scanBuffer;
 
-            // Step 1: Map PathSegments to uint8_t boolean flags
-            LAUNCH_KERNEL_AUTO(kernMapPathSegmentToBooleanU8, n, n, dev_flags, dev_idata);
-            checkCUDAError("kernMapPathSegmentToBooleanU8 failed");
-
-            // Step 2: Exclusive scan from uint8 flags to int indices.
+            // Step 1: Exclusive scan from the producer-supplied uint8 activity
+            // mask to int destination indices.
             // The block scan zero-fills out-of-range lanes, so it accepts the
             // actual element count directly; no power-of-two padding is needed.
             // Dispatch to the template instance matching the auto-detected block size.
             switch (ws.scanBlockSize) {
                 case 512:
                     scanExclusiveSharedMemoryDevice<512, unsigned char>(
-                        n, dev_indices, dev_flags,
+                        n, dev_indices, activityMask,
                         ws.scanScratch, ws.scanScratchInts);
                     break;
                 case 256:
                 default:
                     scanExclusiveSharedMemoryDevice<256, unsigned char>(
-                        n, dev_indices, dev_flags,
+                        n, dev_indices, activityMask,
                         ws.scanScratch, ws.scanScratchInts);
                     break;
             }
 
-            // Step 3: Scatter PathSegments to compacted output
-            // Reuse the uint8 flags produced in Step 1 instead of re-reading
-            // remainingBounces from the strided PathSegment array.
-            LAUNCH_KERNEL_AUTO(kernScatterPathSegmentU8, n,
-                n, dev_odata, dev_idata, dev_indices, dev_flags);
-            checkCUDAError("kernScatterPathSegmentU8 failed");
+            // Step 2: Scatter active PathSegments to compacted output.
+            LAUNCH_KERNEL_AUTO(kernScatterPathSegmentByMask, n,
+                n, dev_odata, dev_idata, dev_indices, activityMask);
+            checkCUDAError("kernScatterPathSegmentByMask failed");
 
             // Count survivors
             unsigned char lastFlag;
             int lastIndex;
-            cudaMemcpy(&lastFlag, dev_flags + (n - 1), sizeof(unsigned char), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&lastFlag, activityMask + (n - 1), sizeof(unsigned char), cudaMemcpyDeviceToHost);
             cudaMemcpy(&lastIndex, dev_indices + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
             int count = lastIndex + (lastFlag ? 1 : 0);
 
