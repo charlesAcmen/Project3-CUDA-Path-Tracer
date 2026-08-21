@@ -73,13 +73,15 @@ void appendTriangle(
 // OBJ Mesh Loading
 // -----------------------------------------------------------------------
 
-// Emit every triangular face of an OBJ into `triangles`.  Walks
+// Emit every triangular face of an OBJ into matched position / attribute
+// arrays.  Walks
 // tinyobjloader's index array. Normals and UVs are indexed per-corner;
 // colors are indexed per vertex.
 static void appendObjGeometry(const tinyobj::attrib_t& attrib,
                               const vector<tinyobj::shape_t>& shapes,
                               bool hasNormals, bool hasUvs, bool hasColors,
-                              vector<Triangle>& triangles, int& count)
+                              vector<TrianglePos>& positions,
+                              vector<TriangleAttr>& attrs, int& count)
 {
     for (const auto& shape : shapes)
     {
@@ -255,19 +257,21 @@ static void stampMtlTextures(const string& objPath,
 
 /**
  * Load triangles from a Wavefront OBJ file and append them to the
- * hostTriangles vector.
+ * matched host position / attribute arrays.
  *
  * @param objPath   Path to the .obj file on disk
- * @param triangles [out] Flat array of object-space triangles to append to
+ * @param positions [out] Flat array of object-space triangle positions to append to
+ * @param attrs     [out] Matching triangle attributes to append to
  * @param scene     Optional texture sink.  When non-null, the companion .mtl's
  *                  image maps (map_Kd / map_Bump / map_Ke) are resolved into
  *                  per-material SurfaceBindings linked to each face by
  *                  material_id.  Null (the loader_test's 2-arg
  *                  calls) skips MTL texture loading — geometry only.
- * @return (offset, count) — the slice of `triangles` this mesh occupies
+ * @return (offset, count) — the source-triangle slice this mesh occupies
  */
 pair<int, int> loadOBJ(const string& objPath,
-                       vector<Triangle>& triangles,
+                       vector<TrianglePos>& positions,
+                       vector<TriangleAttr>& attrs,
                        Scene* scene)
 {
     tinyobj::attrib_t attrib;
@@ -290,7 +294,7 @@ pair<int, int> loadOBJ(const string& objPath,
     if (!warn.empty()) Log::warn("Scene", "%s", warn.c_str());
     if (!err.empty())  Log::warn("Scene", "%s", err.c_str());
 
-    const int offset = (int)triangles.size();
+    const int offset = (int)positions.size();
     int       count  = 0;
 
     // Triangles from the face loop, then — when a Scene sink is present —
@@ -299,13 +303,13 @@ pair<int, int> loadOBJ(const string& objPath,
     // texture loading entirely.
     appendObjGeometry(attrib, shapes, !attrib.normals.empty(),
                       !attrib.texcoords.empty(), !attrib.colors.empty(),
-                      triangles, count);
+                      positions, attrs, count);
     if (scene != nullptr && !materials.empty())
         stampMtlTextures(objPath, materials, shapes, (size_t)offset,
-                         *scene, triangles);
+                         *scene, attrs);
 
     Log::info("Scene", "Loaded mesh: %s  (%d triangles, total %zu)",
-              objPath.c_str(), count, triangles.size());
+              objPath.c_str(), count, positions.size());
     return {offset, count};
 }
 

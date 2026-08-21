@@ -572,31 +572,33 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
 
 // Emit all of a mesh's primitives under one accumulated transform.
 static void appendMeshTriangles(const cgltf_mesh* mesh, const glm::mat4& world,
-                                vector<Triangle>& triangles, int& count,
+                                vector<TrianglePos>& positions,
+                                vector<TriangleAttr>& attrs, int& count,
                                 GltfLoadCtx& ctx)
 {
     const glm::mat4 worldIT = glm::inverseTranspose(world);
     for (cgltf_size pi = 0; pi < mesh->primitives_count; ++pi)
         appendPrimitiveTriangles(&mesh->primitives[pi], world, worldIT,
-                                 triangles, count, ctx);
+                                 positions, attrs, count, ctx);
 }
 
 // Depth-first walk of the scene graph.  The accumulated matrix `parentWorld`
 // is the composition of every ancestor's local transform; multiplying it by
 // this node's local transform gives the world matrix that places its mesh.
 static void walkNode(const cgltf_node* node, const glm::mat4& parentWorld,
-                     vector<Triangle>& triangles, int& count, GltfLoadCtx& ctx)
+                     vector<TrianglePos>& positions,
+                     vector<TriangleAttr>& attrs, int& count, GltfLoadCtx& ctx)
 {
     const glm::mat4 world = parentWorld * nodeLocalMatrix(node);
     if (node->mesh != nullptr)
-        appendMeshTriangles(node->mesh, world, triangles, count, ctx);
+        appendMeshTriangles(node->mesh, world, positions, attrs, count, ctx);
     for (cgltf_size c = 0; c < node->children_count; ++c)
-        walkNode(node->children[c], world, triangles, count, ctx);
+        walkNode(node->children[c], world, positions, attrs, count, ctx);
 }
 
 /**
  * Load triangles from a glTF 2.0 file (.gltf JSON or .glb binary) and
- * append them to the scene's hostTriangles vector.
+ * append them to the scene's matched host position / attribute arrays.
  *
  * - The scene graph is walked and every node's accumulated transform is
  *   applied, so multi-part models scattered across nodes are assembled
@@ -614,9 +616,9 @@ static void walkNode(const cgltf_node* node, const glm::mat4& parentWorld,
  *   JSON TEXTURE overrides the glTF baseColor — see parseObjects).
  * - Draco-compressed primitives are not supported (cgltf does not decode).
  *
- * @param scene     Scene to append to (hostTriangles AND textures)
+ * @param scene     Scene to append to (parallel geometry arrays AND textures)
  * @param gltfPath  Path to the .gltf or .glb file
- * @return (offset, count) — the slice of scene.hostTriangles this file occupies
+ * @return (offset, count) — the source-triangle slice this file occupies
  */
 pair<int, int> loadGLTF(Scene& scene, const string& gltfPath)
 {
@@ -646,8 +648,9 @@ pair<int, int> loadGLTF(Scene& scene, const string& gltfPath)
         return {-1, 0};
     }
 
-    vector<Triangle>& triangles = scene.hostTriangles;
-    const int offset = (int)triangles.size();
+    vector<TrianglePos>& positions = scene.hostTrianglePositions;
+    vector<TriangleAttr>& attrs = scene.hostTriangleAttrs;
+    const int offset = (int)positions.size();
     int       count  = 0;
 
     // Texture auto-load context: glTF image URIs resolve relative to the
@@ -687,19 +690,19 @@ pair<int, int> loadGLTF(Scene& scene, const string& gltfPath)
     if (gltfScene != nullptr && gltfScene->nodes_count > 0)
     {
         for (cgltf_size i = 0; i < gltfScene->nodes_count; ++i)
-            walkNode(gltfScene->nodes[i], glm::mat4(1.0f), triangles, count, ctx);
+            walkNode(gltfScene->nodes[i], glm::mat4(1.0f), positions, attrs, count, ctx);
     }
     else
     {
         // No scene graph (some minimal files): emit every mesh untransformed.
         for (cgltf_size mi = 0; mi < data->meshes_count; ++mi)
-            appendMeshTriangles(&data->meshes[mi], glm::mat4(1.0f), triangles, count, ctx);
+            appendMeshTriangles(&data->meshes[mi], glm::mat4(1.0f), positions, attrs, count, ctx);
     }
 
     cgltf_free(data);
 
     Log::info("Scene", "Loaded mesh: %s  (%d triangles, total %zu)",
-              gltfPath.c_str(), count, triangles.size());
+              gltfPath.c_str(), count, positions.size());
     return {offset, count};
 }
 
