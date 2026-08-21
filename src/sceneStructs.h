@@ -261,9 +261,9 @@ struct PathSegment
 // every bounce and can also be gathered by material sorting, so keeping the
 // record small avoids moving normal/UV/tangent/texture data for every path.
 //
-// materialId is deliberately stored beside the compact hit record: material
-// sorting needs a contiguous key array and must not random-read attributes
-// merely to extract that key.  triangleIndex == -1 and t < 0 represent a miss.
+// triangleIndex == -1 and t < 0 represent a miss.  The material is resolved
+// from the selected triangle's Surface only after traversal; sorting derives
+// its key through the same lookup when explicitly enabled.
 struct HitRecord
 {
     float t = -1.0f;       // parametric distance along the ray; < 0 = miss

@@ -10,7 +10,8 @@
 // World-space bake: buildSceneBvh transforms every mesh's triangles from
 // object space to world space (vertices via the geom's `transform`, vertex
 // normals via `invTranspose` — the same normal transform the old kernel
-// applied per hit) and tags each with its materialId.  One tree is then
+// applied per hit) and tags each material/binding pair to a shared
+// Surface.  One tree is then
 // built over the COMBINED world-space array, so the GPU kernel runs a
 // single closest-hit traversal per ray with no per-mesh loop or ray
 // transformation.

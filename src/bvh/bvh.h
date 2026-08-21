@@ -213,8 +213,8 @@ namespace bvh
                       const std::vector<TrianglePos>& positions,
                       const std::vector<TriangleAttr>& attrs);
 
-    // Bake every mesh's triangles to world space (tagging materialId), build
-    // the single scene-wide BVH, and fill out.hostNodes/hostTriangles.
+    // Bake every mesh's triangles to world space, deduplicate their
+    // (materialId, source-binding) pairs into Surfaces, then build the tree.
     void buildSceneBvh(BvhBuffers& out,
                        const std::vector<TrianglePos>& positions,
                        const std::vector<TriangleAttr>& attrs,
