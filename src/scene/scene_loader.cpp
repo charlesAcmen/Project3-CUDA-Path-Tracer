@@ -253,9 +253,9 @@ static void parseCamera(const json& data, Scene& scene)
     camera.lensRadius      = cameraData.value("LENS_RADIUS", 0.0f);
     camera.focalDistance   = cameraData.value("FOCAL_DISTANCE", 0.0f);
 
-    float yscaled = tan(fovy * DEG_TO_RAD);
+    float yscaled = tan(0.5f * fovy * DEG_TO_RAD);
     float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
-    float fovx    = atan(xscaled) * RAD_TO_DEG;
+    float fovx    = 2.0f * atan(xscaled) * RAD_TO_DEG;
     camera.fov    = glm::vec2(fovx, fovy);
 
     camera.view        = glm::normalize(camera.lookAt - camera.position);
