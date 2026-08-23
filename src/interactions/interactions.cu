@@ -758,7 +758,7 @@ __host__ __device__ void scatterRay(
     const glm::vec3        intersect = pathSegment.ray.origin + hit.t * pathSegment.ray.direction;
     const glm::vec3        normal    = hit.surfaceNormal;
     const glm::vec2&       uv        = hit.uv;
-    const SurfaceBinding&  tex       = hit.surface;
+    const SurfaceBinding&  tex       = *hit.surface;
 
     // Opaque (double-sided) materials shade on the hit side regardless of the
     // model's winding: orient the shading normal toward the incoming ray so

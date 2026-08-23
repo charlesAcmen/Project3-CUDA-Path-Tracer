@@ -168,14 +168,20 @@ void pathtraceInit(Scene* scene)
                        cudaMemcpyHostToDevice);
         }
 
-        if (!scene->surfaceBindings.empty())
-        {
-            cudaMalloc(&g_dev.deviceSurfaceBindings,
-                       scene->surfaceBindings.size() * sizeof(SurfaceBinding));
-            cudaMemcpy(g_dev.deviceSurfaceBindings, scene->surfaceBindings.data(),
-                       scene->surfaceBindings.size() * sizeof(SurfaceBinding),
-                       cudaMemcpyHostToDevice);
-        }
+        // Slot 0 is a default empty binding. Every source binding id is
+        // addressed as id + 1 in shading, so an unbound surface (id = -1)
+        // needs neither a per-thread fallback object nor a struct copy.
+        std::vector<SurfaceBinding> deviceSurfaceBindings;
+        deviceSurfaceBindings.reserve(scene->surfaceBindings.size() + 1);
+        deviceSurfaceBindings.emplace_back();
+        deviceSurfaceBindings.insert(deviceSurfaceBindings.end(),
+                                     scene->surfaceBindings.begin(),
+                                     scene->surfaceBindings.end());
+        cudaMalloc(&g_dev.deviceSurfaceBindings,
+                   deviceSurfaceBindings.size() * sizeof(SurfaceBinding));
+        cudaMemcpy(g_dev.deviceSurfaceBindings, deviceSurfaceBindings.data(),
+                   deviceSurfaceBindings.size() * sizeof(SurfaceBinding),
+                   cudaMemcpyHostToDevice);
 
         bvh::uploadToDevice(g_dev.bvh);   // node + meta buffers (null if no meshes)
     }

@@ -116,11 +116,10 @@ __global__ void shadeMaterial(
             const TriangleAttr& triangleAttr = triangleAttrs[hit.triangleIndex];
             const Surface& surfaceRef = surfaces[triangleAttr.surfaceId];
             const Material& material = materials[surfaceRef.materialId];
-            const SurfaceBinding emptySurface;
-            const SurfaceBinding& surface =
-                (surfaceRef.surfaceBindingId >= 0 && surfaceBindings != nullptr)
-                ? surfaceBindings[surfaceRef.surfaceBindingId]
-                : emptySurface;
+            // Device binding slot 0 is the default empty binding.  Source
+            // binding ids are therefore shifted by one, mapping -1 to 0.
+            const SurfaceBinding* surface =
+                &surfaceBindings[surfaceRef.surfaceBindingId + 1];
             ShadeableIntersection intersection{};
             intersection.t          = hit.t;
             intersection.surfaceFeatures = surfaceRef.features;
@@ -138,7 +137,7 @@ __global__ void shadeMaterial(
                 // (flat color when no emissive slot), scaled by the JSON emittance
                 // knob.  Accumulate and terminate the path.
                 pathSegment.accumulatedRadiance = pathSegment.throughput *
-                    resolveEmissive(intersection.surface, scene.textures,
+                    resolveEmissive(*intersection.surface, scene.textures,
                                     intersection.uv, material) *
                     material.emittance;
                 pathSegment.remainingBounces = 0;
@@ -152,10 +151,10 @@ __global__ void shadeMaterial(
                 // instead of directly writing to image.  The surface is still shaded
                 // by its BSDF.  (Terminating here would turn a mostly-black
                 // emissive map on a shaded surface black.)
-                if (intersection.surface.emissiveFactor != glm::vec3(0.0f))
+                if (intersection.surface->emissiveFactor != glm::vec3(0.0f))
                 {
                     pathSegment.accumulatedRadiance += pathSegment.throughput *
-                        resolveEmissive(intersection.surface, scene.textures,
+                        resolveEmissive(*intersection.surface, scene.textures,
                                        intersection.uv, material);
                 }
 

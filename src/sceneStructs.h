@@ -306,5 +306,5 @@ struct ShadeableIntersection
   uint32_t surfaceFeatures;
   glm::vec2 uv;   // interpolated texture coordinate at the hit point
   glm::vec3 vertexColor; // interpolated vertex color (COLOR_0), default white = no effect
-  SurfaceBinding surface; // resolved from the hit triangle's shared binding
+  const SurfaceBinding* surface; // resolved binding in the device-side shared table
 };
