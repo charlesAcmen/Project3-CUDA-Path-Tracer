@@ -169,6 +169,8 @@ static bool testScatterRayNeverNaN()
         ShadeableIntersection hit{};
         hit.t = 0.0f;
         hit.surfaceNormal = normal;
+        SurfaceBinding emptyBinding{};
+        hit.surface = &emptyBinding;
         scatterRay(p, hit, glass, rng, TextureTable{});
 
         CHECK(isFinite(p.ray.direction),

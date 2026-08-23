@@ -201,7 +201,7 @@ bool bruteForceClosest(const Ray& ray, const TestMesh& mesh,
                 glm::vec3 vertexColor;
                 t = tt;
                 interpolateTriangleAttributes(mesh.positions[offset + j], mesh.attrs[offset + j],
-                                              u, v, nrm, uv, tangent, vertexColor);
+                                              u, v, true, nrm, uv, tangent, vertexColor);
                 idx = offset + j;
                 hit = true;
             }
@@ -500,7 +500,7 @@ bool testTraversalVsBrute(const char* name, const TestMesh& mesh,
         glm::vec3 vcolor;
         interpolateTriangleAttributes(out.hostTrianglePositions[vhit.triIndex],
                                       out.hostTriangleAttrs[vhit.triIndex],
-                                      vhit.u, vhit.v,
+                                      vhit.u, vhit.v, true,
                                       vn, vuv, vtangent, vcolor);
 
         if (fabsf(bt - vhit.t) > 1e-3f || glm::dot(bn, vn) < 0.9999f)
