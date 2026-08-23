@@ -276,16 +276,6 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
 }
 
 // ====================================================================
-// Extern: globals defined in main.cpp (used by printStartupSummary)
-// ====================================================================
-
-extern std::string  startTimeString;
-extern int          width;
-extern int          height;
-extern RenderState* renderState;
-extern bool         g_autoSave;
-
-// ====================================================================
 // Display: startup help text
 // ====================================================================
 
@@ -325,49 +315,6 @@ void printStartupHelp(const char* exeName)
     Log::raw("      when --benchmark is enabled.\n");
     Log::raw("    - Nonzero values for --sort are treated as enabled.\n");
     Log::raw("    - Only compact values 0..3 have defined behavior.\n");
-    Log::raw("======================================================================\n");
-    Log::raw("\n");
-}
-
-// ====================================================================
-// Display: startup summary
-// ====================================================================
-
-void printStartupSummary(const AppConfig& cfg)
-{
-    // Unpack what the body prints from the config.
-    const ProfilerConfig& profCfg = cfg.profCfg;
-    const RngMode         rngMode = cfg.rngMode;
-
-    Log::raw("\n");
-    Log::raw("======================================================================\n");
-    Log::raw("  Startup Summary\n");
-    Log::raw("======================================================================\n");
-    Log::raw("  Scene: %s\n", profCfg.sceneName.c_str());
-    Log::raw("  Timestamp: %s\n", startTimeString.c_str());
-    Log::raw("  Resolution: %d x %d\n", width, height);
-    if (renderState) {
-        Log::raw("  Trace iterations (depth): %d\n", renderState->iterations);
-    }
-    Log::raw("  Profiler: %s\n", profCfg.enabled ? "ENABLED" : "disabled");
-    if (profCfg.enabled) {
-        Log::raw("    Warmup iters: %d\n", profCfg.warmupIters);
-        Log::raw("    Verbose logging: %s\n", profCfg.verbose ? "yes" : "no");
-    }
-    const char* compactName = "Unknown";
-    switch (profCfg.compactMethod) {
-        case CompactMethod::Off:        compactName = "Disabled (no compaction)"; break;
-        case CompactMethod::GlobalScan: compactName = "Global-memory scan (custom)"; break;
-        case CompactMethod::Thrust:     compactName = "Thrust copy_if"; break;
-        case CompactMethod::SharedMem:  compactName = "Shared-memory multi-block scan"; break;
-    }
-    Log::raw("  Compact method: %s\n", compactName);
-    Log::raw("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
-    const char* rngName = (rngMode == RngMode::HALTON ? "Scrambled Halton" : "LCG");
-    Log::raw("  RNG mode: %s\n", rngName);
-    Log::raw("  BVH traversal: enabled  (max depth %d, leaf size %d)\n",
-           kBvhMaxDepth, kBvhLeafSize);
-    Log::raw("  Auto-save final image: %s\n", g_autoSave ? "yes" : "no");
     Log::raw("======================================================================\n");
     Log::raw("\n");
 }
