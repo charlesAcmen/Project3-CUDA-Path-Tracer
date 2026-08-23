@@ -777,11 +777,15 @@ __host__ __device__ void scatterRay(
     {
         shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -normal : normal;
     }
-    else
+    else if (hit.surfaceFeatures & SurfaceFeatureNormalMap)
     {
         const glm::vec3 perturbed =
             resolveShadingNormal(normal, hit.tangent, tex, textures, uv);
         shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -perturbed : perturbed;
+    }
+    else
+    {
+        shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -normal : normal;
     }
 
     // Offset the new ray origin off the surface by EPSILON so it cannot

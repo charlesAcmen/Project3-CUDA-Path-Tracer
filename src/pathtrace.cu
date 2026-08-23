@@ -137,6 +137,16 @@ void pathtraceInit(Scene* scene)
         bvh::buildSceneBvh(g_dev.bvh, scene->hostTrianglePositions,
                            scene->hostTriangleAttrs, scene->geoms);
 
+        for (Surface& surface : g_dev.bvh.hostSurfaces)
+        {
+            if (surface.surfaceBindingId >= 0 &&
+                surface.surfaceBindingId < (int)scene->surfaceBindings.size() &&
+                scene->surfaceBindings[surface.surfaceBindingId].normal >= 0)
+            {
+                surface.features |= SurfaceFeatureNormalMap;
+            }
+        }
+
         const int n = (int)g_dev.bvh.hostTrianglePositions.size();
         if (n > 0)
         {
