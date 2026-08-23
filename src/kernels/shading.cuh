@@ -65,7 +65,7 @@ __device__ bool russianRouletteTerminate(
  * For each active path:
  *   - Light source hit (JSON Emitting) → accumulate emission (textured or
  *     flat, × emittance), terminate path.
- *   - Auto-glow surface (bound emissive slot, no JSON emittance) → bank the
+ *   - Auto-glow surface (non-zero emissive factor, no JSON emittance) → bank the
  *     direct radiance into `image` additively (Lo = Le + ∫BRDF·Li), then
  *     CONTINUE scattering — the surface is still shaded by its BSDF.
  *   - Surface hit       → scatter the ray according to material BSDF

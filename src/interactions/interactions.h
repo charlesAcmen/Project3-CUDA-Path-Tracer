@@ -75,11 +75,12 @@ __host__ __device__ glm::vec3 resolveBaseColor(
     const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m, const glm::vec3& vertexColor);
 
-// Resolve the per-hit emissive radiance.  Source chain — first hit wins:
-//   glTF/OBJ emissive texture (tex.emissive, × emissiveFactor × emissiveStrength) >
-//   flat material color m.color.
+// Resolve the per-hit emissive radiance.  glTF/OBJ emission is
+//   (emissive texture RGB or white) × emissiveFactor × emissiveStrength.
+// A zero factor denotes no model-defined emission; JSON Emitting then falls
+// back to its flat material color.
 // The caller scales by material.emittance for JSON Emitting light sources;
-// auto-glow (a bound emissive slot with no emittance) adds the radiance as-is.
+// auto-glow (a non-zero emissive factor with no emittance) adds it as-is.
 __host__ __device__ glm::vec3 resolveEmissive(
     const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m);

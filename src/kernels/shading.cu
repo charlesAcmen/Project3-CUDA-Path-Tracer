@@ -145,13 +145,13 @@ __global__ void shadeMaterial(
             else
             {
                 // ---- Auto-glow: additive emission ----
-                // A bound emissive slot with no JSON emittance means the model
-                // glows at its own glTF-defined radiance.  Emission is ADDITIVE
+                // A non-zero emissive factor with no JSON emittance means the
+                // model glows at its own glTF/OBJ-defined radiance.  Emission is ADDITIVE
                 // (Lo = Le + ∫BRDF·Li), so accumulate to pathSegment.accumulatedRadiance
                 // instead of directly writing to image.  The surface is still shaded
                 // by its BSDF.  (Terminating here would turn a mostly-black
                 // emissive map on a shaded surface black.)
-                if (intersection.surface.emissive >= 0)
+                if (intersection.surface.emissiveFactor != glm::vec3(0.0f))
                 {
                     pathSegment.accumulatedRadiance += pathSegment.throughput *
                         resolveEmissive(intersection.surface, scene.textures,
