@@ -68,9 +68,8 @@
 
 // ---- BVH build-time settings — single source of truth ----
 // Tree depth and leaf size are compile-time constants (tune here, no runtime
-// validation).  The traversal kernel's explicit stack holds at most
-// BVH_MAX_STACK_DEPTH entries, so BVH_MAX_DEPTH must stay well below it:
-// each tree level pushes up to two children.
+// validation). A depth-first traversal retains at most one deferred sibling
+// per internal level, plus the current node.
 constexpr int kBvhMaxDepth      = 24;   // max tree depth
 constexpr int kBvhLeafSize      = 4;    // max triangles per leaf
-constexpr int kMaxBvhStackDepth = 64;   // explicit-stack capacity
+constexpr int kMaxBvhStackDepth = kBvhMaxDepth + 1; // explicit-stack capacity
