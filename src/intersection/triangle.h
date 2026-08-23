@@ -129,6 +129,7 @@ __host__ __device__ inline void interpolateTriangleAttributes(
     const TriangleAttr& attr,
     float u,
     float v,
+    bool computeTangent,
     glm::vec3& outNormal,
     glm::vec2& outUv,
     glm::vec4& outTangent,
@@ -169,6 +170,8 @@ __host__ __device__ inline void interpolateTriangleAttributes(
     // Same barycentric weights.  Vertex colors are multiplied with
     // the base color in shading (glTF COLOR_0 × baseColorTexture).
     outVertexColor = (1.0f - u - v) * attr.c0 + u * attr.c1 + v * attr.c2;
+
+    if (!computeTangent) return;
 
     // ---- Step 8: per-triangle tangent (for tangent-space normal maps) ----
     // Derive the direction in which the texture's +U axis increases, from

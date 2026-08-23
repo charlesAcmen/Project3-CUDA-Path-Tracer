@@ -125,6 +125,7 @@ __global__ void shadeMaterial(
             intersection.t          = hit.t;
             intersection.materialId = surfaceRef.materialId;
             interpolateTriangleAttributes(trianglePos, triangleAttr, hit.u, hit.v,
+                                          (surfaceRef.features & SurfaceFeatureNormalMap) != 0,
                                           intersection.surfaceNormal,
                                           intersection.uv,
                                           intersection.tangent,
