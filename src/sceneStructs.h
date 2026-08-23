@@ -2,6 +2,7 @@
 
 #include <cuda_runtime.h>
 
+#include <cstdint>
 #include <glm/glm.hpp>
 
 #include <string>
@@ -52,6 +53,12 @@ struct SurfaceBinding
     float emissiveStrength = 1.0f;
 };
 
+enum SurfaceFeature : uint32_t
+{
+    SurfaceFeatureNone      = 0,
+    SurfaceFeatureNormalMap = 1u << 0,
+};
+
 // Runtime shading identity.  A Surface combines the scene material that
 // selects the BSDF with one immutable texture/factor binding.  The table is
 // deduplicated by (materialId, surfaceBindingId), so triangles reference a
@@ -61,6 +68,7 @@ struct Surface
 {
     int materialId       = -1;
     int surfaceBindingId = -1;
+    uint32_t features    = SurfaceFeatureNone;
 };
 
 // Position-only device layout.  The traversal hot loop reads this array and
@@ -295,7 +303,7 @@ struct ShadeableIntersection
   // → shading computes B = cross(N, T)·w.  (0,0,0,0) sentinel = degenerate
   // UVs → tangent-space normal mapping is skipped.
   glm::vec4 tangent;
-  int materialId;
+  uint32_t surfaceFeatures;
   glm::vec2 uv;   // interpolated texture coordinate at the hit point
   glm::vec3 vertexColor; // interpolated vertex color (COLOR_0), default white = no effect
   SurfaceBinding surface; // resolved from the hit triangle's shared binding
