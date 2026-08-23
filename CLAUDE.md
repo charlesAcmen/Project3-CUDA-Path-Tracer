@@ -1,175 +1,113 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This document describes the current source tree. Treat `src/` as the implementation authority when this file and code disagree.
 
-## Build & Run
+## Build and run
 
-- **Windows (Visual Studio):** Generate with `cmake -B build`, then build with `cmake --build build --config Release` (or open the generated `.sln`).
-- **Linux/WSL (Make):** `make` or `make Release` builds with CMake into `build/`.
-- **Run:** `build/bin/cis565_path_tracer <scenefile.json>` — e.g. `build/bin/cis565_path_tracer scenes/cornell.json`. In VS, set `Debugging > Command Arguments` to `../scenes/cornell.json`.
-- **Clean:** `make clean`
-- **No test suite in the main build** — validation is visual inspection of the rendered output. Standalone tests live under `tests/` (`bvh_test`, `config_test`, `loader_test`, `rng_test`, `refraction_test`) but are NOT wired into the root CMakeLists. Each has its own CMake project; build with `cmake -G "Visual Studio 17 2022" -A x64 -B <test>/build <test>` then `cmake --build <test>/build --config Release`. `bvh_test` compiles the production `src/bvh/bvh.cu` directly (no duplicate copies) and validates the world-space bake, single-tree structure, near-first `traverseBvhClosest` vs brute force, and `intersectRayAABBEntry`.
+- Windows / Visual Studio: `cmake -B build`, then `cmake --build build --config Release`.
+- Linux / WSL: `make` or `make Release` (CMake output is under `build/`).
+- Run: `build/bin/cis565_path_tracer <scene.json>`, for example `build/bin/cis565_path_tracer scenes/cornell_box.json`.
+- Standalone projects under `tests/` are not wired into the root CMake build. Generate each one separately with Visual Studio 2022 x64, then build its Release configuration. Rendering changes are primarily validated by the user through visual inspection.
 
-## Runtime Configuration (three-layer priority)
+Do not run builds or render scenes merely to validate a source change. State the exact command for the user to run and the expected visual or console result instead.
 
-`CLI flags > config.local.json > code defaults`, handled by `src/config/config.cpp`/`config.h` through the `appConfig()` singleton. Defaults: `compactMethod = SharedMem`, `sortByMaterial = false`, `rngMode = LCG`, `autoSave = true`. All runtime renderer settings live in the `AppConfig` singleton. BVH depth/leaf size are **compile-time constants** `kBvhMaxDepth`/`kBvhLeafSize` in `src/constants.h` — not runtime-configurable.
+## Runtime configuration
 
-In `config.local.json`, enum fields (`compactMethod`, `rngMode`) accept either the **case-insensitive name** (`"SharedMem"`, `"lcg"`) or the **legacy integer** (`3`, `0`); unknown names fall back to the current value with a warning. CLI flags stay numeric (`--compact=N`, `--rng=N`).
+`CLI flags > explicitly selected --config file > config.local.json > code defaults`. `initAppConfig()` in `src/config/config.cpp` owns this merge and `appConfig()` is the singleton consumed by the application and renderer.
 
-| Flag | Meaning |
-|------|---------|
-| `--compact=N` | Compaction: 0=off, 1=global-mem scan, 2=Thrust `copy_if`, 3=shared-mem scan (default) |
-| `--sort=N` | Material sorting 0/1 (default off) |
-| `--rng=N` | 0=LCG (default), 1=scrambled Halton |
-| `--benchmark` | Enable profiler CSV output to `profiler_output/<scene>_<timestamp>/` |
-| `--warmup=N` | Profiler warmup iterations (default 3) |
-| `--save` / `--save-at=N1,N2,...` | Save final / checkpoint images |
-| `--config=PATH` | Load config JSON (default `config.local.json` in CWD) |
-| `-h`, `--help` | Help text |
+The defaults are shared-memory compaction, material sorting off, LCG RNG, and auto-save on. JSON `compactMethod` and `rngMode` accept either a case-insensitive name or their legacy integer; CLI forms are numeric.
 
-Many settings can also be toggled live via the ImGui overlay (`RenderImGui` in `main.cpp`); those mutate the same `g_opts` singleton through setters declared in `pathtrace.h`.
+| Flag | Current meaning |
+|---|---|
+| `--compact=N` | `0` off, `1` global scan, `2` Thrust, `3` shared-memory scan |
+| `--sort=N` | Material sorting; nonzero enables it |
+| `--rng=N` | `0` LCG, `1` scrambled Halton |
+| `--benchmark`, `--warmup=N`, `--verbose` | CSV profiler, warm-up count, per-bounce logging |
+| `--save`, `--save-at=N1,N2,...` | Final save and checkpoint saves |
+| `--config=PATH`, `-h`, `--help` | Config path and help |
 
-## Project Architecture
+`config.local.json` also controls bloom, chromatic aberration, vignette and profiler settings. The ImGui panel changes the same live renderer settings; camera changes reset accumulation.
 
-CUDA-based Monte Carlo path tracer (CIS 565 at UPenn). **All geometry is triangulated at load time** — there are no sphere/cube primitives anymore; every `Geom` is a mesh referencing a slice of a flat triangle array. Rendering is CUDA-GL interop with a live ImGui overlay.
-
-### Source Layout
+## Source ownership and entry flow
 
 ```
-src/
-├── main.cpp                  # GLFW/GL window, camera controls, ImGui, render loop → pathtrace()
-├── pathtrace.cu / .h         # GPU pipeline + runtime getters/setters; includes kernels/ + pipeline/
-├── config/config.cpp / .h    # AppConfig singleton, JSON + CLI merge, startup help/summary
-├── scene/scene_loader.cpp / .h    # JSON scene dispatch (Materials/Objects/Camera); the only public entry
-├── scene/obj_loader.cpp           # OBJ mesh loading (tinyobjloader impl) + shared makeTri
-├── scene/gltf_loader.cpp          # glTF 2.0 mesh loading (cgltf impl): scene-graph walk + texture auto-load
-├── scene/texture_loader.cpp       # PNG/JPG decode (stb_image header only) into Scene::textures
-├── scene/loader_internal.h        # cross-TU loader helpers (makeTri/loadOBJ/loadGLTF/loadTexture…)
-├── scene/scene.cpp / .h           # Scene container + computeSceneStats
-├── sceneStructs.h            # All shared data structures (Ray, Geom, Material, PathSegment, …)
-├── constants.h               # PI, EPSILON, RAY_EPSILON, RR_P_MIN/MAX, LARGE_T, …
-├── utils/utilities.h / .cu   # buildTransformationMatrix, checkCUDAErrorFn
-├── utils/logger.h            # tagged stdout/stderr logging (Log::info/warn/error/raw)
-├── kernels/kernel_config.h   # LAUNCH_KERNEL_AUTO macros, KernelConfig / OccupancyConfig / DeviceInfo
-├── image.h / .cpp            # PNG/HDR output (stb_image)
-├── glslUtility.* / window_setup.h   # GLFW/GL/CUDA-interop init, PBO registration & per-frame mapping
-├── bvh/                      # single world-space BVH: AABB + node structs + host SAH build + flatten
-│   ├── aabb.h                #   AABB + sign-based slab ray test + entry-distance variant (__host__ __device__)
-│   ├── bvh.h                 #   BvhNode/BvhBuffers/BvhHit + shared traverseBvhClosest (near-first)
-│   └── bvh.cu                #   buildSceneBvh (world-space bake + SAH) → flatten → uploadToDevice/freeDevice
-├── kernels/                  # __global__ kernels (pure GPU, data passed as parameters):
-│   ├── ray_generation.cuh    #   primary rays + AA sub-pixel jitter + thin-lens DoF
-│   ├── bvh_traversal.cuh     #   single world-space BVH closest-hit traversal (only intersection path)
-│   ├── shading.cuh           #   BSDF eval + scatterRay + Russian roulette
-│   └── accumulation.cuh      #   gatherTerminatedPaths, sendImageToPBO
-├── pipeline/                 # host-side orchestration (references g_opts / g_dev globals):
-│   ├── sort.cuh              #   material sorting (thrust sort_by_key + gather)
-│   ├── compact.cuh           #   stream-compaction dispatch (gather + compact per bounce)
-│   └── postprocess.cuh       #   bloom → prepareDisplay → ACES/sRGB → CA → vignette → PBO
-├── postprocess/              # bloom, tonemap (ACES + sRGB), chromatic_aberration, vignette kernels
-├── interactions/             # scatterRay + Fresnel (Schlick/Accurate) + hemisphere/GGX surface sampling
-├── intersection/             # intersections.h (ray utils, concentricSampleDisk), triangle.h (Möller–Trumbore)
-├── rng/rng.h                 # RngState: LCG + scrambled Halton, utilhash
-├── profiler/                 # Profiler singleton: cudaEvent GPU + chrono CPU timing, CSV export
-├── stream_compaction/        # efficient.cu/h: global-scan + shared-mem hierarchical-scan compaction
-├── ImGui/                    # Dear ImGui source
+main.cpp
+  -> config/config.cpp          startup configuration
+  -> scene/scene_loader.cpp     JSON orchestration
+       -> obj_loader.cpp / gltf_loader.cpp / texture_loader.cpp
+  -> window_setup.cpp           GLFW/OpenGL/CUDA-GL setup
+  -> app_loop.cpp               per-frame CUDA map, display, save/cleanup
+       -> camera_controller.cpp input and free-fly camera state
+       -> render_ui.cpp         ImGui controls and profiler display
+       -> pathtrace.cu          GPU pipeline orchestration
 ```
-(json.hpp lives in `external/include/` alongside the other vendored headers — see Dependencies.)
 
-### Path Tracing Pipeline (one iteration = one sample per pixel)
+`AppState` is application/window state only. `Scene` owns parsed CPU scene data; `pathtrace.cu` allocates and frees the GPU copies. Keep vendored `external/` headers read-only unless a task explicitly authorizes changes.
 
-`pathtrace()` in `pathtrace.cu` runs once per frame:
+Important source groups:
 
-1. **`generateRayFromCamera`** — primary rays per pixel (AA jitter; thin-lens DoF if `lensRadius > 0`). All `pixelcount` paths start with `remainingBounces = traceDepth`.
-2. **Bounce loop** (until every path terminates or `depth ≥ traceDepth`):
-   - **Intersection** — `bvhTraverse` (single world-space BVH closest-hit traversal, the only path). Triangles were baked to world space at build time (and tagged with `materialId`), so each active path runs ONE `traverseBvhClosest` over the whole tree — no per-mesh loop, no ray transform. Near-child-first traversal orders children by AABB entry distance to tighten the far plane early. Double-sided Möller–Trumbore `triangleIntersectionTest` with interpolated vertex normals; records closest `t`, `materialId` (from the hit triangle), world-space `surfaceNormal`.
-   - **`sortPathsByMaterial`** *(optional)* — thrust sort_by_key on `materialId`, reorders paths + intersections so same-material paths are contiguous (less warp divergence).
-   - **`shadeMaterial`** — emissive hit: multiply by emittance, terminate. Miss: terminate black. Surface hit: `scatterRay()` (diffuse/glossy/mirror/refractive) then Russian roulette.
-   - **`compactActivePaths`** *(optional, 4 methods)* — first `gatherTerminatedPaths` banks dead-path colors into the HDR accumulation image, then stream-compacts survivors to the front of a ping-pong buffer.
-3. **`runPostProcess`** — bloom (linear HDR) → `prepareDisplayKernel` (÷iter, composite bloom) → ACES + sRGB tonemap → chromatic aberration → vignette → PBO.
-4. Copy the **tonemapped** display buffer (`g_dev.imageDisplay`) to host `state.image` so `saveImage()` matches the on-screen preview (raw HDR lives in `g_dev.image`).
+- `sceneStructs.h`: GPU-shared layouts and runtime enums.
+- `scene/`: JSON parser plus format-specific OBJ, glTF and texture loading.
+- `bvh/`: host-side scene bake/build, GPU-readable nodes and traversal helper.
+- `kernels/`: primary-ray generation, BVH traversal, shading, accumulation.
+- `interactions/`: texture sampling, normal mapping, GGX/diffuse/refraction scattering and Fresnel helpers.
+- `pipeline/`: optional sorting/compaction and post-processing orchestration.
+- `postprocess/`: bloom, tonemap, chromatic aberration and vignette kernels.
+- `profiler/`: per-phase GPU timing and CSV output.
 
-### Key Data Structures (all in `sceneStructs.h`)
+## Scene representation and loading
 
-- **`Triangle`** — 3 vertices + 3 vertex normals + `materialId`. Object space in `Scene::hostTriangles`; baked to world space (vertices via `transform`, normals via `invTranspose`) by `buildSceneBvh`.
-- **`Geom`** — `materialid`, transform/inverse/invTranspose (used only by the world-space bake at build time; no longer read by any kernel), plus `meshTriangleOffset`/`meshTriangleCount` (slice into `Scene::hostTriangles`; `-1,0` for none).
-- **`Material`** — `color`, `specular { color }`, `type` (`MaterialType` enum: Diffuse/Reflective/Pbr/Refractive/Emissive), `indexOfRefraction` + `invIndexOfRefraction`, `emittance`, `textureId` (-1 = flat color), `uvScale`. **No `roughness`/`metallic` fields** — those are resolved per-hit at runtime from the mesh's own ORM textures / glTF factors (see `resolvePbrSurfaceParams`).
-- **`Camera`** — resolution, position/lookAt/view/up/right, fov, pixelLength, `lensRadius` (0 = pinhole), `focalDistance`.
-- **`PathSegment`** — ray + accumulated color + pixelIndex + remainingBounces.
-- **`ShadeableIntersection`** — `t` (<0 = miss), `surfaceNormal`, `materialId`.
-- **`RenderState`** — camera + iterations + traceDepth + rrMinBounces + host `image` buffer + `DebugConfig`. (Renderer settings like `rngMode`/compaction live in `AppConfig`, not here.)
-- **`AppConfig`** — runtime config singleton (see above).
+All renderable geometry is triangulated. Source geometry uses parallel `TrianglePos` (positions) and `TriangleAttr` (normals, UV0, COLOR_0 and a source surface-binding id) arrays. A `Geom` references a source slice and contains its JSON transform.
 
-### Random Number Generation (`src/rng/rng.h`)
+`buildSceneBvh()` applies each geom transform to positions and inverse transpose to normals, then creates one world-space BVH over all meshes. It also maps each `(materialId, SurfaceBinding)` pair to one compact runtime `Surface`. Consequently traversal only loads positions and records `t`, barycentrics and triangle index in a 20-byte `HitRecord`; shading expands the winning triangle's attributes and surface afterwards.
 
-`RngState` exposes a uniform `.next(dim)` API for both modes. `makeRngState(iter, pixelIndex, bounceNum * MAX_DRAWS_PER_BOUNCE, mode)` creates the per-bounce state (bounce encoding via `MAX_DRAWS_PER_BOUNCE = 8`).
+glTF nodes are walked with accumulated matrix or `T * R * S` transforms. Supported vertex attributes are POSITION, NORMAL, TEXCOORD_0 and COLOR_0; higher UV/color sets, skinning, morph targets and Draco are not handled. OBJ and glTF mesh paths are relative to the scene JSON file.
 
-- **LCG** — `thrust::default_random_engine` seeded by `utilhash` (backward compatible).
-- **Halton** — `haltonIndex = hash(pixel, bounce) + iter` (consecutive walk across frames → low-discrepancy convergence). `next(dim)` picks a prime base per dimension (`HaltonDim`: AA jitter, lens, diffuse θ/φ, GGX half-vector θ/φ, Fresnel roulette, path RR, PBR diffuse/specular split) and applies a Cranley-Patterson rotation with a **fixed** per-(pixel, bounce, dim) offset. `iter` is deliberately excluded from the CP seed (see comments in `rng.h`).
-- Dimensions 0–10 are allocated (10 = PBR diffuse/specular split); 11–15 reserved.
+## Materials, textures and scattering
 
-### Intersection Testing
+The JSON material selects the BSDF: `Diffuse`, `Emitting`, `Specular`, `PBR`, or `Refractive`. `Specular` maps to reflective chrome-like GGX behavior and may use `SPECULAR_COLOR`; `PBR` uses metallic-roughness GGX; `Refractive` uses optional `IOR` (default 1.5). For a PBR material missing `RGB`, the loader deliberately uses a sentinel so a glTF material's base color can win.
 
-Mesh-only. Every `Geom` is a triangulated mesh; non-mesh geoms silently miss. Triangles are baked to world space at BVH build time, so the traversal kernel works directly in world space (no per-mesh ray transform). Triangle test in `intersection/triangle.h` is **double-sided** (accepts back faces — required for rays inside refractive objects) and reports the model's **true** shading normal (winding preserved — the bake's `invTranspose` normal transform preserves it) plus an `outFrontFace` flag (the Möller–Trumbore determinant's sign). Opaque materials orient the normal toward the ray in `scatterRay` off that stable flag; refraction keys enter vs exit off it too (never `dot(normal, ray)`, which degenerates at grazing angles). `t` is the world-space distance along the normalized world ray.
+Texture ownership is asset-driven: no JSON `TEXTURE` or `UV_SCALE` path is parsed. glTF contributes baseColor, normal, metallicRoughness (ORM), occlusion and emissive slots. OBJ companion MTL contributes `map_Kd`, `map_Bump`/`map_bump`, and `map_Ke`. Color maps are decoded sRGB-to-linear; normal/ORM/occlusion data maps remain linear bytes. glTF images are decoded in parallel, then appended serially to retain deterministic texture ids; external and bufferView-backed GLB images are supported.
 
-### Scattering (`interactions/interactions.cu`)
+The relevant source chains are:
 
-- **Diffuse** — cosine-weighted hemisphere sampling; `color *= albedo` (the `cosθ/pdf` factor cancels the `1/π` in the Lambert BRDF).
-- **Normal mapping** — `resolveShadingNormal` (in `interactions.cu`) samples the glTF `normal` slot (a **data map**, srgb=false → raw linear bytes) and remaps [0,1]→[-1,1] (glTF: `n = 2·texel − 1`). The TBN frame uses the **per-triangle tangent** computed in `triangleIntersectionTest` (world-space edges + UV deltas, orthogonalized against the interpolated normal; a `(0,0,0,0)` sentinel = degenerate UVs → skip). The tangent is a `vec4`: `.w` carries the **UV handedness sign** (`det > 0 → +1` regular layout, `det < 0 → −1` mirrored island, the glTF `TANGENT.w` convention — e.g. DamagedHelmet's symmetric halves), and shading computes `B = cross(N, T) · tangent.w` (glTF/OpenGL +V green → bitangent, flipped back correctly on mirrored islands). `worldN = T·n.x + B·n.y + N·n.z` replaces the geometric normal for diffuse/GGX scattering (ray-origin offset keyed off it too). **Refraction never perturbs** — enter/exit classification and TIR must keep the true geometric normal. Opaque orientation still keys off the geometric normal's sign vs the ray, then orients the *perturbed* normal toward the ray.
-- **Reflective / Pbr** — unified metallic-roughness GGX surface (`resolvePbrSurfaceParams` resolves per-hit `r`, `α = r²`, conductor `F0 = mix(0.04, baseColor, metallic)`, `diffuseColor = baseColor·(1−metallic)`). A smooth surface (`r < ROUGHNESS_THRESHOLD`) with `metallic > PBR_MIRROR_METALLIC_THRESHOLD` collapses to a single mirror lobe weighted by `Fresnel(N·V)`; otherwise a Fresnel-weighted probabilistic split, `specProb = mix(clamp(lum(Fresnel(N·V)), 0.05, 0.95), 1.0, metallic)` — the metallic pull keeps a pure metal from wasting samples on the zero-weight diffuse branch (diffuseColor and 1−specProb both scale with 1−metallic, so diffuse weights stay bounded):
-  - **Specular branch** (prob `specProb`) — importance-sample the GGX half-vector (`cosθh² = (1−ξ₁)/(1+(α²−1)ξ₁)`), reflect the view about it, weight `F·G·(V·H)/((N·V)(N·H)) ÷ specProb` (D and N·L cancel out of the estimator). Below-surface samples (N·L ≤ 0) get weight 0 and scatter the mirror reflection so the path survives for Russian roulette.
-  - **Diffuse branch** (prob `1−specProb`) — cosine hemisphere, weight `diffuseColor·(1−lum(F_view)) ÷ (1−specProb)`. The `(1−lum(F_view))` energy compensation prevents specular+diffuse from summing past 1 (grazing fireflies).
-  - Legacy JSON `Specular` → `Reflective` is the metallic=1 chrome case: F0 = `specular.color`, no diffuse.
-- **Refractive** — enter/exit keyed off the intersection's `frontFace` flag, Fresnel hardcoded to **Accurate** (Schlick is kept in `interactions.cu` for a one-line switch — no runtime mode dispatch), Russian-roulette split between reflection and refraction with probability-compensated throughput; ray origin offset by `EPSILON` into the correct side of the surface (keyed off the enter/exit state, stable near grazing).
-- **Russian roulette** (`shading.cuh`) — after `rrMinBounces`, survival probability = clamp(max RGB, `RR_P_MIN`, `RR_P_MAX`); survivors divide color by p.
-- **Ray-origin offset** — every scatter pushes the new origin off the surface by `EPSILON` along the shading normal (sign per branch: refraction off the enter/exit side, GGX/diffuse off the scatter-direction orientation), and the traversal's `RAY_EPSILON` near-clip skips the freshly-scattered surface.
+- PBR base color: glTF base-color texture times its glTF factor, otherwise the JSON material color; vertex COLOR_0 multiplies the result when present.
+- Roughness/metallic: ORM G/B times their glTF factors, otherwise non-default glTF factors, otherwise the PBR/Reflective type defaults.
+- Emission: `(emissive texture or white) * emissiveFactor * emissiveStrength`. A JSON `Emitting` material multiplies this by `emittance` and terminates; nonzero glTF emission on any other BSDF is additive auto-glow and scattering continues.
 
-### Post-Processing
+Normal maps use a per-triangle tangent generated from UV derivatives. A degenerate-UV sentinel disables perturbation. Opaque scattering orients the shading normal against the incident ray; refraction keeps the geometric normal and uses the front-face classification, preserving winding-dependent behavior. The renderer is double-sided at intersection time.
 
-Bloom runs in linear HDR space (threshold → separable Gaussian blur with shared-memory tiling). ACES filmic (Hill fit) + sRGB gamma in `tonemap.cuh`. Chromatic aberration and vignette run in sRGB space. The display buffer `g_dev.imageDisplay` is separate from the raw HDR accumulation `g_dev.image`.
+## Per-iteration GPU pipeline
 
-### Scene Files
+1. `generateRayFromCamera` creates one primary path per pixel, including AA jitter and optional thin-lens depth of field.
+2. Each bounce traverses the one world-space BVH, optionally sorts active paths by resolved material, shades/scatters, then optionally gathers dead paths and compacts survivors.
+3. With compaction disabled, terminated paths are gathered after the bounce loop. With compaction enabled, gathering occurs inside compaction.
+4. Post-processing runs bloom in linear HDR, averages/composites into the display buffer, then ACES+sRGB tonemapping, chromatic aberration and vignette. `pathtraceCopyDisplayToHost()` makes saved PNGs match the display, rather than exporting raw HDR accumulation.
 
-- **Materials** — `TYPE`: `Diffuse` / `Emitting` / `Specular` / `PBR` / `Refractive`. `Specular` (legacy → `Reflective` chrome) supports `SPECULAR_COLOR`; `PBR` is the unified metallic-roughness GGX surface; `Refractive` uses `IOR`. Roughness/metallic/baseColor are resolved by **source chains** (first hit wins, see `resolvePbrSurfaceParams` / `resolveBaseColor` in `interactions.cu`). **There are no JSON `ROUGHNESS` / `METALLIC` keys** — the models carry their own maps/factors, so the scene JSON only supplies `RGB` (+ optional `SPECULAR_COLOR` / `TEXTURE`):
-  - **Roughness** — a bound glTF `metallicRoughness` texture overrides everything **per-texel** (ORM G channel — a data map, raw bytes → already linear); else the glTF `roughnessFactor` (into `TextureBinding::roughnessFactor`, `-1` for OBJ); else type default: `Reflective` → `REFLECTIVE_ROUGHNESS_DEFAULT` (0.0 = chrome mirror), `Pbr` → `PBR_ROUGHNESS_DEFAULT` (0.5 — an incomplete material must not silently become a mirror). `r < ROUGHNESS_THRESHOLD` (or G=0 / factor 0) is a true mirror.
-  - **Metallic** — ORM B channel per-texel; else glTF `metallicFactor`; else type default: `Reflective` = 1.0 (chrome, no diffuse), `Pbr` = 0.0 (dielectric).
-  - **Base color** — `PBR` resolves the albedo via `resolveBaseColor` (glTF `baseColor` texture × `baseColorFactor`, else JSON `TEXTURE`, else `RGB`); `Specular` uses `RGB`/`SPECULAR_COLOR` as the metal tint; `Diffuse` stays pure Lambert (`RGB`/`TEXTURE`, unchanged).
-- **Camera** — `RES`, `FOVY`, `ITERATIONS`, `DEPTH`, `RR_DEPTH`, `FILE`, `EYE`, `LOOKAT`, `UP`; optional `LENS_RADIUS` / `FOCAL_DISTANCE` (DoF).
-- **Objects** — no `TYPE` field (mesh is the only object type; the loader ignores it entirely, and the old JSONs' `"TYPE":"mesh"` still loads as a harmless unknown key). Each entry: `FILE` (mesh path relative to the scene file; `.obj` via tinyobjloader, `.gltf`/`.glb` via cgltf), `MATERIAL`, `TRANS`, `ROTAT`, `SCALE`. Models live in `scenes/models/` — a flat dump of the official Khronos `glTF-Sample-Assets` repo (ignored by git), so `FILE` entries reference those folders' `.gltf`/`.glb` (e.g. `Models/Avocado/scene.gltf`). The dump has no `.obj` files and no `gen_shapes.py` — supply your own `.obj` if a scene needs one.
-- **glTF node transforms are applied** — `gltf_loader.cpp` walks the scene graph and emits each `(node, mesh)` instance under the accumulated TRS/matrix transform (`nodeLocalMatrix` → `walkNode`), so multi-part models assemble exactly as the file specifies. Caveat: some Sketchfab/asset exports are **baked** — the vertices already carry the world-space transform and the node matrices are redundant. Applying both double-transforms the model. For such files, zero out the redundant node matrices in a local copy of the file, or compensate with the scene `TRANS`/`ROTAT`/`SCALE`. The loader reads POSITION/NORMAL/TEXCOORD_0; glTF skinning/morphs/Draco are ignored — the scene JSON's `MATERIAL` governs the shading model (see the Textures bullet for what the asset's own maps contribute).
-- **Textures** — auto-loaded from the model file itself. glTF `baseColor` / `normal` / `metallicRoughness` / `occlusion` / `emissive` slots load from external PNG/JPG URIs (relative to the `.gltf`/`.glb`) **and** from images packed into the `.glb` binary buffer (bufferView — decoded from memory); `data:` URIs fall back to the material color. OBJ companion `.mtl` maps load too (`map_Kd` → baseColor, `map_Bump`/`map_bump` → normal, `map_Ke` → emissive), resolved relative to the OBJ file (tinyobjloader is handed the OBJ's dir as its MTL base — otherwise it looks in the CWD). MTL flat colors (`Kd`/`Ks`/`Ns`) are **not** applied — the scene JSON's `MATERIAL` still governs type/color. An explicit JSON `TEXTURE` on a material overrides the asset's own baseColor (see `parseObjects`). `baseColor` / ORM / `normal` are sampled by shading (see Scattering); `occlusion` / `emissive` are loaded but unused.
-- **Winding / normals** — the renderer **trusts the model's winding and normal direction**. The intersection reports the true shading normal; `scatterRay` orients it toward the ray only for opaque materials, and refraction reads its sign (dot with the ray) to classify enter vs exit. When a glTF `normal` texture is bound, opaque materials scatter with the tangent-space-perturbed shading normal (`resolveShadingNormal`); refraction always keeps the true geometric normal. For solid glass use an **outward-wound** mesh (smooth `vn`, CCW). An **inward-wound / flat-shaded** sphere (no `vn`) renders as inside-out glass — Fresnel wall reflections still visible, but the entry ray is misclassified as "exit", so there is **no lensing/caustics** (that's the correct winding-respecting behavior, not a bug).
+RNG is per `(iteration, pixel, bounce)`. Halton uses fixed Cranley-Patterson rotations per pixel/bounce/dimension and advances its index across iterations. Dimensions 0--10 are allocated; 11--15 are reserved.
 
-### Known Performance Notes
+## Runtime controls
 
-- `checkCUDAError` (`utilities.h`) is compiled in **only** for Debug / RelWithDebInfo (`CIS565_ENABLE_CUDA_ERRORCHECK` in CMakeLists); in Release it expands to a no-op, so kernels run fully asynchronously. Use a Release build when you want real benchmark numbers.
-- `LAUNCH_KERNEL_AUTO` sizes each launch through `KernelConfig`, but device properties come from the `DeviceInfo` singleton (`kernel_config.h`) — ONE `cudaGetDeviceProperties` per device, not per launch.
-- Intersection is always the single world-space BVH closest-hit traversal (`bvhTraverse` + `traverseBvhClosest`). One traversal per ray (no per-mesh loop or transform) with near-child-first ordering; the win over a linear scan appears on large meshes.
-- **The BVH build is host-side CPU** (`bvh.cu` `buildRecursive`): an exhaustive per-axis SAH that `std::sort`s every node's range on all 3 axes → O(n log² n). It is fine for ~thousands of triangles (a few ms), but a high-poly glTF dump (e.g. ABeautifulGame, 1.5M tris) makes the **first-frame build take seconds** — that, not any kernel, is the bulk of the startup freeze before the first frame renders. One-time per scene load, never per frame.
-- **Startup texture decoding is CPU-parallel** (`texture_loader.cpp` `decodeTexture` + `gltf_loader.cpp` `preloadGltfTextures`): glTF images are collected up front, then decoded (`stbi_load` + sRGB-linearize) across `hardware_concurrency()` worker threads — one wave with an atomic index pull, then assembled **serially** into `Scene::textures` in deterministic order (texture ids are table indices: decode parallel, assembly serial). `Auto-loaded glTF texture ...` lines still print in image order, but all at once instead of one-by-one. `pathtraceInit` then concatenates every texture into ONE flat host buffer and H2D-copies it; 33× 2048² (≈1.7 GB, ABeautifulGame) makes that copy alone ~0.5–1 s. OBJ / JSON `TEXTURE` paths stay serial (few textures). All one-time, not per-frame.
-- **Fast math** — `CMakeLists.txt` compiles CUDA with `-use_fast_math` (rcp.approx division, fast sqrt/trig/pow). Errors are ~2 ulp, invisible in a path tracer, and it makes the hot `1.0f / a` in `intersection/triangle.h` cheap. Consequence: **results differ from a precise-math build in the last few bits** — use the same flags when diffing renders or benchmarking.
-- **GPU division avoidance** — reciprocals and ratios that are constant per frame / per material are precomputed on the host: per-pixel `÷iter` became `*invIter` (`postprocess.cuh` → `tonemap.cuh`/`bloom.cuh`), Fresnel takes precomputed `eta` = n1/n2 (`interactions.cu`, from `invIndexOfRefraction`/`indexOfRefraction`), and `sendImageToPBO` no longer divides (display buffer is pre-averaged). The old Phong `exponent`/`invExponentPlusOne` precomputes are gone — the GGX surface derives `α = r²` per-hit in `resolvePbrSurfaceParams` (roughness/metallic can be per-texel or glTF factors, so a host-side exponent would be wrong), and the GGX branch divides only by its own branch probability. `fresnelSchlickConductor`'s `(1−cosθ)⁵` is explicit multiplies, never `powf` (fast-math friendly).
+- `W/A/S/D`, `Space`, `Left Shift`: fly on camera axes.
+- Left drag: rotate in place. Right drag (vertical) or wheel: dolly.
+- Middle drag: pan. `R`: restore the loaded camera. `P`: save. `Esc`: save and exit.
 
-## Controls (Runtime)
+`cam.position` is authoritative. `lookAt` is derived from the view direction and reference zoom distance, not the position controller's anchor.
 
-| Key | Action |
-|-----|--------|
-| Esc | Save image and exit |
-| P   | Save image |
-| R   | Re-center camera to original position + orientation |
-| W / A / S / D | Fly forward / left / backward / right along camera axes |
-| Space / Shift | Fly up / down along camera up |
-| Left mouse drag | Rotate camera **in place** (yaw/pitch; position unchanged) |
-| Right mouse drag (vertical) / wheel | Dolly along the view axis (fly toward/away from the focused point) |
-| Middle mouse drag | Pan the camera along its right/up axes |
+## Performance and limits
 
-The camera is a free-fly camera: `cam.position` is independent state, translated by WASD / middle-pan / scroll-dolly, while left-drag only changes the view orientation (`theta`/`phi`) — the camera turns in place and never moves. `cam.lookAt` is a derived reference point `zoom` units ahead along the view axis (bookkeeping only; the renderer uses position/view/up/right). Fly speed scales with `zoom` (the reference distance).
+- The BVH is built on the CPU with exhaustive three-axis SAH sorting, then flattened into leaf-contiguous triangle arrays. It is one-time work, but can dominate startup on high-poly assets.
+- Device texture data is one concatenated RGB buffer plus image descriptors; the one-time host-to-device copy can be substantial for large texture sets.
+- CUDA error checks synchronize only in Debug and RelWithDebInfo. Release is asynchronous and is the appropriate configuration for timing comparisons.
+- CUDA uses `-use_fast_math`; last-bit image comparisons require matching compiler flags. `KernelConfig` obtains device properties through its cached `DeviceInfo` singleton.
 
-## Open TODO Items
+## Known scope limits
 
-- **Motion blur** — jitter rays "in time" (`src/kernels/ray_generation.cuh`).
-- **Wire `tests/` into the root CMake build.**
+- Occlusion is loaded and carried through the surface binding, but is not sampled by current shading.
+- Emissive maps are used; glTF alpha, transparent traversal, skinning, morphs, Draco, motion blur and extra UV/color sets are not implemented.
+- BVH maximum depth and leaf size are compile-time constants in `constants.h`.
+- Root CMake does not include the standalone `tests/` projects.
 
-## Dependencies
+## Change checklist
 
-CUDA (with Thrust), OpenGL, GLFW, GLEW, GLM (header-only, in `external/`), nlohmann/json (`external/include/json.hpp`), stb (`src/stb.cpp`), tinyobjloader (`external/include/tiny_obj_loader.h`), cgltf (`external/include/cgltf.h`). All vendored headers are `#include`d with angle brackets (`<glm/…>`, `<json.hpp>`, `<stb_image.h>`, `<cgltf.h>`, `<tiny_obj_loader.h>`) and resolve via the `external/include` include path; project-local headers under `src/` use quotes. Compiled with C++17 / CUDA 17 standard, `CUDA_SEPARABLE_COMPILATION ON`, targeting `native` architecture.
+For a propagated renderer change, follow the data through producer, transport, consumer and validation: loader/source layout -> BVH bake/device upload -> kernel/pipeline -> scene or focused test. Preserve `HitRecord`'s 20-byte GPU layout unless every consumer and its tests are intentionally updated. Do not claim a visual pass; give the user a scene command and the expected effect.
