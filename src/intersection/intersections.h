@@ -27,6 +27,24 @@ __host__ __device__ inline glm::vec3 getExactPointOnRay(Ray r, float t)
 }
 
 /**
+ * Moves a secondary-ray origin to the requested side of a surface.
+ *
+ * A fixed world-space epsilon can round back to the original float coordinate
+ * in large scenes.  Scaling each component by the hit-point magnitude keeps
+ * the offset representable while retaining the existing near-origin epsilon.
+ */
+__host__ __device__ inline glm::vec3 offsetRayOrigin(
+    const glm::vec3& point,
+    const glm::vec3& normal,
+    float side)
+{
+    const glm::vec3 magnitude = glm::max(glm::abs(point), glm::vec3(1.0f));
+    const glm::vec3 offset = glm::max(
+        glm::vec3(EPSILON), magnitude * RAY_ORIGIN_RELATIVE_EPSILON);
+    return point + normal * (side * offset);
+}
+
+/**
  * Maps two uniform random numbers in [0,1) to a point on the unit disk
  * using concentric mapping (Shirley's method), which preserves fractional
  * area for unbiased Monte Carlo integration over a circular aperture.

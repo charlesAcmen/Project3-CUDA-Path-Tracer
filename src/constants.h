@@ -13,6 +13,7 @@
 #define DEG_TO_RAD        (PI / 180.0f)   // degrees → radians (scene rotations, FOV)
 #define RAD_TO_DEG        (180.0f / PI)   // radians → degrees (FOV back-calc)
 #define EPSILON           0.00001f    // ray origin offset for self-intersection prevention
+#define RAY_ORIGIN_RELATIVE_EPSILON 2e-7f // scale-aware component offset; stays representable far from the origin
 #define RAY_EPSILON       1e-10f      // minimum ray–scene distance; rejects near-parallel / self-hit
 // Minimum squared length a refract() result must exceed to be a valid
 // direction.  Unit |d|² = 1.0; a NaN (TIR: sqrt of negative) compares

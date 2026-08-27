@@ -1,5 +1,7 @@
 #include "interactions/interactions.h"
 
+#include "intersection/intersections.h"
+
 #include "utils/utilities.h"
 
 #include "rng/rng.h"
@@ -617,7 +619,7 @@ static __host__ __device__ void scatterGgxSurface(
 
     pathSegment.throughput *= throughput;
     float offsetSign = glm::dot(scatterDir, shadingNormal) > 0.0f ? 1.0f : -1.0f;
-    pathSegment.ray.origin = intersect + shadingNormal * (EPSILON * offsetSign);
+    pathSegment.ray.origin = offsetRayOrigin(intersect, shadingNormal, offsetSign);
     pathSegment.ray.direction = scatterDir;
 }
 
@@ -678,7 +680,7 @@ static __host__ __device__ void scatterRefractive(
     {
         glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
         const float offsetSign = entering ? 1.0f : -1.0f;
-        pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
+        pathSegment.ray.origin = offsetRayOrigin(intersect, normal, offsetSign);
         pathSegment.ray.direction = reflectedDir;
         // Internal reflection / TIR happens inside the colored medium;
         // external Fresnel reflection off the outer boundary is achromatic (uncolored).
@@ -692,7 +694,7 @@ static __host__ __device__ void scatterRefractive(
         // !tir here ⇒ refractedDir is a finite unit vector; the offset
         // pushes to the far side of the surface.
         const float offsetSign = entering ? -1.0f : 1.0f;
-        pathSegment.ray.origin = intersect + normal * (EPSILON * offsetSign);
+        pathSegment.ray.origin = offsetRayOrigin(intersect, normal, offsetSign);
         pathSegment.ray.direction = refractedDir;
         // Light traverses into / out of the colored medium: apply transmission attenuation
         pathSegment.throughput *= m.color;
@@ -718,7 +720,7 @@ static __host__ __device__ void scatterDiffuse(
     //   offset along newDirection has almost zero normal component
     // - This causes the ray to start below the surface -> self-intersection -> shadow acne
     glm::vec3 newDirection = calculateRandomDirectionInHemisphere(shadingNormal, rng);
-    pathSegment.ray.origin = intersect + shadingNormal * EPSILON;
+    pathSegment.ray.origin = offsetRayOrigin(intersect, shadingNormal, 1.0f);
     // Apply diffuse material color (energy attenuation)
     // multiplier = fr * cos theta/pdf(omega)
     // where pdf(omega) = cos theta / PI
