@@ -797,7 +797,69 @@ bool testAabbEntry()
     return true;
 }
 
-// Test 6: empty scene.  No triangles → no tree; traversal with null buffers
+// Test 6: a near child is already AABB-tested by its parent, while a popped
+// far child must be retested after the near subtree may have tightened t.
+bool testKnownNearChildTraversal()
+{
+    auto makeLeaf = [](const TrianglePos& tri, int offset) {
+        BvhNode leaf{};
+        leaf.bounds.expand(tri);
+        leaf.left = offset;
+        leaf.right = 1;
+        leaf.isLeaf = true;
+        return leaf;
+    };
+
+    // Both child AABBs hit; the near triangle at z=2 must win and prune the
+    // far child at z=5 when it is popped with the reduced far plane.
+    {
+        const TrianglePos nearTri{ {-1, -1, 2}, {1, -1, 2}, {0, 1, 2} };
+        const TrianglePos farTri { {-1, -1, 5}, {1, -1, 5}, {0, 1, 5} };
+        BvhNode nodes[3]{};
+        nodes[1] = makeLeaf(nearTri, 0);
+        nodes[2] = makeLeaf(farTri, 1);
+        nodes[0].bounds.expand(nodes[1].bounds);
+        nodes[0].bounds.expand(nodes[2].bounds);
+        nodes[0].left = 1;
+        nodes[0].right = 2;
+
+        const TrianglePos tris[] = { nearTri, farTri };
+        const BvhHit hit = traverseBvhClosest(
+            Ray{ glm::vec3(0, 0, 0), glm::vec3(0, 0, 1) }, nodes, tris, LARGE_T);
+        if (!hit.hit || hit.triIndex != 0 || fabsf(hit.t - 2.0f) > 1e-4f)
+        {
+            printf("FAIL known-near: expected near triangle at t=2\\n");
+            return false;
+        }
+    }
+
+    // The near leaf's box hits but its triangle does not. The far leaf must
+    // still be popped and traversed, producing its triangle at z=5.
+    {
+        const TrianglePos nearMiss{ {0, 0, 2}, {2, 0, 2}, {0, 2, 2} };
+        const TrianglePos farTri  { {0.5f, 0.5f, 5}, {2.5f, 0.5f, 5}, {1.5f, 2.5f, 5} };
+        BvhNode nodes[3]{};
+        nodes[1] = makeLeaf(nearMiss, 0);
+        nodes[2] = makeLeaf(farTri, 1);
+        nodes[0].bounds.expand(nodes[1].bounds);
+        nodes[0].bounds.expand(nodes[2].bounds);
+        nodes[0].left = 1;
+        nodes[0].right = 2;
+
+        const TrianglePos tris[] = { nearMiss, farTri };
+        const BvhHit hit = traverseBvhClosest(
+            Ray{ glm::vec3(1.5f, 1.5f, 0), glm::vec3(0, 0, 1) }, nodes, tris, LARGE_T);
+        if (!hit.hit || hit.triIndex != 1 || fabsf(hit.t - 5.0f) > 1e-4f)
+        {
+            printf("FAIL known-near: expected far triangle after near-leaf miss\\n");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Test 7: empty scene.  No triangles → no tree; traversal with null buffers
 // must miss without touching any memory.
 bool testEmptyScene()
 {
@@ -833,6 +895,7 @@ int main()
     if (!testWorldBake()) failures++;
     if (!testMultiGeomBake()) failures++;
     if (!testAabbEntry()) failures++;
+    if (!testKnownNearChildTraversal()) failures++;
     if (!testEmptyScene()) failures++;
 
     // Traversal + structure across mesh kinds and transforms.
