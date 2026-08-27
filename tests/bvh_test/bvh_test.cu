@@ -21,7 +21,9 @@
 //      scan on the baked array — hit flag, t, normal, materialId.
 //   4. intersectRayAABBEntry entry-distance correctness + the near-first
 //      ordering metric (two boxes, both ray directions, inside-box).
-//   5. Empty scene: no nodes, traversal misses.
+//   5. Scale-aware secondary-ray origin offsets remain representable at large
+//      world coordinates while preserving the near-origin offset.
+//   6. Empty scene: no nodes, traversal misses.
 //
 // Host-only: no kernels launched, no GPU required.
 // ====================================================================
@@ -34,6 +36,7 @@
 #include "bvh/bvh.h"             // production: AABB, BvhNode, BvhBuffers, traverseBvhClosest
 #include "bvh/aabb.h"            // production: intersectRayAABBEntry
 #include "constants.h"
+#include "intersection/intersections.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -859,7 +862,27 @@ bool testKnownNearChildTraversal()
     return true;
 }
 
-// Test 7: empty scene.  No triangles → no tree; traversal with null buffers
+// Test 7: a fixed EPSILON does not change 1000.0f, but the production
+// scale-aware offset must move both sides of a large-coordinate surface.
+bool testScaleAwareRayOffset()
+{
+    const glm::vec3 point(1000.0f, -600.0f, 0.25f);
+    const glm::vec3 normal(1.0f, 0.0f, 0.0f);
+    const glm::vec3 positive = offsetRayOrigin(point, normal, 1.0f);
+    const glm::vec3 negative = offsetRayOrigin(point, normal, -1.0f);
+    const glm::vec3 nearOrigin = offsetRayOrigin(glm::vec3(0.0f), normal, 1.0f);
+
+    if (!(positive.x > point.x) || !(negative.x < point.x) ||
+        !(nearOrigin.x >= EPSILON))
+    {
+        printf("[FAIL] scale-aware ray origin offset\n");
+        return false;
+    }
+    printf("[PASS] scale-aware ray origin offset\n");
+    return true;
+}
+
+// Test 8: empty scene.  No triangles → no tree; traversal with null buffers
 // must miss without touching any memory.
 bool testEmptyScene()
 {
@@ -896,6 +919,7 @@ int main()
     if (!testMultiGeomBake()) failures++;
     if (!testAabbEntry()) failures++;
     if (!testKnownNearChildTraversal()) failures++;
+    if (!testScaleAwareRayOffset()) failures++;
     if (!testEmptyScene()) failures++;
 
     // Traversal + structure across mesh kinds and transforms.
