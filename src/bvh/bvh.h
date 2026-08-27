@@ -115,21 +115,26 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
     int stack[kMaxBvhStackDepth];
     int sp = 0;                             // stack pointer
     int nodeIndex = 0;                      // root is always node 0
+    bool nodeBoundsKnownHit = false;
 
     // "current" node is examined before pushing; a LIFO pop resumes the
-    // loop after a subtree finishes.
+    // loop after a subtree finishes. A near child was just AABB-tested by
+    // its parent, so it enters with nodeBoundsKnownHit set. A popped far
+    // child must be tested again because a nearer hit may have reduced t.
     while (true)
     {
         const BvhNode& node = nodes[nodeIndex];
 
         // Near side: RAY_EPSILON, far side: current best (result.t).  Skip
         // the node and its subtree if the ray misses the AABB in that window.
-        if (!intersectRayAABB(objRay.origin, invDir, node.bounds, RAY_EPSILON, result.t))
+        if (!nodeBoundsKnownHit &&
+            !intersectRayAABB(objRay.origin, invDir, node.bounds, RAY_EPSILON, result.t))
         {
             if (sp == 0) break;
             nodeIndex = stack[--sp];        // pop
             continue;
         }
+        nodeBoundsKnownHit = false;
 
         if (node.isLeaf)
         {
@@ -183,14 +188,17 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
                 if (sp < kMaxBvhStackDepth - 1) stack[sp++] = node.childL();
                 nodeIndex = node.childR();
             }
+            nodeBoundsKnownHit = true;
         }
         else if (hitL)
         {
             nodeIndex = node.childL();
+            nodeBoundsKnownHit = true;
         }
         else if (hitR)
         {
             nodeIndex = node.childR();
+            nodeBoundsKnownHit = true;
         }
         else
         {
