@@ -3,7 +3,7 @@
 // ====================================================================
 // Application State
 //
-// Private state for the single-window executable.  Rendering data remains
+// Private application state for the single-window executable.  Rendering data remains
 // owned by Scene / pathtrace; this only groups the former main.cpp globals
 // that coordinate input, UI, CUDA-GL interop, and the application loop.
 // ====================================================================

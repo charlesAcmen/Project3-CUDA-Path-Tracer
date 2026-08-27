@@ -1,10 +1,10 @@
-#include "app_loop.h"
+#include "app/app_loop.h"
 
-#include "camera_controller.h"
+#include "app/camera_controller.h"
 #include "image.h"
 #include "pathtrace.h"
 #include "profiler/profiler.h"
-#include "render_ui.h"
+#include "app/render_ui.h"
 
 #include "ImGui/imgui_impl_glfw.h"
 #include "ImGui/imgui_impl_opengl3.h"

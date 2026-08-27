@@ -8,6 +8,6 @@
 // state explicitly instead of reading globals from main.cpp.
 // ====================================================================
 
-#include "app_state.h"
+#include "app/app_state.h"
 
 bool init(AppState& app);

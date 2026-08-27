@@ -1,10 +1,10 @@
-#include "app_loop.h"
-#include "app_state.h"
-#include "camera_controller.h"
+#include "app/app_loop.h"
+#include "app/app_state.h"
+#include "app/camera_controller.h"
 #include "config/config.h"
 #include "scene/scene_loader.h"
 #include "utils/logger.h"
-#include "window_setup.h"
+#include "app/window_setup.h"
 
 #include <cstdlib>
 #include <ctime>

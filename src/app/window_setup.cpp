@@ -1,6 +1,6 @@
-#include "window_setup.h"
+#include "app/window_setup.h"
 
-#include "camera_controller.h"
+#include "app/camera_controller.h"
 #include "glslUtility.hpp"
 
 #include "ImGui/imgui_impl_glfw.h"

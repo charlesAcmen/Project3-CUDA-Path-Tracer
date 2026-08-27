@@ -1,6 +1,6 @@
-#include "render_ui.h"
+#include "app/render_ui.h"
 
-#include "camera_controller.h"
+#include "app/camera_controller.h"
 #include "config/config.h"
 #include "pathtrace.h"
 #include "profiler/profiler.h"

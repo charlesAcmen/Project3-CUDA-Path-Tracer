@@ -1,6 +1,6 @@
-#include "camera_controller.h"
+#include "app/camera_controller.h"
 
-#include "app_loop.h"
+#include "app/app_loop.h"
 #include "constants.h"
 
 #include <glm/glm.hpp>

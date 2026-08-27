@@ -1,6 +1,6 @@
 #pragma once
 
-#include "app_state.h"
+#include "app/app_state.h"
 
 void initializeCameraController(AppState& app);
 void updateCameraMovement(AppState& app, float dt);

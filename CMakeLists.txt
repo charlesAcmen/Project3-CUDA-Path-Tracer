@@ -71,11 +71,11 @@ include_directories(${GLM_INCLUDE_DIRS})
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
 set(headers
-    src/app_loop.h
-    src/app_state.h
+    src/app/app_loop.h
+    src/app/app_state.h
     src/bvh/aabb.h
     src/bvh/bvh.h
-    src/camera_controller.h
+    src/app/camera_controller.h
     src/config/config.h
     src/kernels/bvh_traversal.cuh
     src/image.h
@@ -85,19 +85,19 @@ set(headers
     src/pathtrace.h
     src/profiler/profiler.h
     src/rng/rng.h
-    src/render_ui.h
+    src/app/render_ui.h
     src/scene/loader_internal.h
     src/scene/scene.h
     src/scene/scene_loader.h
     src/sceneStructs.h
     src/utils/utilities.h
-    src/window_setup.h
+    src/app/window_setup.h
 )
 
 set(sources
-    src/app_loop.cpp
+    src/app/app_loop.cpp
     src/bvh/bvh.cu
-    src/camera_controller.cpp
+    src/app/camera_controller.cpp
     src/main.cpp
     src/stb.cpp
     src/config/config.cpp
@@ -105,7 +105,7 @@ set(sources
     src/glslUtility.cpp
     src/pathtrace.cu
     src/profiler/profiler.cu
-    src/render_ui.cpp
+    src/app/render_ui.cpp
     src/interactions/interactions.cu
     src/kernels/ray_generation.cu
     src/kernels/bvh_traversal.cu
@@ -117,7 +117,7 @@ set(sources
     src/scene/scene_loader.cpp
     src/scene/texture_loader.cpp
     src/utils/utilities.cu
-    src/window_setup.cpp
+    src/app/window_setup.cpp
 )
 list(SORT headers)
 list(SORT sources)
