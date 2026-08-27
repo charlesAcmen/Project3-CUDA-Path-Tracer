@@ -1,0 +1,37 @@
+{
+  "Materials": {
+    "wall_white": {
+      "TYPE": "Diffuse",
+      "RGB": [0.73, 0.73, 0.73]
+    },
+    "area_light": {
+      "TYPE": "Emitting",
+      "RGB": [1.0, 1.0, 1.0],
+      "EMITTANCE": 8.0
+    },
+    "CompareSheen": {
+      "TYPE": "PBR",
+      "RGB": [1.0, 1.0, 1.0]
+    }
+  },
+  "Objects": [
+    { "FILE": "box/floor.obj",       "MATERIAL": "wall_white", "TRANS": [-2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
+    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-2, 4, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-2, 0, 2],  "ROTAT": [0, 0, 0], "SCALE": [4, 4, 1] },
+    { "FILE": "box/left_red.obj",    "MATERIAL": "wall_white", "TRANS": [2, 0, -2],  "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "wall_white", "TRANS": [-2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
+    { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-0.75, 3.98, -0.75], "ROTAT": [0, 0, 0], "SCALE": [1.5, 1, 1.5] },
+    { "FILE": "Models/CompareSheen/glTF/CompareSheen.gltf", "MATERIAL": "CompareSheen", "TRANS": [0, 2, 0], "ROTAT": [0, 180, 0], "SCALE": [1, 1, 1] }
+  ],
+  "Camera": {
+    "RES": [1500, 1500],
+    "FOVY": 50,
+    "ITERATIONS": 5000,
+    "DEPTH": 8,
+    "RR_DEPTH": 3,
+    "FILE": "compare_sheen.png",
+    "EYE": [0, 2, -4.5],
+    "LOOKAT": [0, 2, 0],
+    "UP": [0, 1, 0]
+  }
+}

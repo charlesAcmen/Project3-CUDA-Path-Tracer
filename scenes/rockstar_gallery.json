@@ -1,0 +1,59 @@
+{
+  "Materials": {
+    "wall_white": {
+      "TYPE": "Diffuse",
+      "RGB": [0.73, 0.73, 0.73]
+    },
+    "wall_red": {
+      "TYPE": "Diffuse",
+      "RGB": [0.63, 0.065, 0.05]
+    },
+    "wall_green": {
+      "TYPE": "Diffuse",
+      "RGB": [0.14, 0.45, 0.091]
+    },
+    "area_light": {
+      "TYPE": "Emitting",
+      "RGB": [1.0, 1.0, 1.0],
+      "EMITTANCE": 10.0
+    },
+    "side_light": {
+      "TYPE": "Emitting",
+      "RGB": [1.0, 0.95, 0.9],
+      "EMITTANCE": 6.0
+    },
+    "rockstar_pbr": {
+      "TYPE": "PBR"
+    }
+  },
+  "Objects": [
+    { "FILE": "box/floor.obj",       "MATERIAL": "wall_white", "TRANS": [-500, 0, -150], "ROTAT": [0, 0, 0], "SCALE": [1000, 1, 300] },
+    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-300, 100, -50], "ROTAT": [0, 0, 0], "SCALE": [600, 1, 100] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-300, 0, 50], "ROTAT": [0, 0, 0], "SCALE": [600, 100, 1] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-300, 0, -140], "ROTAT": [0, 0, 0], "SCALE": [600, 100, 1] },
+    { "FILE": "box/left_red.obj",    "MATERIAL": "wall_red",   "TRANS": [300, 0, -50], "ROTAT": [0, 0, 0], "SCALE": [1, 100, 100] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "wall_green", "TRANS": [-300, 0, -50], "ROTAT": [0, 0, 0], "SCALE": [1, 100, 100] },
+    { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-250, 99.8, -20], "ROTAT": [0, 0, 0], "SCALE": [500, 1, 40] },
+    { "FILE": "box/left_red.obj",    "MATERIAL": "side_light", "TRANS": [299.8, 15, -40], "ROTAT": [0, 0, 0], "SCALE": [1, 70, 80] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "side_light", "TRANS": [-299.8, 15, -40], "ROTAT": [0, 0, 0], "SCALE": [1, 70, 80] },
+
+    { "FILE": "Models/ROCKSTAR/arthur_morgan__rdr2_3d_character/scene.gltf",                   "MATERIAL": "rockstar_pbr", "TRANS": [150, -90, -10], "ROTAT": [0, 0, 0], "SCALE": [2000,2000,2000] },
+    { "FILE": "Models/ROCKSTAR/carl_johnson_cj/scene.gltf",                                      "MATERIAL": "rockstar_pbr", "TRANS": [100, 2, -35], "ROTAT": [0, 180, 0], "SCALE": [20, 20, 20] },
+    { "FILE": "Models/ROCKSTAR/franklin_gta_5/scene.gltf",                                       "MATERIAL": "rockstar_pbr", "TRANS": [100, 25,-20], "ROTAT": [0, 0, 0], "SCALE": [15, 15, 15] },
+    { "FILE": "Models/ROCKSTAR/grand_theft_auto_vice_city_-_tommy_vercetti/scene.gltf",          "MATERIAL": "rockstar_pbr", "TRANS": [100, 25, 0], "ROTAT": [0, 180, 0], "SCALE": [20, 20, 20] },
+    { "FILE": "Models/ROCKSTAR/john_marston/scene.gltf",                                         "MATERIAL": "rockstar_pbr", "TRANS": [130, 2, -25], "ROTAT": [90, 0, 180], "SCALE": [50, 50, 50] },
+    { "FILE": "Models/ROCKSTAR/michael_de_santa_-_gta_v/scene.gltf",                             "MATERIAL": "rockstar_pbr", "TRANS": [130, 20, 0], "ROTAT": [0, 180, 0], "SCALE": [20, 20, 20] },
+    { "FILE": "Models/ROCKSTAR/trevor_gta_5/scene.gltf",                                         "MATERIAL": "rockstar_pbr", "TRANS": [160,25, 0], "ROTAT": [0, 180, 0], "SCALE": [20, 20, 20] }
+  ],
+  "Camera": {
+    "RES": [2560, 1440],
+    "FOVY": 40,
+    "ITERATIONS": 5000,
+    "DEPTH": 8,
+    "RR_DEPTH": 3,
+    "FILE": "rockstar_gallery.png",
+    "EYE": [159.6734, 43.3094, -96.7043],
+    "LOOKAT": [-94.1853, -167.3584, 520.6893],
+    "UP": [-0.1144, 0.9536, 0.2783]
+  }
+}

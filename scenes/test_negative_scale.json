@@ -1,0 +1,22 @@
+{
+  "Materials": {
+    "wall_white": { "TYPE": "Diffuse", "RGB": [0.73, 0.73, 0.73] },
+    "wall_red":   { "TYPE": "Diffuse", "RGB": [0.63, 0.065, 0.05] },
+    "wall_green": { "TYPE": "Diffuse", "RGB": [0.14, 0.45, 0.091] },
+    "area_light": { "TYPE": "Emitting", "RGB": [1.0, 1.0, 1.0], "EMITTANCE": 14.0 },
+    "test_model": { "TYPE": "PBR" }
+  },
+  "Objects": [
+    { "FILE": "box/floor.obj",       "MATERIAL": "wall_white", "TRANS": [-2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
+    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-2, 4, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-2, 0, 2],  "ROTAT": [0, 0, 0], "SCALE": [4, 4, 1] },
+    { "FILE": "box/left_red.obj",    "MATERIAL": "wall_red",   "TRANS": [2, 0, -2],  "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "wall_green", "TRANS": [-2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
+    { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-0.75, 3.98, -0.75], "ROTAT": [0, 0, 0], "SCALE": [1.5, 1, 1.5] },
+    { "FILE": "Models/NegativeScaleTest/glTF/NegativeScaleTest.gltf", "MATERIAL": "test_model", "TRANS": [0, 2.0, 0], "ROTAT": [0, 180, 0], "SCALE": [0.32, 0.32, 0.32] }
+  ],
+  "Camera": {
+    "RES": [1200, 1100], "FOVY": 48, "ITERATIONS": 3000, "DEPTH": 8, "RR_DEPTH": 3,
+    "FILE": "test_negative_scale.png", "EYE": [0, 2.0, -4.6], "LOOKAT": [0, 2.0, 0], "UP": [0, 1, 0]
+  }
+}

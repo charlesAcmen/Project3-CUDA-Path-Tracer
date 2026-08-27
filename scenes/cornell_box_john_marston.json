@@ -1,0 +1,52 @@
+{
+  "Materials": {
+    "wall_white": {
+      "TYPE": "Diffuse",
+      "RGB": [0.73, 0.73, 0.73]
+    },
+    "wall_red": {
+      "TYPE": "Diffuse",
+      "RGB": [0.63, 0.065, 0.05]
+    },
+    "wall_green": {
+      "TYPE": "Diffuse",
+      "RGB": [0.14, 0.45, 0.091]
+    },
+    "area_light": {
+      "TYPE": "Emitting",
+      "RGB": [1.0, 1.0, 1.0],
+      "EMITTANCE": 15.0
+    },
+    "side_light": {
+      "TYPE": "Emitting",
+      "RGB": [1.0, 0.95, 0.9],
+      "EMITTANCE": 8.0
+    },
+    "john_pbr": {
+      "TYPE": "PBR"
+    }
+  },
+  "Objects": [
+    { "FILE": "box/floor.obj",       "MATERIAL": "wall_white", "TRANS": [-2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
+    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-2, 4, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-2, 0, 2],  "ROTAT": [0, 0, 0], "SCALE": [4, 4, 1] },
+    { "FILE": "box/left_red.obj",    "MATERIAL": "wall_red",   "TRANS": [2, 0, -2],  "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "wall_green", "TRANS": [-2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
+    { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-0.75, 3.98, -0.75], "ROTAT": [0, 0, 0], "SCALE": [1.5, 1, 1.5] },
+    { "FILE": "box/left_red.obj",    "MATERIAL": "side_light", "TRANS": [1.95, 0.75, -1.5], "ROTAT": [0, 0, 0], "SCALE": [1, 2.5, 3] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "side_light", "TRANS": [-1.95, 0.75, -1.5], "ROTAT": [0, 0, 0], "SCALE": [1, 2.5, 3] },
+
+    { "FILE": "Models/ROCKSTAR/john_marston/scene.gltf", "MATERIAL": "john_pbr", "TRANS": [0, 0, 0], "ROTAT": [90, 0, 180], "SCALE": [4, 4, 4] }
+  ],
+  "Camera": {
+    "RES": [1500, 1500],
+    "FOVY": 50,
+    "ITERATIONS": 5000,
+    "DEPTH": 8,
+    "RR_DEPTH": 3,
+    "FILE": "cornell_box_john_marston.png",
+    "EYE": [110.0626, 41.4017, -87.4066],
+    "LOOKAT": [308.0822, -60.4155, 576.2360],
+    "UP": [0.0416, 0.9894, 0.1394]
+  }
+}

@@ -1,136 +1,189 @@
 # CUDA Path Tracer
 
-**University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 3**
+University of Pennsylvania CIS 565 Project 3 CUDA path tracer. The renderer is
+a progressive CUDA Monte Carlo path tracer with CUDA–OpenGL interop and a live
+ImGui overlay: each displayed frame adds one sample per pixel.
 
-A CUDA-based Monte Carlo path tracer with CUDA–OpenGL interop and a live ImGui overlay. It renders globally illuminated scenes progressively, one sample per pixel per frame.
+This README is a source-level implementation inventory. It distinguishes code
+that exists from requirements that still need user-supplied render images or
+performance measurements; it does not claim an unverified visual or benchmark
+result.
 
-All geometry is **triangulated at load time** — there are no sphere/cube primitives. Every object in a scene is a mesh loaded from `.obj` (tinyobjloader) or `.gltf` / `.glb` (cgltf), with smooth per-vertex normals. glTF scene-graph node transforms (TRS/matrix) are applied at load, so multi-part models scattered across nodes assemble automatically.
+## What is implemented
 
-## Features
+All scene geometry is triangulated at load time. The renderer loads OBJ through
+tinyobjloader and glTF 2.0 / GLB through cgltf; it walks the glTF scene graph
+and applies accumulated node transforms, so multi-node assets assemble in their
+authored layout. The runtime uses one world-space BVH over the baked triangles,
+not a per-object intersection loop.
 
-- **Mesh-only rendering** — OBJ + glTF/GLB loading, glTF scene-graph transforms (multi-part models auto-assemble), double-sided Möller–Trumbore intersection, interpolated vertex normals
-- **BVH acceleration** — single world-space BVH over all baked triangles, near-child-first closest-hit traversal
-- **Materials** — diffuse, emissive, specular (perfect mirror + glossy Phong via `ROUGHNESS`), refractive (glass, IOR, accurate Fresnel), Russian roulette path termination
-- **Stream compaction** — 4 methods (off / global-mem scan / Thrust `copy_if` / shared-mem scan), toggleable at runtime
-- **Material sorting** — Thrust `sort_by_key` + gather so same-material paths are contiguous, toggleable
-- **RNG** — LCG (default) and true nested Owen-scrambled Halton (`--rng=1`) behind one `RngState::next(dim)` API
-- **Camera** — per-pixel AA jitter and thin-lens depth-of-field
-- **Post-processing** — HDR bloom, ACES filmic + sRGB tone mapping, chromatic aberration, vignette
-- **Profiler** — per-kernel `cudaEvent` / CPU `chrono` timing with CSV export and companion Python plot scripts
-- **ImGui overlay** — live toggles for compact method, sorting, RNG, bloom, and more
+### Project requirement inventory
 
-## Build & run
+| Instruction feature | Source status | Notes |
+|---|---|---|
+| Cosine-weighted diffuse BSDF | Implemented | `calculateRandomDirectionInHemisphere` and `scatterRay` sample a cosine-weighted hemisphere. |
+| Material-path sorting | Implemented and runtime-toggleable | `--sort=1` uses Thrust `sort_by_key` plus gathers to group active paths by resolved material before shading. |
+| Stochastic anti-aliasing | Implemented | Primary rays jitter sub-pixel positions each iteration. |
+| Refraction with Fresnel | Implemented | Uses `glm::refract`, total-internal-reflection handling, and accurate dielectric Fresnel roulette. |
+| Thin-lens depth of field | Implemented | `LENS_RADIUS` and `FOCAL_DISTANCE` drive aperture sampling and focal-plane convergence. |
+| OBJ loading | Implemented | Triangle loading plus companion MTL color, bump/normal, and emissive maps. |
+| glTF / GLB loading | Implemented | POSITION, NORMAL, TEXCOORD_0, COLOR_0, node transforms, external images, and embedded bufferView images. |
+| Shared-memory stream compaction | Implemented and runtime-toggleable | The shared-memory hierarchical scan is `--compact=3`; global scan and Thrust variants are also retained. |
+| Russian roulette termination | Implemented | After `RR_DEPTH`, survival probability is derived from path throughput and clamped to configured bounds. |
+| Hierarchical acceleration structure | Implemented | CPU-built, GPU-traversed world-space BVH with iterative closest-hit traversal. It is always enabled; there is no linear-intersection fallback toggle for an A/B comparison. |
+| Better random sequence | Implemented | LCG and scrambled Halton modes share the `RngState::next(dim)` interface. |
+| Final-ray post-processing | Implemented | Bloom in linear HDR, then ACES/sRGB, optional chromatic aberration, vignette, and PBO output. |
+| Metallic-roughness PBR | Implemented extension | GGX/Smith/Fresnel surface with glTF ORM factors and tangent-space normal maps. |
+
+### Partial or unsupported instruction features
+
+| Feature | Current boundary |
+|---|---|
+| Texture mapping and bump mapping | File-loaded base-color, normal, ORM, and emissive textures are implemented. The instruction's required basic procedural texture and a file-vs-procedural performance comparison are not implemented. |
+| Procedural shapes and textures | `scenes/models/gen_shapes.py` provides multiple generated mesh shapes. There is no procedural texture shader, so this is not presented as the complete combined feature. |
+| Direct lighting / next-event estimation | Not implemented. Emissive surfaces contribute only when reached by a path; `docs/direct-lighting-design.md` is a proposal, not current renderer behavior. |
+| Motion blur | Not implemented. Primary-ray code explicitly reserves it as future time jitter. |
+| Subsurface scattering, denoising, CUDA–Vulkan interop | Not implemented. |
+| Restartable path tracing | Not implemented as persistent save/resume. `--save-at` saves images only; it does not serialize accumulation or BVH state. |
+| glTF alpha, skinning, morph targets, Draco, extra UV/color sets | Not implemented. |
+| Occlusion texture | Loaded and carried in the surface binding, but not sampled by shading. |
+
+## Rendering pipeline
+
+For each iteration:
+
+1. `generateRayFromCamera` creates one primary path per pixel with AA jitter
+   and optional thin-lens sampling.
+2. Every active path traverses the single world-space BVH. Optional material
+   sorting then groups path and hit buffers before `shadeMaterial` evaluates
+   the BSDF and scatters the next ray.
+3. Terminated paths are accumulated. Optional stream compaction gathers their
+   radiance before removing them from the active queue.
+4. The display pipeline averages HDR radiance, optionally composites bloom,
+   applies ACES filmic tone mapping and sRGB transfer, then optional chromatic
+   aberration and vignette before writing the OpenGL PBO.
+
+`pathtraceCopyDisplayToHost()` reads back the post-processed display buffer, so
+saved PNGs match the on-screen preview rather than the raw HDR sum.
+
+## Materials and textures
+
+JSON materials select the BSDF: `Diffuse`, `Emitting`, `Specular`, `PBR`, or
+`Refractive`.
+
+- `Diffuse` uses cosine-weighted Lambert scattering.
+- `Specular` is the chrome-like reflective case of the unified GGX path;
+  `ROUGHNESS` controls its lobe. It is not the older Phong implementation.
+- `PBR` uses metallic-roughness GGX. ORM texture channels are G = roughness
+  and B = metallic, multiplied by their glTF factors.
+- `Refractive` uses the material `IOR` (default 1.5), Fresnel roulette, and
+  winding-aware entry/exit classification.
+- `Emitting` terminates after adding its radiance. A nonzero glTF/MTL emissive
+  binding on another BSDF is additive auto-glow, so the path continues.
+
+Texture ownership is asset-driven: JSON scene materials do not provide a
+separate `TEXTURE` or UV-scale override. glTF contributes base-color, normal,
+metallic-roughness, occlusion, and emissive slots; OBJ MTL contributes
+`map_Kd`, `map_Bump` / `map_bump`, and `map_Ke`. Color maps decode from sRGB to
+linear values; normal, ORM, and occlusion maps retain raw linear byte values.
+
+## Build and run
 
 ### Windows / Visual Studio
 
 ```powershell
 cmake -B build
 cmake --build build --config Release
-```
-
-Then run with a scene file:
-
-```powershell
-build\bin\Release\cis565_path_tracer.exe scenes\cornell.json
+build\bin\cis565_path_tracer.exe scenes\cornell_box.json
 ```
 
 ### Linux / WSL
 
 ```bash
-make
-# or
 make Release
+./build/bin/cis565_path_tracer scenes/cornell_box.json
 ```
 
-```bash
-./build/bin/cis565_path_tracer scenes/cornell.json
-```
+The standalone tests under `tests/` are not included by the root CMake target.
+Generate and build each test project separately when validating its subsystem.
 
 ## Runtime configuration
 
-Settings are resolved with three-layer priority **CLI flags > `config.local.json` > code defaults**, handled by `src/config/` through the `appConfig()` singleton.
-
-| Flag | Meaning |
-|------|---------|
-| `--compact=N` | Compaction: `0` off, `1` global-mem scan, `2` Thrust `copy_if`, `3` shared-mem scan (default) |
-| `--sort=N` | Material sorting `0/1` (default off) |
-| `--rng=N` | `0` LCG (default), `1` scrambled Halton |
-| `--benchmark` | Enable profiler CSV output to `profiler_output/<scene>_<timestamp>/` |
-| `--warmup=N` | Profiler warmup iterations (default 3) |
-| `--verbose` | Print per-bounce path counts to the console |
-| `--save` / `--save-at=N1,N2,...` | Save final / checkpoint images |
-| `--config=PATH` | Load a config JSON (default `config.local.json` in CWD) |
-| `-h`, `--help` | Help text |
-
-Most settings can also be toggled live in the ImGui overlay; those mutate the same `g_opts` singleton.
-
-## Project structure
+Configuration priority is:
 
 ```text
-src/
-├── main.cpp                  # GLFW/GL window, camera, ImGui, render loop → pathtrace()
-├── pathtrace.cu / .h         # GPU pipeline + runtime getters/setters
-├── config/                   # AppConfig singleton, JSON + CLI merge
-├── scene/                    # scene container + scene_loader (OBJ via tinyobjloader, glTF/GLB via cgltf)
-├── kernels/                  # __global__ kernels: ray_generation, bvh_traversal, shading, accumulation
-├── pipeline/                 # host-side orchestration: sort, compact, postprocess dispatch
-├── postprocess/              # bloom, tonemap (ACES + sRGB), chromatic_aberration, vignette
-├── interactions/             # scatterRay, Fresnel (Schlick/Accurate), hemisphere/Phong sampling
-├── intersection/             # triangle.h (Möller–Trumbore), ray utils
-├── rng/                      # RngState: LCG + scrambled Halton
-├── profiler/                 # cudaEvent/chrono timers, CSV export
-├── stream_compaction/        # global-scan + shared-mem hierarchical-scan compaction
-├── utils/                    # utilities, logger
-├── ImGui/                    # Dear ImGui source
-└── json.hpp                  # nlohmann/json (header-only)
+CLI flags > explicitly selected --config file > config.local.json > code defaults
 ```
 
-Other folders:
+| Flag | Meaning |
+|---|---|
+| `--compact=N` | `0` off, `1` global-memory scan, `2` Thrust `copy_if`, `3` shared-memory scan (default) |
+| `--sort=N` | Material sorting; nonzero enables it (default off) |
+| `--rng=N` | `0` LCG (default), `1` scrambled Halton |
+| `--benchmark`, `--warmup=N`, `--verbose` | Enable profiler CSV output, choose warm-up iterations, print per-bounce counts |
+| `--save`, `--save-at=N1,N2,...` | Save the final image or checkpoint images |
+| `--config=PATH`, `-h`, `--help` | Select configuration, show help |
 
-- `scenes/` — scene JSON files (cornell, cornellRefra, cornellGlossy, cornell_shapes, cornell_inv, john_marston, …)
-- `scenes/models/` — mesh assets; `gen_shapes.py` regenerates the procedural shapes, plus `glTF-Sample-Assets/` for downloaded glTF models
-- `docs/` — design notes, benchmarking guide, profiler output structure
-- `tests/` — standalone loader/RNG/config/refraction tests (not wired into the root build)
-- `scripts/` — benchmark runner + plot scripts
-
-## Scenes & models
-
-Scenes are JSON files with `Materials`, `Camera`, and `Objects` sections. Objects are meshes placed by `TRANS` / `ROTAT` / `SCALE`:
-
-```json
-{ "TYPE":"mesh", "MATERIAL":"glass", "FILE":"models/sphere.gltf",
-  "TRANS":[2.0,0.7,-1.8], "ROTAT":[0,0,0], "SCALE":[0.7,0.7,0.7] }
-```
-
-- `scenes/models/gen_shapes.py` generates sphere / cylinder / cone / torus / capsule as both `.gltf` and `.glb`, plus `*_inv` twins (flipped normals + winding — the glTF equivalent of `sphere_inv.obj`).
-- **Winding / normals matter.** The renderer trusts the model's winding and normal direction. Opaque materials orient the normal toward the ray, but refraction reads its sign to classify enter vs exit — an inward-wound glass mesh renders as inside-out glass (Fresnel reflections, no lensing/caustics). Use outward-wound meshes for solid glass.
-- **glTF node transforms are applied.** The scene graph is walked and each node's accumulated TRS/matrix transform places its mesh, so multi-part models assemble exactly as the file specifies. (Caveat: some Sketchfab/asset exports bake the world-space transform into the vertices **and** carry a redundant node matrix — applying both double-transforms the model. For such files, zero out the redundant node matrices or adjust the scene `SCALE`.)
+Bloom, chromatic aberration, vignette, compaction, sorting, and RNG are also
+available through ImGui. Camera and the relevant live renderer setting changes
+restart accumulation.
 
 ## Controls
 
-| Key | Action |
-|-----|--------|
-| Esc | Save image and exit |
-| P   | Save image |
-| R   | Re-center camera to original position + orientation |
-| W / A / S / D | Fly forward / left / backward / right along camera axes |
-| Space / Shift | Fly up / down along camera up |
-| Left mouse drag | Rotate camera **in place** (yaw/pitch; position unchanged) |
-| Right mouse drag (vertical) / wheel | Dolly along the view axis (fly toward/away from the focused point) |
-| Middle mouse drag | Pan the camera along its right/up axes |
+| Input | Action |
+|---|---|
+| `Esc` | Save image and exit |
+| `P` | Save image |
+| `R` | Restore loaded position, orientation, and reference distance |
+| `W` / `A` / `S` / `D` | Fly forward / left / backward / right on camera axes |
+| `Space` / `Left Shift` | Fly up / down |
+| Left drag | Rotate in place |
+| Right drag (vertical) or wheel | Dolly along the viewing axis |
+| Middle drag | Pan in the camera image plane |
 
-The camera is a free-fly camera: `cam.position` is independent state, translated by WASD / middle-pan / scroll-dolly, while left-drag only changes the view orientation — the camera turns in place and never moves.
+The camera is free-fly: `cam.position` is authoritative. `lookAt` is a derived
+reference point at the current zoom distance along the view direction.
 
-## Documentation
+## Source layout
 
-- `docs/benchmarking-guide.md` — profiler usage, experiment recipes, CSV formats
-- `docs/OUTPUT_STRUCTURE.md` — profiler output layout
-- `docs/bvh-design.md` — implemented BVH acceleration design
-- `docs/direct-lighting-design.md` — planned next-event estimation / direct lighting
-- `docs/bloom-design.md`, `docs/postprocess-effects-design.md`, `docs/rng-design.md` — implemented feature designs
+```text
+src/
+├── main.cpp                  # startup, configuration, scene loading, loop assembly
+├── app/                      # AppState, window setup, input, ImGui, frame loop
+├── pathtrace.cu / .h         # GPU resource lifetime and path-tracing pipeline orchestration
+├── sceneStructs.h            # shared CPU/GPU layouts and runtime enums
+├── config/                   # CLI + JSON merge and AppConfig singleton
+├── scene/                    # JSON, OBJ, glTF/GLB, texture loading
+├── bvh/                      # world-space BVH construction, flattening, traversal helper
+├── kernels/                  # ray generation, BVH traversal, shading, accumulation
+├── interactions/             # texture sampling, GGX, diffuse and refractive scattering
+├── pipeline/                 # optional sort, compaction, post-process dispatch
+├── postprocess/              # bloom, tone map, chromatic aberration, vignette kernels
+├── rng/                      # LCG and scrambled Halton RNG
+├── profiler/                 # GPU/CPU phase timing and CSV export
+└── stream_compaction/        # global and shared-memory compaction implementations
+```
 
-## Notes for contributors
+## Validation and submission evidence
 
-- No test suite in the main build — validation is visual inspection of the rendered output. Standalone tests live under `tests/` (`bvh_test`, `loader_test`, `config_test`, `rng_test`, `refraction_test`), each a separate CMake project.
-- `-use_fast_math` is enabled; renders differ from a precise-math build in the last few bits.
-- Intersection is a single world-space BVH closest-hit traversal (`bvhTraverse`) — no per-mesh loop or ray transform (see `docs/bvh-design.md`).
+The project instructions require render images and measured analysis for each
+claimed optional feature. Add only user-validated evidence here:
+
+- before/after images for visual features;
+- profiler CSV or chart comparisons for sorting, compaction, Russian roulette,
+  and BVH claims;
+- open versus closed-scene path-survival and compaction comparisons;
+- file-texture versus procedural-texture comparison only after a procedural
+  texture implementation exists.
+
+The built-in profiler writes CSV files under
+`profiler_output/<scene>_<timestamp>/` when `--benchmark` is enabled. See
+`docs/benchmarking-guide.md` for experiment recipes and CSV fields.
+
+## References
+
+- [Project instructions](INSTRUCTION.md)
+- [PBRT v4](https://pbr-book.org/4ed/contents)
+- [PBRT v3](https://www.pbr-book.org/3ed-2018/contents)
+- [GPU Gems 3, Chapter 39: Parallel Prefix Sum](https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda)
+- [Antialiasing and Raytracing — Paul Bourke](https://paulbourke.net/miscellaneous/raytracing/)

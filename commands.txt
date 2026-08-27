@@ -23,3 +23,87 @@ https://192.168.1.1/
 # 新场景指令 (2026-08-17)
 .\build\bin\Release\cis565_path_tracer.exe scenes/cornell_box.json
 .\build\bin\Release\cis565_path_tracer.exe scenes/cornell_box_ABeautifulGame.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/rockstar_gallery.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_box_john_marston.json
+.\build\bin\Release\cis565_path_tracer.exe scenes/damaged_helmet.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\arthur_preview.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\arthur_open_preview.json
+# DamagedHelmet 法线贴图 A/B 对比 (2026-08-17)
+# 1) 先用现代码跑上面这条 damaged_helmet 指令 → 头盔表面光滑、只有 albedo 颜色，无划痕/锈蚀凹凸
+# 2) normal map 实现后重跑同一条指令 → 金属上划痕、钣金缝、锈斑的凹凸细节应明显可见
+
+# 注意：Khronos Compare* 资产的 logo 默认朝向 +z（模板相机在 -z → 背对相机朝后墙）。
+# 两球带 logo 的资产统一 ROTAT [0,180,0] 翻到相机侧且不颠倒（代价：左右球互换，见各场景描述）。
+# 传输族/毛发/AO 资产（棋盘背景本就在球后、无 logo）保持 ROTAT [0,0,0]。
+
+# ---- Compare 系列 · 已实现的特性（会显示差异） ----
+
+# CompareNormal 法线贴图对照
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_normal.json
+# 渲染左侧 (模型右, Wicker with Normal)：引用法线贴图 → 编织藤条起伏纹理
+# 渲染右侧 (模型左, Wicker no Normal)：不引用 → 光滑米色球
+# 若左球也光滑 = normal 未生效；纹理发暗/内凹 = 绿色通道方向反了 (应外凸)
+
+# CompareMetallic 金属度对照
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_metallic.json
+# 渲染左侧 (glTF Logo Metallic)：ORM B=1 处为金属 → logo 区域镜面反射盒内
+# 渲染右侧 (glTF Logo)：metallic=0 电介质 → 印刷 logo + 高光
+
+# CompareRoughness 粗糙度对照
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_roughness.json
+# 渲染左侧 (glTF Logo Roughness)：ORM G=粗糙度掩码 → 反射锐度随掩码变化
+# 渲染右侧 (glTF Logo)：roughness=0 → 全球镜面级清晰反射
+
+# CompareBaseColor 基色对照（支持 baseColorTexture）
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_base_color.json
+# 渲染右侧：纯色 baseColorFactor (暗棕)；中间/左侧：baseColorTexture
+# （资产带 KHR_texture_transform，loader 不处理 → 纹理按全图采样，与官方截图略有出入）
+
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_emissive_strength.json
+
+# ---- Compare 系列 · 未实现的特性（两球几乎无差异，仅作对照/确认未实现） ----
+
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_alpha_coverage.json      # alpha mask/blend 不支持 → 毛发全不透明
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_ambient_occlusion.json   # AO 加载不采样 → 无差异（且带 208 单位大背景板，构图不佳）
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_anisotropy.json          # 各向异性不支持（法线贴图纹理仍会显示）
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_clearcoat.json           # 清漆层不支持（仅剩 glossy vs rough 粗糙度差异）
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_iridescence.json         # 虹彩不支持
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_sheen.json               # 丝绒不支持
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_specular.json            # KHR_materials_specular 不支持
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_ior.json                 # glTF IOR/transmission 不读取 → 不透明电介质
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_transmission.json        # transmission 不支持 → 不透明球 + 金环 + 棋盘背景
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_volume.json              # volume 不支持 → 不透明球 + 金环 + 棋盘背景
+.\build\bin\Release\cis565_path_tracer.exe scenes/compare_dispersion.json          # 色散不支持 → 两重叠球变不透明一个
+
+# ---- Khronos *Test 资产逐项 Cornell Box 检查 (2026-08-22) ----
+
+# EmissiveStrengthTest：KHR_materials_emissive_strength 已实现。
+# 预期五个青色方块从左到右按 1x/2x/4x/8x/16x 增亮，并逐渐产生更强照明/泛光。
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_emissive_strength.json
+
+# EnvironmentTest：core PBR metallic/roughness 已实现；这里用 Cornell Box 几何反射代替 IBL。
+# 预期三排球的粗糙度从一端到另一端连续变化；金属排反射红/绿墙，电介质排保留漫反射。
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_environment.json
+
+# NegativeScaleTest：节点负缩放和 inverse-transpose 法线变换已接入。
+# 预期 +1/-1 两列的对应表面受光一致；本 renderer 双面求交，不验证 glTF back-face culling。
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_negative_scale.json
+
+# NodePerformanceTest：10,000 nodes/meshes/materials 加载压力测试，首次加载和 BVH 构建会明显较慢。
+# 内置 KHR_lights_punctual 不支持，场景改用 Cornell 面光源；预期看到完整的密集岩石阵列。
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_node_performance.json
+
+# NormalTangentTest：不提供 TANGENT，验证当前按三角形 UV 自动生成 tangent/TBN 的路径。
+# 预期真实几何列与 normal-map 列的高光/凹凸朝向一致；绿色通道不应反向。
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_normal_tangent.json
+
+# NormalTangentMirrorTest：诊断已知缺口。模型提供 TANGENT，但当前 loader 不读取该 accessor。
+# 若 Mirror 组反射/凹凸翻转，说明测试正确暴露了缺失；不能把本场景当成已通过。
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_normal_tangent_mirror.json
+
+# OrientationTest：验证节点 quaternion 与 matrix 的旋转/平移。
+# 预期红绿蓝及青品黄箭头分别指向同色目标；偏离表示矩阵转置或四元数方向错误。
+.\build\bin\Release\cis565_path_tracer.exe scenes/test_orientation.json
+
+# DiffuseTransmissionTest 未建场景：KHR_materials_diffuse_transmission、KHR_materials_unlit、
+# KHR_lights_punctual 均未实现，当前加载只能显示不透明的 core fallback，不能验证该测试。

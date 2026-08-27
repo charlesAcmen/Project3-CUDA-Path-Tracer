@@ -1,0 +1,9 @@
+# Cornell box ceiling -- unit quad in the XZ plane (y=0), winding gives -Y normal.
+# Sized and positioned by the scene JSON (SCALE/TRANS).
+v 0 0 0
+v 1 0 0
+v 1 0 1
+v 0 0 1
+vn 0 -1 0
+f 1//1 2//1 3//1
+f 1//1 3//1 4//1

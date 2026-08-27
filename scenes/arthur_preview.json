@@ -1,0 +1,45 @@
+{
+  "Materials": {
+    "wall_white": {
+      "TYPE": "Diffuse",
+      "RGB": [0.73, 0.73, 0.73]
+    },
+    "wall_red": {
+      "TYPE": "Diffuse",
+      "RGB": [0.63, 0.065, 0.05]
+    },
+    "wall_green": {
+      "TYPE": "Diffuse",
+      "RGB": [0.14, 0.45, 0.091]
+    },
+    "area_light": {
+      "TYPE": "Emitting",
+      "RGB": [1.0, 1.0, 1.0],
+      "EMITTANCE": 15.0
+    },
+    "arthur_pbr": {
+      "TYPE": "PBR"
+    }
+  },
+  "Objects": [
+    { "FILE": "box/floor.obj",       "MATERIAL": "wall_white", "TRANS": [-30, 0, -30], "ROTAT": [0, 0, 0], "SCALE": [60, 1, 60] },
+    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-30, 50, -30], "ROTAT": [0, 0, 0], "SCALE": [60, 1, 60] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-30, 0, 30], "ROTAT": [0, 0, 0], "SCALE": [60, 50, 1] },
+    { "FILE": "box/left_red.obj",    "MATERIAL": "wall_red",   "TRANS": [30, 0, -30], "ROTAT": [0, 0, 0], "SCALE": [1, 50, 60] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "wall_green", "TRANS": [-30, 0, -30], "ROTAT": [0, 0, 0], "SCALE": [1, 50, 60] },
+    { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-15, 49.8, -15], "ROTAT": [0, 0, 0], "SCALE": [30, 1, 30] },
+
+    { "FILE": "Models/ROCKSTAR/arthur_morgan__rdr2_3d_character/scene.gltf", "MATERIAL": "arthur_pbr", "TRANS": [0, 20.1, 0], "ROTAT": [0, 0, 0], "SCALE": [20, 20, 20] }
+  ],
+  "Camera": {
+    "RES": [1000, 1000],
+    "FOVY": 50,
+    "ITERATIONS": 5000,
+    "DEPTH": 8,
+    "RR_DEPTH": 3,
+    "FILE": "arthur_preview.png",
+    "EYE": [0, 20, -100],
+    "LOOKAT": [0, 20, 0],
+    "UP": [0, 1, 0]
+  }
+}

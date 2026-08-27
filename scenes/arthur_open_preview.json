@@ -1,0 +1,33 @@
+{
+  "Materials": {
+    "ground": {
+      "TYPE": "Diffuse",
+      "RGB": [0.65, 0.65, 0.65]
+    },
+    "area_light": {
+      "TYPE": "Emitting",
+      "RGB": [1.0, 1.0, 1.0],
+      "EMITTANCE": 30.0
+    },
+    "arthur_pbr": {
+      "TYPE": "PBR"
+    }
+  },
+  "Objects": [
+    { "FILE": "box/floor.obj", "MATERIAL": "ground",     "TRANS": [-1000, 0, -1000], "ROTAT": [0, 0, 0], "SCALE": [2000, 1, 2000] },
+    { "FILE": "box/light.obj", "MATERIAL": "area_light", "TRANS": [-500, 450, -500], "ROTAT": [0, 0, 0], "SCALE": [1000, 1, 1000] },
+
+    { "FILE": "Models/ROCKSTAR/arthur_morgan__rdr2_3d_character/scene.gltf", "MATERIAL": "arthur_pbr", "TRANS": [0, 100.4, 0], "ROTAT": [0, 0, 0], "SCALE": [1000, 1000, 1000] }
+  ],
+  "Camera": {
+    "RES": [1200, 900],
+    "FOVY": 50,
+    "ITERATIONS": 5000,
+    "DEPTH": 8,
+    "RR_DEPTH": 3,
+    "FILE": "arthur_open_preview.png",
+    "EYE": [0, 150, -600],
+    "LOOKAT": [0, 100, 0],
+    "UP": [0, 1, 0]
+  }
+}
