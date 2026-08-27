@@ -1,0 +1,11 @@
+Model Information:
+* title:	John Marston
+* source:	https://sketchfab.com/3d-models/john-marston-b86fdbd1459442209a1599dee7fddc3c
+* author:	marcosacevez57 (https://sketchfab.com/marcosacevez57)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "John Marston" (https://sketchfab.com/3d-models/john-marston-b86fdbd1459442209a1599dee7fddc3c) by marcosacevez57 (https://sketchfab.com/marcosacevez57) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

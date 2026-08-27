@@ -1,0 +1,11 @@
+Model Information:
+* title:	Arthur Morgan — RDR2 3D Character
+* source:	https://sketchfab.com/3d-models/arthur-morgan-rdr2-3d-character-21ced739b87a4c02bf1900e9d2b5dd36
+* author:	S25Ultra (https://sketchfab.com/S25Ultra)
+
+Model License:
+* license type:	CC-BY-NC-4.0 (http://creativecommons.org/licenses/by-nc/4.0/)
+* requirements:	Author must be credited. No commercial use.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Arthur Morgan — RDR2 3D Character" (https://sketchfab.com/3d-models/arthur-morgan-rdr2-3d-character-21ced739b87a4c02bf1900e9d2b5dd36) by S25Ultra (https://sketchfab.com/S25Ultra) licensed under CC-BY-NC-4.0 (http://creativecommons.org/licenses/by-nc/4.0/)

@@ -24,7 +24,9 @@ config.local.json
 
 # Khronos glTF-Sample-Assets dump (flat copy of the official repo, 159 models)
 # -- only the model library is ignored; scene JSONs under scenes/ stay tracked
-/scenes/Models/
+/scenes/Models/*
+!/scenes/Models/ROCKSTAR/
+!/scenes/Models/ROCKSTAR/**
 # /scenes
 *.pdf
 
