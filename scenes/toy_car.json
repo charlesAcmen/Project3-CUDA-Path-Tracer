@@ -1,0 +1,24 @@
+{
+  "Materials": {
+    "wall_white": { "TYPE": "Diffuse", "RGB": [0.73, 0.73, 0.73] },
+    "wall_red": { "TYPE": "Diffuse", "RGB": [0.63, 0.065, 0.05] },
+    "wall_green": { "TYPE": "Diffuse", "RGB": [0.14, 0.45, 0.091] },
+    "area_light": { "TYPE": "Emitting", "RGB": [1.0, 1.0, 1.0], "EMITTANCE": 20.0 },
+    "toy_car_pbr": { "TYPE": "PBR" }
+  },
+  "Objects": [
+    { "FILE": "box/floor.obj", "MATERIAL": "wall_white", "TRANS": [-2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
+    { "FILE": "box/ceiling.obj", "MATERIAL": "wall_white", "TRANS": [-2, 4, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
+    { "FILE": "box/back.obj", "MATERIAL": "wall_white", "TRANS": [-2, 0, 2], "ROTAT": [0, 0, 0], "SCALE": [4, 4, 1] },
+    { "FILE": "box/left_red.obj", "MATERIAL": "wall_red", "TRANS": [2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "wall_green", "TRANS": [-2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
+    { "FILE": "box/light.obj", "MATERIAL": "area_light", "TRANS": [-0.9, 3.98, -0.9], "ROTAT": [0, 0, 0], "SCALE": [1.8, 1, 1.8] },
+    { "FILE": "Models/ToyCar/glTF/ToyCar.gltf", "MATERIAL": "toy_car_pbr", "TRANS": [0, 0.35, 0], "ROTAT": [0, 180, 0], "SCALE": [25, 25, 25] }
+  ],
+  "Camera": {
+    "RES": [2560, 1440], "FOVY": 60, "ITERATIONS": 5000, "DEPTH": 8, "RR_DEPTH": 3,
+    "FILE": "toy_car.png", "EYE": [-0.0205, 1.3416, -3.5433],
+"LOOKAT": [-0.0099, 0.1950, 0.7211],
+"UP": [0.0006, 0.9657, 0.2597]
+  }
+}

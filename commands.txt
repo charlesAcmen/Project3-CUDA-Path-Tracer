@@ -28,6 +28,12 @@ https://192.168.1.1/
 .\build\bin\Release\cis565_path_tracer.exe scenes/damaged_helmet.json
 .\build\bin\Release\cis565_path_tracer.exe scenes\arthur_preview.json
 .\build\bin\Release\cis565_path_tracer.exe scenes\arthur_open_preview.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\avocado.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\boombox.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\lantern.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\sponza_gallery.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\toy_car.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\water_bottle.json
 # DamagedHelmet 法线贴图 A/B 对比 (2026-08-17)
 # 1) 先用现代码跑上面这条 damaged_helmet 指令 → 头盔表面光滑、只有 albedo 颜色，无划痕/锈蚀凹凸
 # 2) normal map 实现后重跑同一条指令 → 金属上划痕、钣金缝、锈斑的凹凸细节应明显可见
