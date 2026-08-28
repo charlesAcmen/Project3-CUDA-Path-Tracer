@@ -6,7 +6,7 @@ This document describes the current source tree. Treat `src/` as the implementat
 
 - Windows / Visual Studio: `cmake -B build`, then `cmake --build build --config Release`.
 - Linux / WSL: `make` or `make Release` (CMake output is under `build/`).
-- Run: `build/bin/cis565_path_tracer <scene.json>`, for example `build/bin/cis565_path_tracer scenes/cornell_box.json`.
+- Run: `build/bin/Release/cis565_path_tracer <scene.json>`, for example `build/bin/Release/cis565_path_tracer scenes/cornell_box.json`.
 - Standalone projects under `tests/` are not wired into the root CMake build. Generate each one separately with Visual Studio 2022 x64, then build its Release configuration. Rendering changes are primarily validated by the user through visual inspection.
 
 Do not run builds or render scenes merely to validate a source change. State the exact command for the user to run and the expected visual or console result instead.
