@@ -61,7 +61,7 @@ All renderable geometry is triangulated. Source geometry uses parallel `Triangle
 
 `buildSceneBvh()` applies each geom transform to positions and inverse transpose to normals, then creates one world-space BVH over all meshes. It also maps each `(materialId, SurfaceBinding)` pair to one compact runtime `Surface`. Consequently traversal only loads positions and records `t`, barycentrics and triangle index in a 20-byte `HitRecord`; shading expands the winning triangle's attributes and surface afterwards.
 
-glTF nodes are walked with accumulated matrix or `T * R * S` transforms. Supported vertex attributes are POSITION, NORMAL, TEXCOORD_0 and COLOR_0; higher UV/color sets, skinning, morph targets and Draco are not handled. OBJ and glTF mesh paths are relative to the scene JSON file.
+glTF nodes are walked with accumulated matrix or `T * R * S` transforms. Supported vertex attributes are POSITION, NORMAL, TEXCOORD_0, COLOR_0 and TANGENT; higher UV/color sets, skinning, morph targets and Draco are not handled. OBJ and glTF mesh paths are relative to the scene JSON file.
 
 ## Materials, textures and scattering
 
@@ -75,7 +75,7 @@ The relevant source chains are:
 - Roughness/metallic: ORM G/B times their glTF factors, otherwise non-default glTF factors, otherwise the PBR/Reflective type defaults.
 - Emission: `(emissive texture or white) * emissiveFactor * emissiveStrength`. A JSON `Emitting` material multiplies this by `emittance` and terminates; nonzero glTF emission on any other BSDF is additive auto-glow and scattering continues.
 
-Normal maps use a per-triangle tangent generated from UV derivatives. A degenerate-UV sentinel disables perturbation. Opaque scattering orients the shading normal against the incident ray; refraction keeps the geometric normal and uses the front-face classification, preserving winding-dependent behavior. The renderer is double-sided at intersection time.
+Normal maps prefer an interpolated glTF vertex tangent; when it is absent or invalid, they use the existing per-triangle tangent generated from UV derivatives. A degenerate-UV sentinel disables perturbation. Opaque scattering orients the shading normal against the incident ray; secondary-ray origins use the winning triangle's geometric normal and extent-aware offset, while `PathSegment` carries the previous triangle id so closest traversal skips only that numerical self-hit. Direct-light visibility likewise skips only the receiver triangle by default; all other geometry remains an occluder. Refraction keeps the geometric normal and uses the front-face classification, preserving winding-dependent behavior. The renderer is double-sided at intersection time.
 
 ## Per-iteration GPU pipeline
 
