@@ -120,6 +120,16 @@ enum class MaterialType
     Emissive
 };
 
+// Directional emission is a material property, independent of triangle
+// intersection (which remains double-sided).  TwoSided preserves the legacy
+// renderer behavior; OneSided emits only from the side selected by the
+// triangle's geometric normal.
+enum class EmissionSidedness : int
+{
+    TwoSided,
+    OneSided
+};
+
 struct Material
 {
     glm::vec3 color;              // Base albedo or surface tint for diffuse/refraction throughput
@@ -130,6 +140,7 @@ struct Material
         //镜面反射的高光颜色色调
     } specular;
     MaterialType type;            // Explicit material classification used by scattering logic
+    EmissionSidedness emissionSidedness = EmissionSidedness::TwoSided;
     float indexOfRefraction;      // IOR of the refractive material, e.g. 1.5 for glass
     float invIndexOfRefraction;   // Precomputed inverse IOR to avoid GPU division
     float emittance;              // Emission strength for light sources (nonzero = emissive)
