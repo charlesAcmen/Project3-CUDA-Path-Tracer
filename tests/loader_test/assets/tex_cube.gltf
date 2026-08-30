@@ -1,0 +1,39 @@
+{
+  "asset": { "version": "2.0" },
+  "buffers": [
+    {
+      "byteLength": 107,
+      "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAiVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGNoAAMGCAUAKg4GARWeQtcAAAAASUVORK5CYII="
+    }
+  ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 36, "target": 34962 },
+    { "buffer": 0, "byteOffset": 36, "byteLength": 71 }
+  ],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3" }
+  ],
+  "images": [
+    { "bufferView": 1, "mimeType": "image/png" }
+  ],
+  "textures": [
+    { "source": 0 }
+  ],
+  "materials": [
+    {
+      "pbrMetallicRoughness": { "baseColorTexture": { "index": 0 } },
+      "normalTexture": { "index": 0 },
+      "occlusionTexture": { "index": 0 }
+    }
+  ],
+  "meshes": [
+    {
+      "primitives": [
+        { "attributes": { "POSITION": 0 }, "material": 0, "mode": 4 }
+      ]
+    }
+  ],
+  "nodes": [ { "mesh": 0 } ],
+  "scenes": [ { "nodes": [ 0 ] } ],
+  "scene": 0
+}

@@ -39,6 +39,7 @@
 #include "scene/obj_loader.cpp"
 #include "scene/gltf_loader.cpp"
 #include "scene/scene_loader.cpp"
+#include "intersection/triangle.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -432,10 +433,43 @@ static void testLoadGLTF(const std::string& exeDir)
             bool ok = attr.uv0 == glm::vec2(0, 0) && attr.uv1 == glm::vec2(1, 0) &&
                       attr.uv2 == glm::vec2(0, 1);
             check(ok, "tri_uv.gltf -> per-vertex UVs read from TEXCOORD_0");
+
+            glm::vec3 normal, color;
+            glm::vec2 uv;
+            glm::vec4 tangent;
+            interpolateTriangleAttributes(tris.positions[0], attr, 0.2f, 0.3f,
+                                          true, normal, uv, tangent, color);
+            check(glm::length(glm::vec3(tangent) - glm::vec3(1, 0, 0)) < 1e-4f &&
+                  tangent.w == 1.0f,
+                  "tri_uv.gltf -> missing TANGENT uses UV-derived fallback");
         }
     }
     {
-        // glTF texture auto-load: external PNG baseColor + normal + occlusion
+        // The asset tangent deliberately differs from the UV-derived +X
+        // direction.  It proves that a glTF TANGENT survives loading and
+        // wins over the legacy UV reconstruction at the hit point.
+        auto tris = loadGLTFTris(exeDir, "tri_tangent.gltf");
+        check(tris.size() == 1, "tri_tangent.gltf -> 1 triangle");
+        if (tris.size() == 1)
+        {
+            const TriangleAttr& attr = tris.attrs[0];
+            const bool stored = attr.t0 == glm::vec4(0, 1, 0, -1) &&
+                                attr.t1 == glm::vec4(0, 1, 0, -1) &&
+                                attr.t2 == glm::vec4(0, 1, 0, -1);
+            check(stored, "tri_tangent.gltf -> per-vertex TANGENT read");
+
+            glm::vec3 normal, color;
+            glm::vec2 uv;
+            glm::vec4 tangent;
+            interpolateTriangleAttributes(tris.positions[0], attr, 0.2f, 0.3f,
+                                          true, normal, uv, tangent, color);
+            check(glm::length(glm::vec3(tangent) - glm::vec3(0, 1, 0)) < 1e-4f &&
+                  tangent.w == -1.0f,
+                  "tri_tangent.gltf -> vertex TANGENT takes precedence over UV fallback");
+        }
+    }
+    {
+        // glTF texture auto-load: one embedded PNG bound as baseColor + normal + occlusion
         // slots all referencing the SAME image.  The loader must load it ONCE
         // into Scene::textures (dedup by cgltf image index), stamp the global
         // id on the triangle's TextureBinding, and linearize the sRGB

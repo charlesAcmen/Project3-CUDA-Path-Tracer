@@ -8,6 +8,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 add_executable(loader_test
     loader_test.cu
+    ${CMAKE_SOURCE_DIR}/../../src/scene/scene.cpp       # internSurfaceBinding
     ${CMAKE_SOURCE_DIR}/../../src/utils/utilities.cu   # buildTransformationMatrix
 )
 

@@ -23,7 +23,9 @@
 //      ordering metric (two boxes, both ray directions, inside-box).
 //   5. Scale-aware secondary-ray origin offsets remain representable at large
 //      world coordinates while preserving the near-origin offset.
-//   6. Empty scene: no nodes, traversal misses.
+//   6. Bounded any-hit traversal agrees with closest-hit visibility.
+//      The optional previous-triangle guard removes only the self-hit.
+//   7. Empty scene: no nodes, traversal misses.
 //
 // Host-only: no kernels launched, no GPU required.
 // ====================================================================
@@ -269,6 +271,9 @@ void appendBakedExpected(TestMesh& dst, std::vector<int>& materialIds,
     attr.n0     = glm::vec3(g.invTranspose * glm::vec4(srcAttr.n0, 0.0f));
     attr.n1     = glm::vec3(g.invTranspose * glm::vec4(srcAttr.n1, 0.0f));
     attr.n2     = glm::vec3(g.invTranspose * glm::vec4(srcAttr.n2, 0.0f));
+    attr.t0     = glm::vec4(glm::vec3(g.transform * glm::vec4(glm::vec3(srcAttr.t0), 0.0f)), srcAttr.t0.w);
+    attr.t1     = glm::vec4(glm::vec3(g.transform * glm::vec4(glm::vec3(srcAttr.t1), 0.0f)), srcAttr.t1.w);
+    attr.t2     = glm::vec4(glm::vec3(g.transform * glm::vec4(glm::vec3(srcAttr.t2), 0.0f)), srcAttr.t2.w);
     // UVs are texture-space coordinates — the geometry transform does NOT
     // apply to them; copy through unchanged (mirrors the bake in bvh.cu).
     dst.positions.push_back(pos);
@@ -282,8 +287,9 @@ bool nearVec(const glm::vec3& a, const glm::vec3& b, float eps)
 }
 
 // Two source entries are equal iff materialId matches, vertices match, the
-// baked normals are parallel (they may be scaled by invTranspose), and the
-// surface-binding ids + UVs match (both are copied through the bake unchanged).
+// baked normals are parallel (they may be scaled by invTranspose), tangents
+// are parallel (they follow the linear transform), and surface-binding ids +
+// UVs match (both are copied through the bake unchanged).
 bool triEqual(const TrianglePos& aPos, const TriangleAttr& aAttr, int aMaterialId,
               const TrianglePos& bPos, const TriangleAttr& bAttr, int bMaterialId, float eps)
 {
@@ -297,6 +303,11 @@ bool triEqual(const TrianglePos& aPos, const TriangleAttr& aAttr, int aMaterialI
         return glm::dot(x / lx, y / ly) > 1.0f - 1e-5f;
     };
     if (!normalEq(aAttr.n0, bAttr.n0) || !normalEq(aAttr.n1, bAttr.n1) || !normalEq(aAttr.n2, bAttr.n2))
+        return false;
+    if (!normalEq(glm::vec3(aAttr.t0), glm::vec3(bAttr.t0)) ||
+        !normalEq(glm::vec3(aAttr.t1), glm::vec3(bAttr.t1)) ||
+        !normalEq(glm::vec3(aAttr.t2), glm::vec3(bAttr.t2)) ||
+        aAttr.t0.w != bAttr.t0.w || aAttr.t1.w != bAttr.t1.w || aAttr.t2.w != bAttr.t2.w)
         return false;
     const auto uvEq = [](const glm::vec2& x, const glm::vec2& y) {
         return glm::length(x - y) < 1e-4f;
@@ -365,6 +376,11 @@ bool testWorldBake()
     cube.attrs[0].c0 = glm::vec3(1.0f, 0.0f, 0.0f);
     cube.attrs[0].c1 = glm::vec3(0.0f, 1.0f, 0.0f);
     cube.attrs[0].c2 = glm::vec3(0.0f, 0.0f, 1.0f);
+    // Nonzero tangents prove the bake uses the model's linear transform,
+    // rather than accidentally treating them as normals or dropping them.
+    cube.attrs[0].t0 = glm::vec4(1.0f, 0.0f, 0.0f,  1.0f);
+    cube.attrs[0].t1 = glm::vec4(0.0f, 1.0f, 0.0f, -1.0f);
+    cube.attrs[0].t2 = glm::vec4(1.0f, 1.0f, 0.0f,  1.0f);
     const glm::mat4 T = makeTransform({ 1, 2, 3 }, { 0.4f, 0.2f, 0.3f }, { 2, 1, 3 });
     const Geom g = makeGeom(7, 0, (int)cube.positions.size(), T);
 
@@ -872,8 +888,21 @@ bool testScaleAwareRayOffset()
     const glm::vec3 negative = offsetRayOrigin(point, normal, -1.0f);
     const glm::vec3 nearOrigin = offsetRayOrigin(glm::vec3(0.0f), normal, 1.0f);
 
+    const glm::vec3 obliqueNormal = glm::normalize(glm::vec3(1.0f, 2.0f, 3.0f));
+    const glm::vec3 obliqueDelta =
+        offsetRayOrigin(glm::vec3(0.25f, -0.5f, 0.75f), obliqueNormal, 1.0f) -
+        glm::vec3(0.25f, -0.5f, 0.75f);
+    const TrianglePos centredLargeTriangle{
+        glm::vec3(-1000.0f, -1000.0f, 0.0f),
+        glm::vec3( 1000.0f, -1000.0f, 0.0f),
+        glm::vec3(-1000.0f,  1000.0f, 0.0f) };
+    const float centredScale = triangleRayOriginScale(centredLargeTriangle);
+    const glm::vec3 centredOffset = offsetRayOrigin(
+        glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 1.0f, centredScale);
     if (!(positive.x > point.x) || !(negative.x < point.x) ||
-        !(nearOrigin.x >= EPSILON))
+        !(nearOrigin.x >= EPSILON) ||
+        !(glm::length(glm::cross(obliqueDelta, obliqueNormal)) < 1e-7f) ||
+        !(centredScale >= 1000.0f) || !(centredOffset.z > EPSILON))
     {
         printf("[FAIL] scale-aware ray origin offset\n");
         return false;
@@ -882,7 +911,53 @@ bool testScaleAwareRayOffset()
     return true;
 }
 
-// Test 8: empty scene.  No triangles → no tree; traversal with null buffers
+// Test 8: a direct-light shadow query needs only visibility before maxT.
+// Compare the production any-hit traversal to closest-hit at three bounds.
+bool testBoundedAnyHit()
+{
+    const TrianglePos triangles[2] = {
+        TrianglePos{ glm::vec3(-1.0f, -1.0f, 3.0f),
+                     glm::vec3( 1.0f, -1.0f, 3.0f),
+                     glm::vec3( 0.0f,  1.0f, 3.0f) },
+        TrianglePos{ glm::vec3(-1.0f, -1.0f, 6.0f),
+                     glm::vec3( 1.0f, -1.0f, 6.0f),
+                     glm::vec3( 0.0f,  1.0f, 6.0f) }
+    };
+    BvhNode node{};
+    node.bounds.expand(triangles[0]);
+    node.bounds.expand(triangles[1]);
+    node.left = 0;
+    node.right = 2;
+    node.isLeaf = true;
+
+    const Ray ray{ glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f) };
+    const float bounds[] = { 2.5f, 3.5f, 6.5f };
+    for (float maxT : bounds)
+    {
+        const bool anyHit = traverseBvhAnyHit(ray, &node, triangles, maxT);
+        const bool closestHit = traverseBvhClosest(ray, &node, triangles, maxT).hit;
+        if (anyHit != closestHit)
+        {
+            printf("[FAIL] bounded any-hit at maxT=%.2f\n", maxT);
+            return false;
+        }
+    }
+
+    // Skipping the exact previous primitive removes a numerical self-hit but
+    // keeps a farther, genuinely blocking triangle visible to the query.
+    if (traverseBvhAnyHit(ray, &node, triangles, 3.5f, 0) ||
+        traverseBvhClosest(ray, &node, triangles, 3.5f, 0).hit ||
+        !traverseBvhAnyHit(ray, &node, triangles, 6.5f, 0) ||
+        !traverseBvhClosest(ray, &node, triangles, 6.5f, 0).hit)
+    {
+        printf("[FAIL] previous-triangle self-hit guard\n");
+        return false;
+    }
+    printf("[PASS] bounded any-hit\n");
+    return true;
+}
+
+// Test 9: empty scene.  No triangles → no tree; traversal with null buffers
 // must miss without touching any memory.
 bool testEmptyScene()
 {
@@ -920,6 +995,7 @@ int main()
     if (!testAabbEntry()) failures++;
     if (!testKnownNearChildTraversal()) failures++;
     if (!testScaleAwareRayOffset()) failures++;
+    if (!testBoundedAnyHit()) failures++;
     if (!testEmptyScene()) failures++;
 
     // Traversal + structure across mesh kinds and transforms.

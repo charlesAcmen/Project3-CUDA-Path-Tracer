@@ -17,6 +17,7 @@
 
 #include <cstdio>
 #include <cmath>
+#include <limits>
 #include <vector>
 #include <algorithm>
 
@@ -132,15 +133,15 @@ static void testResolvePbrSurfaceParams()
     const glm::vec3 ALBEDO = baseBuf[0];   // the Pbr baseColor at (0,0)
     const glm::vec3 D3(0.04f);             // dielectric F0
 
-    float r, alpha;
+    float r, metallic, alpha;
     glm::vec3 F0, diff;
 
     // ---- ORM bound: dielectric (B=0) — F0 = 0.04, full diffuse ----
     {
         Material m; m.type = MaterialType::Pbr;
-        TextureBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
-        resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
-                                glm::vec2(0.0f, 0.0f), m);
+        SurfaceBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
+        resolvePbrSurfaceParams(r, metallic, alpha, F0, diff, tex, table,
+                                glm::vec2(0.0f, 0.0f), m, glm::vec3(1.0f));
         check(std::fabs(r - 0.5f) < 1e-6f && std::fabs(alpha - 0.25f) < 1e-6f,
               "ORM dielectric: G=0.5 → r=0.5, alpha=r²=0.25");
         check(closeTo(F0, D3) && closeTo(diff, ALBEDO),
@@ -150,9 +151,9 @@ static void testResolvePbrSurfaceParams()
     // ---- ORM bound: metal (B=1) — F0 = baseColor, no diffuse ----
     {
         Material m; m.type = MaterialType::Pbr;
-        TextureBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
-        resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
-                                glm::vec2(0.5f, 0.0f), m);
+        SurfaceBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
+        resolvePbrSurfaceParams(r, metallic, alpha, F0, diff, tex, table,
+                                glm::vec2(0.5f, 0.0f), m, glm::vec3(1.0f));
         check(std::fabs(r - 0.5f) < 1e-6f, "ORM metal: G=0.5 → r=0.5");
         check(closeTo(F0, baseBuf[1]) && closeTo(diff, glm::vec3(0.0f)),
               "ORM metal: B=1 → F0=baseColor, diffuse=0");
@@ -161,9 +162,9 @@ static void testResolvePbrSurfaceParams()
     // ---- ORM bound: r below ROUGHNESS_THRESHOLD + metallic 0.5 ----
     {
         Material m; m.type = MaterialType::Pbr;
-        TextureBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
-        resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
-                                glm::vec2(0.5f, 0.5f), m);
+        SurfaceBinding tex; tex.metallicRoughness = 0; tex.baseColor = 1;
+        resolvePbrSurfaceParams(r, metallic, alpha, F0, diff, tex, table,
+                                glm::vec2(0.5f, 0.5f), m, glm::vec3(1.0f));
         check(r < ROUGHNESS_THRESHOLD,
               "ORM G=0.0001 < ROUGHNESS_THRESHOLD → mirror path");
         check(closeTo(F0, glm::mix(D3, baseBuf[3], 0.5f)) &&
@@ -175,10 +176,10 @@ static void testResolvePbrSurfaceParams()
     {
         Material m; m.type = MaterialType::Pbr;
         m.color = ALBEDO;
-        TextureBinding tex;
+        SurfaceBinding tex;
         tex.roughnessFactor = 0.9f; tex.metallicFactor = 0.7f;
-        resolvePbrSurfaceParams(r, alpha, F0, diff, tex, table,
-                                glm::vec2(0.25f, 0.25f), m);
+        resolvePbrSurfaceParams(r, metallic, alpha, F0, diff, tex, table,
+                                glm::vec2(0.25f, 0.25f), m, glm::vec3(1.0f));
         check(std::fabs(alpha - 0.81f) < 1e-6f,
               "unbound: glTF roughnessFactor 0.9 → alpha=0.81");
         check(closeTo(F0, glm::mix(D3, ALBEDO, 0.7f)) &&
@@ -190,9 +191,9 @@ static void testResolvePbrSurfaceParams()
     {
         Material m; m.type = MaterialType::Reflective;
         m.specular.color = glm::vec3(0.9f, 0.8f, 0.7f);   // chrome tint
-        TextureBinding unbound;                          // all slots -1
-        resolvePbrSurfaceParams(r, alpha, F0, diff, unbound, table,
-                                glm::vec2(0.25f, 0.25f), m);
+        SurfaceBinding unbound;                          // all slots -1
+        resolvePbrSurfaceParams(r, metallic, alpha, F0, diff, unbound, table,
+                                glm::vec2(0.25f, 0.25f), m, glm::vec3(1.0f));
         check(closeTo(F0, m.specular.color) && closeTo(diff, glm::vec3(0.0f)),
               "Reflective default: metallic=1 → F0=specular.color, diffuse=0 (chrome)");
     }
@@ -201,9 +202,9 @@ static void testResolvePbrSurfaceParams()
     {
         Material m; m.type = MaterialType::Pbr;
         m.color = ALBEDO;
-        TextureBinding unbound;
-        resolvePbrSurfaceParams(r, alpha, F0, diff, unbound, table,
-                                glm::vec2(0.25f, 0.25f), m);
+        SurfaceBinding unbound;
+        resolvePbrSurfaceParams(r, metallic, alpha, F0, diff, unbound, table,
+                                glm::vec2(0.25f, 0.25f), m, glm::vec3(1.0f));
         check(std::fabs(r - 0.5f) < 1e-6f && std::fabs(alpha - 0.25f) < 1e-6f,
               "Pbr default: roughness 0.5, alpha 0.25 (incomplete model not a mirror)");
         check(closeTo(F0, D3) && closeTo(diff, ALBEDO),
@@ -214,11 +215,11 @@ static void testResolvePbrSurfaceParams()
     {
         Material m; m.type = MaterialType::Pbr;
         m.color = glm::vec3(1.0f, 0.0f, 0.0f);   // would win if no texture
-        TextureBinding tex; tex.baseColor = 1;
+        SurfaceBinding tex; tex.baseColor = 1;
         tex.baseColorFactor = glm::vec3(0.5f, 0.5f, 0.5f);
-        float rr, aa; glm::vec3 f0, dd;
-        resolvePbrSurfaceParams(rr, aa, f0, dd, tex, table,
-                                glm::vec2(0.0f, 0.0f), m);
+        float rr, mm, aa; glm::vec3 f0, dd;
+        resolvePbrSurfaceParams(rr, mm, aa, f0, dd, tex, table,
+                                glm::vec2(0.0f, 0.0f), m, glm::vec3(1.0f));
         check(closeTo(dd, baseBuf[0] * 0.5f),
               "glTF baseColorFactor × texture → diffuse = texel·factor");
     }
@@ -236,17 +237,17 @@ static void testPbrBrdf()
     const glm::vec3 D3(0.04f);
 
     // ---- Conductor Fresnel (Schlick) endpoints ----
-    check(closeTo(fresnelSchlickConductor(1.0f, D3), D3),
+    check(closeTo(fresnelSchlickF0(1.0f, D3), D3),
           "Fresnel cos=1 → F0 (0.04)");
-    check(closeTo(fresnelSchlickConductor(0.0f, D3), glm::vec3(1.0f)),
+    check(closeTo(fresnelSchlickF0(0.0f, D3), glm::vec3(1.0f)),
           "Fresnel cos=0 → 1.0 (grazing white-out)");
     // cos=0.5 → 0.04 + 0.96·(0.5)⁵ = 0.04 + 0.96·0.03125 = 0.07.
-    const glm::vec3 mid = fresnelSchlickConductor(0.5f, D3);
+    const glm::vec3 mid = fresnelSchlickF0(0.5f, D3);
     check(std::fabs(mid.x - 0.07f) < 1e-6f,
           "Fresnel cos=0.5 → 0.04 + 0.96·(0.5)⁵ = 0.07");
     // Out-of-range cos clamps, never NaNs.
-    check(closeTo(fresnelSchlickConductor(5.0f, D3), D3) &&
-          closeTo(fresnelSchlickConductor(-5.0f, D3), glm::vec3(1.0f)),
+    check(closeTo(fresnelSchlickF0(5.0f, D3), D3) &&
+          closeTo(fresnelSchlickF0(-5.0f, D3), glm::vec3(1.0f)),
           "Fresnel clamps cos outside [0,1]");
 
     // ---- Smith G1 masking-shadowing ----
@@ -312,7 +313,7 @@ static void testPbrBrdf()
                 if (NdotL <= 0.0f) continue;                       // outside the lobe
                 const float G = smithG1Ggx(alpha, NdotV) * smithG1Ggx(alpha, NdotL);
                 const float D = ggxD(alpha, cosTh);                // N·H = cosθh
-                const float F = fresnelSchlickConductor(cosTh, D3).r;   // V·H = cosθh
+                const float F = fresnelSchlickF0(cosTh, D3).r;   // V·H = cosθh
                 specSum += (F * G * D * cosTh / NdotV)
                            * sinTh * (PI * 0.5f / NTH) * (TWO_PI / NPH);
             }
@@ -320,7 +321,7 @@ static void testPbrBrdf()
 
         // F_view at NdotV=1 → Fresnel(1) = 0.04; compensated diffuse energy
         // for albedo=1, metallic=0 is (1 − 0.04) = 0.96.
-        const float diffEnergy = 1.0f * (1.0f - luminance(fresnelSchlickConductor(1.0f, D3)));
+        const float diffEnergy = 1.0f * (1.0f - luminance(fresnelSchlickF0(1.0f, D3)));
         const float total = specSum + diffEnergy;
         check(total <= 1.0f + 2e-2f,
               "compensated GGX + diffuse energy ≤ 1.02");
@@ -336,11 +337,96 @@ static void testPbrBrdf()
     std::printf("\n");
 }
 
+// -----------------------------------------------------------------------
+// evaluateBsdf — finite continuous-result contract for NEE/MIS callers
+// -----------------------------------------------------------------------
+static void testEvaluateBsdfFiniteContract()
+{
+    std::printf("=== evaluateBsdf finite contract ===\n");
+
+    Material material{};
+    material.type = MaterialType::Pbr;
+    material.color = glm::vec3(0.8f);
+
+    SurfaceBinding binding{};
+    binding.roughnessFactor = 0.4f;
+    binding.metallicFactor = 0.0f;
+
+    ShadeableIntersection hit{};
+    hit.surfaceNormal = glm::vec3(0.0f, 0.0f, 1.0f);
+    hit.vertexColor = glm::vec3(1.0f);
+    hit.surface = &binding;
+
+    const BsdfEvaluation valid = evaluateBsdf(
+        hit, material, TextureTable{}, glm::vec3(0.0f, 0.0f, -1.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f));
+    check(!valid.isDelta && std::isfinite(valid.pdfOmega) && valid.pdfOmega > 0.0f &&
+          std::isfinite(valid.value.x) && std::isfinite(valid.value.y) &&
+          std::isfinite(valid.value.z),
+          "valid rough PBR returns a finite continuous BSDF");
+
+    // The shading kernel resolves texture-backed state once, then evaluates it
+    // for both the sampled light direction and the continuation direction.
+    // Keep that path exactly equivalent to the compatibility evaluator.
+    const ResolvedBsdf resolved = resolveBsdf(
+        hit, material, TextureTable{}, glm::vec3(0.0f, 0.0f, -1.0f));
+    const BsdfEvaluation reused = evaluateBsdf(
+        resolved, material, glm::vec3(0.0f, 0.0f, -1.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f));
+    check(!reused.isDelta && fabsf(reused.pdfOmega - valid.pdfOmega) < 1e-6f &&
+          glm::length(reused.value - valid.value) < 1e-6f &&
+          glm::length(reused.shadingNormal - valid.shadingNormal) < 1e-6f,
+          "resolved BSDF evaluation matches compatibility path");
+
+    // Exercise the exact reuse path with both baseColor and ORM slots bound:
+    // this is the expensive Rockstar-style case the compact state is meant to
+    // avoid re-sampling for direct light, GGX scatter, and continuation PDF.
+    glm::vec3 texturePixels[] = {
+        glm::vec3(0.7f, 0.2f, 0.1f),
+        glm::vec3(0.0f, 0.35f, 0.6f)
+    };
+    TextureInfo textureInfos[] = { TextureInfo{ 0, 1, 1 }, TextureInfo{ 1, 1, 1 } };
+    const TextureTable texturedTable{ texturePixels, textureInfos, 2 };
+    binding.baseColor = 0;
+    binding.metallicRoughness = 1;
+    binding.roughnessFactor = 0.8f;
+    binding.metallicFactor = 0.5f;
+    const BsdfEvaluation texturedCompatibility = evaluateBsdf(
+        hit, material, texturedTable, glm::vec3(0.0f, 0.0f, -1.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f));
+    const ResolvedBsdf texturedResolved = resolveBsdf(
+        hit, material, texturedTable, glm::vec3(0.0f, 0.0f, -1.0f));
+    const BsdfEvaluation texturedReused = evaluateBsdf(
+        texturedResolved, material, glm::vec3(0.0f, 0.0f, -1.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f));
+    check(fabsf(texturedReused.pdfOmega - texturedCompatibility.pdfOmega) < 1e-6f &&
+          glm::length(texturedReused.value - texturedCompatibility.value) < 1e-6f,
+          "textured resolved BSDF matches compatibility path");
+
+    // This models a corrupt PBR texture sample.  The public evaluator must
+    // preserve its no-continuous-contribution contract for its NEE/MIS users
+    // instead of exposing the non-finite intermediate result to them.
+    binding = SurfaceBinding{};
+    binding.roughnessFactor = 0.4f;
+    binding.metallicFactor = 0.0f;
+    material.color = glm::vec3(std::numeric_limits<float>::quiet_NaN());
+    const BsdfEvaluation invalid = evaluateBsdf(
+        hit, material, TextureTable{}, glm::vec3(0.0f, 0.0f, -1.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f));
+    check(!invalid.isDelta && invalid.pdfOmega == 0.0f &&
+          invalid.value.x == 0.0f && invalid.value.y == 0.0f &&
+          invalid.value.z == 0.0f,
+          "non-finite PBR evaluation returns zero continuous contribution");
+
+    std::printf("\n");
+}
+
 int main()
 {
     testSampleTexture();
     testResolvePbrSurfaceParams();
     testPbrBrdf();
+    testEvaluateBsdfFiniteContract();
 
     if (g_failures == 0)
         std::printf("ALL PASS\n");
