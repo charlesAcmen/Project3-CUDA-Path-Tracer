@@ -114,9 +114,10 @@ __host__ __device__ inline bool intersectTrianglePositions(
  * needs the original sign to classify entering versus exiting.
  * @param outNormal [out] Model's shading normal, TRUE orientation
  *                        (winding preserved, not oriented toward the ray)
- * @param outTangent [out] Per-triangle tangent aligned with the texture's
- *                        +U axis (world space — edges are baked world space),
- *                        orthogonalized against the interpolated normal.
+ * @param outTangent [out] Interpolated glTF vertex tangent when present;
+ *                        otherwise the existing per-triangle UV-derived
+ *                        tangent.  Both are world-space and orthogonalized
+ *                        against the interpolated normal.
  *                        .xyz = the unit tangent; .w = UV handedness sign
  *                        (+1 regular layout, -1 mirrored island, glTF
  *                        TANGENT.w convention → B = cross(N, T)·w in shading).
@@ -173,10 +174,28 @@ __host__ __device__ inline void interpolateTriangleAttributes(
 
     if (!computeTangent) return;
 
-    // ---- Step 8: per-triangle tangent (for tangent-space normal maps) ----
+    // ---- Step 8: glTF vertex tangent, then UV-derived fallback ---------
+    // A valid glTF TANGENT is the asset author's tangent frame and therefore
+    // takes precedence over reconstruction.  Interpolate its xyz and w with
+    // the same barycentrics as the normal, then normalize after removing the
+    // normal component.  A missing or malformed tangent leaves the old UV
+    // derivative route below fully intact.
+    outTangent = glm::vec4(0.0f);   // sentinel: no usable tangent
+    const glm::vec4 vertexTangent = (1.0f - u - v) * attr.t0 + u * attr.t1 + v * attr.t2;
+    glm::vec3 vertexT = glm::vec3(vertexTangent);
+    vertexT = vertexT - outNormal * glm::dot(outNormal, vertexT);
+    const float vertexTLen2 = glm::dot(vertexT, vertexT);
+    if (vertexTLen2 > TANGENT_EPSILON)
+    {
+        const float handedness = (vertexTangent.w < 0.0f) ? -1.0f : 1.0f;
+        outTangent = glm::vec4(vertexT * glm::inversesqrt(vertexTLen2), handedness);
+        return;
+    }
+
     // Derive the direction in which the texture's +U axis increases, from
-    // the triangle's world-space edges and UV deltas.  Treat the triangle
-    // as a 2×2 system in the tangent plane:
+    // the triangle's world-space edges and UV deltas.  This preserves normal
+    // mapping for OBJ files and glTF primitives without a valid TANGENT.
+    // Treat the triangle as a 2×2 system in the tangent plane:
     //     e1 = ΔU1·T + ΔV1·B ,  e2 = ΔU2·T + ΔV2·B
     //     det = ΔU1·ΔV2 − ΔU2·ΔV1
     //     T   = (e1·ΔV2 − e2·ΔV1) / det     (world space, face plane)
@@ -186,7 +205,6 @@ __host__ __device__ inline void interpolateTriangleAttributes(
     glm::vec2 du1 = attr.uv1 - attr.uv0;
     glm::vec2 du2 = attr.uv2 - attr.uv0;
     const float det = du1.x * du2.y - du2.x * du1.y;
-    outTangent = glm::vec4(0.0f);   // sentinel: degenerate UVs / no tangent
     // TANGENT_DET_EPSILON guards the 2D UV triangle's area (det ≈ 0 → the solve below blows up);
     // TANGENT_EPSILON guards the derived 3D tangent's squared length (T ∥ N).
     if (fabsf(det) > TANGENT_DET_EPSILON)
