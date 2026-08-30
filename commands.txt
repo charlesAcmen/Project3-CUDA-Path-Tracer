@@ -113,3 +113,11 @@ https://192.168.1.1/
 
 # DiffuseTransmissionTest 未建场景：KHR_materials_diffuse_transmission、KHR_materials_unlit、
 # KHR_lights_punctual 均未实现，当前加载只能显示不透明的 core fallback，不能验证该测试。
+
+.\build\bin\Release\cis565_path_tracer.exe scenes\nee_small_light.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\nee_occluded_light.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\nee_deep_room.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\nee_rough_pbr.json
+
+.\build\bin\Release\cis565_path_tracer.exe scenes\stanford_dragon_pbr.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\stanford_dragon_refractive.json
