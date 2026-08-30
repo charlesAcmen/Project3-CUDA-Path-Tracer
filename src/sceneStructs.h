@@ -86,6 +86,10 @@ struct TriangleAttr {
     glm::vec3 n0, n1, n2;// vertex normals (smooth shading interpolation)
     glm::vec2 uv0{ 0.0f }, uv1{ 0.0f }, uv2{ 0.0f };// per-vertex texture coordinates (UVs)
     glm::vec3 c0{ 1.0f }, c1{ 1.0f }, c2{ 1.0f };// per-vertex colors (COLOR_0, default white = no effect)
+    // glTF TANGENT.xyz plus its mirrored-UV handedness in .w.  A zero
+    // vector means the source supplied no usable vertex tangent, so shading
+    // derives the existing per-triangle UV tangent as a fallback.
+    glm::vec4 t0{ 0.0f }, t1{ 0.0f }, t2{ 0.0f };
     int surfaceId = -1;       // compact source-binding / runtime-surface id
 };
 

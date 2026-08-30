@@ -249,6 +249,14 @@ glm::vec3 bakeNormal(const glm::mat4& invTranspose, const glm::vec3& n){
     return glm::vec3(invTranspose * glm::vec4(n, 0.0f));
 }
 
+// Tangents are directions along the surface, so unlike normals they use the
+// geom's linear transform.  Hit-time interpolation re-orthogonalizes them
+// against the baked normal before normal-map sampling.
+glm::vec4 bakeTangent(const glm::mat4& transform, const glm::vec4& tangent){
+    return glm::vec4(glm::vec3(transform * glm::vec4(glm::vec3(tangent), 0.0f)),
+                     tangent.w);
+}
+
 void buildMeshBvh(BvhBuffers& out,
                   const std::vector<TrianglePos>& positions,
                   const std::vector<TriangleAttr>& attrs)
@@ -314,6 +322,9 @@ void buildSceneBvh(BvhBuffers& out,
             dstAttr.n0 = bakeNormal(g.invTranspose, srcAttr.n0);
             dstAttr.n1 = bakeNormal(g.invTranspose, srcAttr.n1);
             dstAttr.n2 = bakeNormal(g.invTranspose, srcAttr.n2);
+            dstAttr.t0 = bakeTangent(g.transform, srcAttr.t0);
+            dstAttr.t1 = bakeTangent(g.transform, srcAttr.t1);
+            dstAttr.t2 = bakeTangent(g.transform, srcAttr.t2);
             // UVs are texture-space coordinates — the geometry transform does
             // NOT apply to them; copy through unchanged.
             dstAttr.uv0 = srcAttr.uv0;
