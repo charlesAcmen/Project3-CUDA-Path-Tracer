@@ -45,7 +45,8 @@ void appendTriangle(
     const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
     const glm::vec3& n0, const glm::vec3& n1, const glm::vec3& n2,
     const glm::vec2& u0, const glm::vec2& u1, const glm::vec2& u2,
-    const glm::vec3& c0, const glm::vec3& c1, const glm::vec3& c2)
+    const glm::vec3& c0, const glm::vec3& c1, const glm::vec3& c2,
+    const glm::vec4& t0, const glm::vec4& t1, const glm::vec4& t2)
 {
     // ---- Face normal calculation (safe fallback) ----
     glm::vec3 e1 = v1 - v0;
@@ -66,6 +67,7 @@ void appendTriangle(
     attr.n0 = validOr(n0); attr.n1 = validOr(n1); attr.n2 = validOr(n2);
     attr.uv0 = u0; attr.uv1 = u1; attr.uv2 = u2;
     attr.c0 = c0; attr.c1 = c1; attr.c2 = c2;
+    attr.t0 = t0; attr.t1 = t1; attr.t2 = t2;
     attrs.push_back(attr);
 }
 

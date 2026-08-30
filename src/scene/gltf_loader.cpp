@@ -332,18 +332,20 @@ static glm::mat4 nodeLocalMatrix(const cgltf_node* n)
     return m;   // m = T·R·S
 }
 
-// Locate the POSITION / NORMAL / TEXCOORD_0 / COLOR_0 accessors of a primitive.
+// Locate the POSITION / NORMAL / TEXCOORD_0 / COLOR_0 / TANGENT accessors of a primitive.
 // TEXCOORD_0 and COLOR_0 are preferred (higher sets are ignored).
 static void findAttributeAccessors(const cgltf_primitive* prim,
                                    const cgltf_accessor*& posAcc,
                                    const cgltf_accessor*& nrmAcc,
                                    const cgltf_accessor*& uvAcc,
-                                   const cgltf_accessor*& colAcc)
+                                   const cgltf_accessor*& colAcc,
+                                   const cgltf_accessor*& tanAcc)
 {
     posAcc = nullptr;
     nrmAcc = nullptr;
     uvAcc  = nullptr;
     colAcc = nullptr;
+    tanAcc = nullptr;
     for (cgltf_size ai = 0; ai < prim->attributes_count; ++ai)
     {
         const cgltf_attribute* attr = &prim->attributes[ai];
@@ -355,6 +357,8 @@ static void findAttributeAccessors(const cgltf_primitive* prim,
             uvAcc = attr->data;   // TEXCOORD_0 (we ignore higher sets)
         else if (attr->type == cgltf_attribute_type_color && attr->index == 0)
             colAcc = attr->data;   // COLOR_0 (we ignore higher sets)
+        else if (attr->type == cgltf_attribute_type_tangent)
+            tanAcc = attr->data;
     }
 }
 
@@ -387,12 +391,13 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
         return;
     }
 
-    // ---- Locate POSITION / NORMAL / TEXCOORD_0 / COLOR_0 accessors ----
+    // ---- Locate POSITION / NORMAL / TEXCOORD_0 / COLOR_0 / TANGENT accessors ----
     const cgltf_accessor* posAcc = nullptr;
     const cgltf_accessor* nrmAcc = nullptr;
     const cgltf_accessor* uvAcc  = nullptr;
     const cgltf_accessor* colAcc  = nullptr;
-    findAttributeAccessors(prim, posAcc, nrmAcc, uvAcc, colAcc);
+    const cgltf_accessor* tanAcc = nullptr;
+    findAttributeAccessors(prim, posAcc, nrmAcc, uvAcc, colAcc, tanAcc);
     if (posAcc == nullptr)
     {
         Log::warn("Scene", "glTF primitive has no POSITION accessor; skipping");
@@ -423,6 +428,18 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
         return;
     }
 
+    // A glTF tangent belongs to the same indexed vertex stream as POSITION.
+    // Unlike NORMAL, a malformed tangent can safely fall back to the existing
+    // UV-derived tangent path, so retain geometry and ignore only that slot.
+    if (tanAcc != nullptr && tanAcc->count != vertCount)
+    {
+        Log::warn("Scene",
+                  "glTF primitive TANGENT count (%zu) != POSITION count "
+                  "(%zu); ignoring tangents",
+                  (size_t)tanAcc->count, (size_t)vertCount);
+        tanAcc = nullptr;
+    }
+
     // Unpack all vertex positions / normals / UVs (cgltf_accessor_read_float
     // handles integer and normalized component types).
     vector<float> pos = unpackAccessor(posAcc, 3);
@@ -431,6 +448,12 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
     vector<float> nrm;
     if (nrmAcc != nullptr)
         nrm = unpackAccessor(nrmAcc, 3);
+
+    // Tangents are optional VEC4 values. xyz is the tangent direction and w
+    // is the glTF mirrored-UV handedness used to reconstruct the bitangent.
+    vector<float> tan;
+    if (tanAcc != nullptr)
+        tan = unpackAccessor(tanAcc, 4);
 
     // UVs (optional; default (0,0)).  glTF UVs are PER-VERTEX — shared by
     // every face that references the vertex — so unlike OBJ there is no
@@ -481,6 +504,13 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
                          nrm[3 * (size_t)i + 1],
                          nrm[3 * (size_t)i + 2]);
     };
+    auto tangentAt = [&](cgltf_size i) -> glm::vec4 {
+        if (tanAcc == nullptr) return glm::vec4(0.0f);
+        return glm::vec4(tan[4 * (size_t)i + 0],
+                         tan[4 * (size_t)i + 1],
+                         tan[4 * (size_t)i + 2],
+                         tan[4 * (size_t)i + 3]);
+    };
     // UVs are texture-space — NOT transformed by the node matrix.
     auto uvAt = [&](cgltf_size i) -> glm::vec2 {
         if (uvAcc == nullptr) return glm::vec2(0.0f);
@@ -506,6 +536,15 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
             ? glm::vec3(worldIT * glm::vec4(norm(i), 0.0f))
             : glm::vec3(0.0f);   // no vertex normal → appendTriangle's face-normal fallback
     };
+    // Tangents are directions in the surface plane, so they follow the
+    // model's linear transform (not inverse-transpose like normals).  The
+    // hit-time TBN build re-orthogonalizes them against the interpolated
+    // normal, which also handles non-uniform scale.
+    auto tTrans = [&](cgltf_size i) -> glm::vec4 {
+        const glm::vec4 tangent = tangentAt(i);
+        return glm::vec4(glm::vec3(world * glm::vec4(glm::vec3(tangent), 0.0f)),
+                         tangent.w);
+    };
 
     // Emit one triangle linked to the primitive's shared surface binding.
     auto emit = [&](cgltf_size i0, cgltf_size i1, cgltf_size i2) {
@@ -513,7 +552,8 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
                        vTrans(i0), vTrans(i1), vTrans(i2),
                        nTrans(i0), nTrans(i1), nTrans(i2),
                        uvAt(i0), uvAt(i1), uvAt(i2),
-                       colAt(i0), colAt(i1), colAt(i2));
+                       colAt(i0), colAt(i1), colAt(i2),
+                       tTrans(i0), tTrans(i1), tTrans(i2));
         attrs.back().surfaceId = surfaceBindingId;
         ++count;
     };

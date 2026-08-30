@@ -36,7 +36,10 @@ void appendTriangle(std::vector<TrianglePos>& positions,
                     const glm::vec2& u2 = glm::vec2(0.0f),
                     const glm::vec3& c0 = glm::vec3(1.0f),
                     const glm::vec3& c1 = glm::vec3(1.0f),
-                    const glm::vec3& c2 = glm::vec3(1.0f));
+                    const glm::vec3& c2 = glm::vec3(1.0f),
+                    const glm::vec4& t0 = glm::vec4(0.0f),
+                    const glm::vec4& t1 = glm::vec4(0.0f),
+                    const glm::vec4& t2 = glm::vec4(0.0f));
 
 // Load an image file (PNG/JPG via stb_image) into Scene::textures.
 // Returns the Scene::textures index (>= 0), or -1 on failure.
