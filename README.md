@@ -27,7 +27,7 @@ not a per-object intersection loop.
 | Refraction with Fresnel | Implemented | Uses `glm::refract`, total-internal-reflection handling, and accurate dielectric Fresnel roulette. |
 | Thin-lens depth of field | Implemented | `LENS_RADIUS` and `FOCAL_DISTANCE` drive aperture sampling and focal-plane convergence. |
 | OBJ loading | Implemented | Triangle loading plus companion MTL color, bump/normal, and emissive maps. |
-| glTF / GLB loading | Implemented | POSITION, NORMAL, TEXCOORD_0, COLOR_0, node transforms, external images, and embedded bufferView images. |
+| glTF / GLB loading | Implemented | POSITION, NORMAL, TEXCOORD_0, COLOR_0, TANGENT, node transforms, external images, and embedded bufferView images. |
 | Shared-memory stream compaction | Implemented and runtime-toggleable | The shared-memory hierarchical scan is `--compact=3`; global scan and Thrust variants are also retained. |
 | Russian roulette termination | Implemented | After `RR_DEPTH`, survival probability is derived from path throughput and clamped to configured bounds. |
 | Hierarchical acceleration structure | Implemented | CPU-built, GPU-traversed world-space BVH with iterative closest-hit traversal. It is always enabled; there is no linear-intersection fallback toggle for an A/B comparison. |
