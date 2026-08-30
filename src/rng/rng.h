@@ -120,6 +120,9 @@ __host__ __device__ inline unsigned int utilhash(unsigned int a)
 //    8    23    Fresnel roulette               scatterRay (refractive branch)
 //    9    29    Path Russian roulette          russianRouletteTerminate
 //   10    31    Diffuse/specular split (PBR)   scatterRay (GGX surface)
+//   11    37    Direct-light alias selection    shadeMaterial
+//   12    41    Direct-light triangle sample u  shadeMaterial
+//   13    43    Direct-light triangle sample v  shadeMaterial
 //   ---  -----  -----------------------------  ----------------------------
 
 /** Named constants for Halton dimension indices.
@@ -142,6 +145,9 @@ namespace HaltonDim {
     constexpr int FresnelRR      = 8;
     constexpr int PathRR         = 9;
     constexpr int PbrSplit       = 10;   // diffuse vs specular roulette (GGX surface)
+    constexpr int LightSelection = 11;
+    constexpr int LightSampleU   = 12;
+    constexpr int LightSampleV   = 13;
 }
 
 /**
