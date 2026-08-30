@@ -120,6 +120,31 @@ static void applyMaterialType(const json& p, const string& name, Material& m)
     }
 }
 
+// JSON area lights retain their historical two-sided behavior unless the
+// scene explicitly requests a physically one-sided emitting wall/panel.
+static void applyEmissionSidedness(const json& p, const string& name, Material& m)
+{
+    if (!p.contains("EMISSION_SIDEDNESS")) return;
+
+    std::string value = p["EMISSION_SIDEDNESS"].get<std::string>();
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    if (value == "ONE_SIDED" || value == "ONESIDED")
+    {
+        m.emissionSidedness = EmissionSidedness::OneSided;
+    }
+    else if (value == "TWO_SIDED" || value == "TWOSIDED")
+    {
+        m.emissionSidedness = EmissionSidedness::TwoSided;
+    }
+    else
+    {
+        Log::warn("Scene",
+            "Unknown EMISSION_SIDEDNESS '%s' for '%s'; using TwoSided",
+            value.c_str(), name.c_str());
+    }
+}
+
 /**
  * Parse the "Materials" section into Scene::materials.
  *
@@ -144,6 +169,7 @@ static void parseMaterials(
         newMaterial.invIndexOfRefraction = 1.0f;
 
         applyMaterialType(p, name, newMaterial);
+        applyEmissionSidedness(p, name, newMaterial);
 
         MatNameToID[name] = scene.materials.size();
         scene.materials.emplace_back(newMaterial);
