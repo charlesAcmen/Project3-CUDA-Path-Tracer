@@ -81,6 +81,7 @@ set(headers
     src/image.h
     src/interactions/interactions.h
     src/intersection/intersections.h
+    src/lighting/light_sampling.h
     src/glslUtility.hpp
     src/pathtrace.h
     src/profiler/profiler.h
@@ -111,6 +112,7 @@ set(sources
     src/kernels/bvh_traversal.cu
     src/kernels/shading.cu
     src/kernels/accumulation.cu
+    src/lighting/light_sampling.cpp
     src/scene/gltf_loader.cpp
     src/scene/obj_loader.cpp
     src/scene/scene.cpp
