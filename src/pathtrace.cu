@@ -26,6 +26,7 @@
 #include "profiler/profiler.h"
 #include "kernels/kernel_config.h"
 #include "kernels/bvh_traversal.cuh"      // bvhTraverse (BVH GPU traversal)
+#include "lighting/light_sampling.h"       // emissive-triangle alias table
 #include "rng/rng.h"
 #include "bvh/bvh.h"                      // bvh::buildSceneBvh, uploadToDevice, freeDevice
 #include "efficient.h"       // StreamCompaction::Efficient
@@ -147,6 +148,14 @@ void pathtraceInit(Scene* scene)
             }
         }
 
+        const HostLightSampling hostLights = buildLightSampling(
+            g_dev.bvh.hostTrianglePositions,
+            g_dev.bvh.hostTriangleAttrs,
+            g_dev.bvh.hostSurfaces,
+            scene->materials,
+            scene->surfaceBindings,
+            scene->textures);
+
         const int n = (int)g_dev.bvh.hostTrianglePositions.size();
         if (n > 0)
         {
@@ -165,6 +174,27 @@ void pathtraceInit(Scene* scene)
                        g_dev.bvh.hostSurfaces.size() * sizeof(Surface));
             cudaMemcpy(g_dev.deviceSurfaces, g_dev.bvh.hostSurfaces.data(),
                        g_dev.bvh.hostSurfaces.size() * sizeof(Surface),
+                       cudaMemcpyHostToDevice);
+        }
+
+        if (!hostLights.triangles.empty())
+        {
+            g_dev.lightCount = static_cast<int>(hostLights.triangles.size());
+            cudaMalloc(&g_dev.lightTriangles,
+                       hostLights.triangles.size() * sizeof(LightTriangle));
+            cudaMemcpy(g_dev.lightTriangles, hostLights.triangles.data(),
+                       hostLights.triangles.size() * sizeof(LightTriangle),
+                       cudaMemcpyHostToDevice);
+            cudaMalloc(&g_dev.lightAliasEntries,
+                       hostLights.aliasEntries.size() * sizeof(LightAliasEntry));
+            cudaMemcpy(g_dev.lightAliasEntries, hostLights.aliasEntries.data(),
+                       hostLights.aliasEntries.size() * sizeof(LightAliasEntry),
+                       cudaMemcpyHostToDevice);
+            cudaMalloc(&g_dev.lightIndexByTriangle,
+                       hostLights.lightIndexByTriangle.size() * sizeof(int));
+            cudaMemcpy(g_dev.lightIndexByTriangle,
+                       hostLights.lightIndexByTriangle.data(),
+                       hostLights.lightIndexByTriangle.size() * sizeof(int),
                        cudaMemcpyHostToDevice);
         }
 
@@ -231,12 +261,6 @@ void pathtraceInit(Scene* scene)
     // Gaussian weight buffer (small: max 65 floats ≈ 260 bytes)
     cudaMalloc(&g_dev.bloomWeights, (2 * MAX_BLOOM_RADIUS + 1) * sizeof(float));
 
-    // Sort buffers — always allocated (negligible overhead); sorting
-    // early-returns when g_opts.sortByMaterial is false at runtime.
-    cudaMalloc(&g_dev.sortKeys, pixelcount * sizeof(int));
-    cudaMalloc(&g_dev.sortIndices, pixelcount * sizeof(int));
-    cudaMalloc(&g_dev.intersectionsSorted, pixelcount * sizeof(HitRecord));
-
     s_initialized = true;
 
     checkCUDAError("pathtraceInit");
@@ -257,8 +281,11 @@ void pathtraceFree()
     cudaFree(g_dev.materials);
     cudaFree(g_dev.intersections);
     cudaFree(g_dev.sortKeys);
+    g_dev.sortKeys = nullptr;
     cudaFree(g_dev.sortIndices);
+    g_dev.sortIndices = nullptr;
     cudaFree(g_dev.intersectionsSorted);
+    g_dev.intersectionsSorted = nullptr;
     cudaFree(g_dev.imageDisplay);  // post-process LDR display buffer
     cudaFree(g_dev.bloomBufA);     // bloom ping-pong buffer A
     cudaFree(g_dev.bloomBufB);     // bloom ping-pong buffer B
@@ -271,6 +298,13 @@ void pathtraceFree()
     g_dev.deviceSurfaces = nullptr;
     cudaFree(g_dev.deviceSurfaceBindings);
     g_dev.deviceSurfaceBindings = nullptr;
+    cudaFree(g_dev.lightTriangles);
+    g_dev.lightTriangles = nullptr;
+    cudaFree(g_dev.lightAliasEntries);
+    g_dev.lightAliasEntries = nullptr;
+    cudaFree(g_dev.lightIndexByTriangle);
+    g_dev.lightIndexByTriangle = nullptr;
+    g_dev.lightCount = 0;
     cudaFree(g_dev.textures.pixels);
     g_dev.textures.pixels = nullptr;
     cudaFree(g_dev.textures.infos);
@@ -407,7 +441,10 @@ void pathtrace(uchar4* pbo, int iter)
             g_dev.deviceTriangleAttrs,
             g_dev.deviceSurfaces,
             g_dev.deviceSurfaceBindings,
-            g_dev.textures
+            g_dev.textures,
+            LightSamplingView{ g_dev.lightTriangles, g_dev.lightAliasEntries,
+                               g_dev.lightIndexByTriangle, g_dev.lightCount },
+            g_dev.bvh.deviceNodes
         };
         ShadingBufferView shadingBuffers = {
             g_dev.intersections,

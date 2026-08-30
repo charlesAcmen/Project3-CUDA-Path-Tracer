@@ -18,6 +18,8 @@ struct DeviceBuffers {
     unsigned char*          pathActivityFlags   = nullptr;  // shading output consumed by mask-based compaction
     Material*               materials           = nullptr;
     HitRecord*              intersections       = nullptr;
+    // Allocated together on first material-sort use.  They stay resident
+    // afterwards so an ImGui toggle does not reallocate every frame.
     int*                    sortKeys            = nullptr;
     int*                    sortIndices         = nullptr;
     HitRecord*              intersectionsSorted = nullptr;
@@ -35,6 +37,14 @@ struct DeviceBuffers {
     TriangleAttr*           deviceTriangleAttrs       = nullptr;
     Surface*                deviceSurfaces            = nullptr;
     SurfaceBinding*         deviceSurfaceBindings     = nullptr;
+
+    // Direct-light sampler built from the flattened world-space triangles.
+    // Kept outside BvhBuffers because it is shading metadata, not traversal
+    // state; the BVH hot loop never reads these arrays.
+    LightTriangle*          lightTriangles            = nullptr;
+    LightAliasEntry*        lightAliasEntries         = nullptr;
+    int*                    lightIndexByTriangle      = nullptr;
+    int                     lightCount                = 0;
 
     // Texture table: every scene image concatenated into one flat texel
     // buffer, with one TextureInfo per image telling the sampler where its

@@ -15,6 +15,8 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
         segment.throughput = glm::vec3(1.0f, 1.0f, 1.0f);
         segment.accumulatedRadiance = glm::vec3(0.0f, 0.0f, 0.0f);
+        segment.previousBsdfPdfOmega = 0.0f;
+        segment.previousTriangleIndex = -1;
 
         // RNG state shared across all primary-ray sampling.
         // Halton mode:  next(dim) selects a distinct prime base per dimension,

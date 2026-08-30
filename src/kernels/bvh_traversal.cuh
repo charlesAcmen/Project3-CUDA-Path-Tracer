@@ -23,7 +23,8 @@
  * the single world-space BVH.
  *
  * \param num_paths         Number of active paths
- * \param pathSegments      Active-path buffer
+ * \param pathSegments      Active-path buffer (including the previous
+ *                             primitive self-hit guard)
  * \param intersections     [out] Compact closest-hit record per path
  * \param deviceTrianglePositions   World-space position array (REORDERED by the BVH build)
  * \param deviceBvhNodes    Node array (device, built on host)

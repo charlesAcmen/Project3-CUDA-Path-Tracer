@@ -94,13 +94,16 @@ struct BvhHit
  * @param nodes         Node array (device or host); nullptr → miss
  * @param tris          Position array (leaf chunks reference into it)
  * @param maxT          Far plane: only hits with t < maxT are reported.
+ * @param ignoredTriangleIndex Optional previous primitive to skip as a
+ *                             numerical self-intersection guard.
  * @return              BvhHit — hit = true only if a triangle with t < maxT
  */
 __host__ __device__ inline BvhHit traverseBvhClosest(
     const Ray& objRay,
     const BvhNode* nodes,
     const TrianglePos* tris,
-    float maxT)
+    float maxT,
+    int ignoredTriangleIndex = -1)
 {
     BvhHit result;
     result.t = maxT;   // tighten this as closer hits are found
@@ -144,13 +147,15 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
             const int triCount = node.leafTriCount();
             for (int j = 0; j < triCount; j++)
             {
+                const int triangleIndex = triBase + j;
+                if (triangleIndex == ignoredTriangleIndex) continue;
                 float t;
                 float u;
                 float v;
                 // The hot traversal loop needs only positions plus t/u/v.
                 // Interpolating normals, UVs, colors and tangents here would
                 // repeat that work for any hit later replaced by a closer one.
-                if (intersectTrianglePositions(objRay, tris[triBase + j], t, u, v))
+                if (intersectTrianglePositions(objRay, tris[triangleIndex], t, u, v))
                 {
                     if (t < result.t)
                     {
@@ -158,7 +163,7 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
                         result.u        = u;
                         result.v        = v;
                         result.hit      = true;
-                        result.triIndex = triBase + j;
+                        result.triIndex = triangleIndex;
                     }
                 }
             }
@@ -208,6 +213,106 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
     }
 
     return result;
+}
+
+/**
+ * Bounded any-hit BVH traversal for visibility rays.
+ *
+ * The tree and triangle positions use the same world-space layout as closest
+ * traversal.  Once an intersection before maxT is found, no hit attributes or
+ * farther nodes are needed, so the query returns immediately.  The optional
+ * ignored triangle is a numerical self-intersection guard; all other
+ * triangles remain blockers.  Callers without a previous primitive pass -1.
+ */
+__host__ __device__ inline bool traverseBvhAnyHit(
+    const Ray& ray,
+    const BvhNode* nodes,
+    const TrianglePos* tris,
+    float maxT,
+    int ignoredTriangleIndex = -1)
+{
+    if (nodes == nullptr || tris == nullptr || !(maxT > RAY_EPSILON))
+        return false;
+
+    const glm::vec3 invDir(
+        1.0f / ray.direction.x,
+        1.0f / ray.direction.y,
+        1.0f / ray.direction.z);
+
+    int stack[kMaxBvhStackDepth];
+    int sp = 0;
+    int nodeIndex = 0;
+    bool nodeBoundsKnownHit = false;
+
+    while (true)
+    {
+        const BvhNode& node = nodes[nodeIndex];
+        if (!nodeBoundsKnownHit &&
+            !intersectRayAABB(ray.origin, invDir, node.bounds, RAY_EPSILON, maxT))
+        {
+            if (sp == 0) break;
+            nodeIndex = stack[--sp];
+            continue;
+        }
+        nodeBoundsKnownHit = false;
+
+        if (node.isLeaf)
+        {
+            const int triBase = node.leafTriOffset();
+            const int triCount = node.leafTriCount();
+            for (int j = 0; j < triCount; ++j)
+            {
+                const int triangleIndex = triBase + j;
+                if (triangleIndex == ignoredTriangleIndex) continue;
+                float t, u, v;
+                if (intersectTrianglePositions(ray, tris[triangleIndex], t, u, v) &&
+                    t < maxT)
+                    return true;
+            }
+
+            if (sp == 0) break;
+            nodeIndex = stack[--sp];
+            continue;
+        }
+
+        float entryL, entryR;
+        const bool hitL = intersectRayAABBEntry(ray.origin, invDir,
+            nodes[node.childL()].bounds, RAY_EPSILON, maxT, entryL);
+        const bool hitR = intersectRayAABBEntry(ray.origin, invDir,
+            nodes[node.childR()].bounds, RAY_EPSILON, maxT, entryR);
+
+        if (hitL && hitR)
+        {
+            if (entryL < entryR)
+            {
+                if (sp < kMaxBvhStackDepth - 1) stack[sp++] = node.childR();
+                nodeIndex = node.childL();
+            }
+            else
+            {
+                if (sp < kMaxBvhStackDepth - 1) stack[sp++] = node.childL();
+                nodeIndex = node.childR();
+            }
+            nodeBoundsKnownHit = true;
+        }
+        else if (hitL)
+        {
+            nodeIndex = node.childL();
+            nodeBoundsKnownHit = true;
+        }
+        else if (hitR)
+        {
+            nodeIndex = node.childR();
+            nodeBoundsKnownHit = true;
+        }
+        else
+        {
+            if (sp == 0) break;
+            nodeIndex = stack[--sp];
+        }
+    }
+
+    return false;
 }
 
 // Host-side construction + GPU memory management, implemented in bvh.cu.

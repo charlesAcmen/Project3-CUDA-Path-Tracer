@@ -85,6 +85,24 @@ __host__ __device__ glm::vec3 resolveEmissive(
     const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m);
 
+// Cosine between the geometric emission side and a direction leaving the
+// surface.  TwoSided preserves the legacy absolute-cosine convention;
+// OneSided returns zero on the back side.
+__host__ __device__ float emissionCosine(
+    const Material& m,
+    const glm::vec3& geometricNormal,
+    const glm::vec3& emittedDirection);
+
+// Resolve radiance emitted toward `emittedDirection`. JSON Emitting surfaces
+// multiply the shared texture/factor result by emittance; model auto-glow
+// uses the same value without that multiplier. OneSided emitters return zero
+// from their geometric-normal back side.
+__host__ __device__ glm::vec3 evaluateEmittedRadiance(
+    const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const Material& m,
+    const glm::vec3& geometricNormal,
+    const glm::vec3& emittedDirection);
+
 // Resolve the per-hit GGX surface parameters for a Reflective / Pbr material.
 //
 // Roughness source chain — first hit wins:
@@ -124,6 +142,54 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
     const TextureTable& textures,
     glm::vec2 uv);
 
+// Continuous BSDF evaluation used by direct-light sampling and MIS.  `value`
+// is f(wo, wi); pdfOmega is in solid-angle measure.  Delta events return
+// isDelta=true and pdfOmega=0 because a finite-area light sample cannot
+// generate their single direction.  Invalid numerical evaluations return the
+// zero-initialized result, preserving this same no-continuous-contribution
+// contract without clamping valid samples.
+struct BsdfEvaluation
+{
+    glm::vec3 value{ 0.0f };
+    glm::vec3 shadingNormal{ 0.0f };
+    float pdfOmega = 0.0f;
+    bool isDelta = false;
+};
+
+// Texture-resolved, incident-direction-dependent BSDF state for one hit.
+// Direct lighting and continuation scattering consume the same values, so a
+// normal/base-color/ORM lookup happens once per shaded non-emissive hit.
+// This deliberately contains only material parameters; light samples and
+// shadow-traversal temporaries remain local to the direct-light path.
+struct ResolvedBsdf
+{
+    glm::vec3 shadingNormal{ 0.0f };
+    glm::vec3 baseColor{ 0.0f }; // Lambert albedo, PBR baseColor, or Reflective tint
+    float roughness = 0.0f;
+    float metallic = 0.0f;
+};
+
+__host__ __device__ ResolvedBsdf resolveBsdf(
+    const ShadeableIntersection& hit,
+    const Material& material,
+    const TextureTable& textures,
+    const glm::vec3& incidentRayDirection);
+
+__host__ __device__ BsdfEvaluation evaluateBsdf(
+    const ResolvedBsdf& resolved,
+    const Material& material,
+    const glm::vec3& incidentRayDirection,
+    const glm::vec3& outgoingDirection);
+
+// Compatibility entry point for focused BSDF tests.  Shading code should
+// resolve once, then use the overload above for every direction at that hit.
+__host__ __device__ BsdfEvaluation evaluateBsdf(
+    const ShadeableIntersection& hit,
+    const Material& material,
+    const TextureTable& textures,
+    const glm::vec3& incidentRayDirection,
+    const glm::vec3& outgoingDirection);
+
 /**
  * Scatter a ray with some probabilities according to the material properties.
  * For example, a diffuse surface scatters in a cosine-weighted hemisphere.
@@ -147,14 +213,13 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
  * This method applies its changes to the Ray parameter `ray` in place.
  * It also modifies the color `color` of the ray in place.
  *
- * Texture input: the hit carries a resolved shared SurfaceBinding and a UV.
- * The Diffuse branch resolves the albedo from the mesh's baseColor slot and
- * samples the scene's texture table (`textures`).
- * The unified GGX surface (Reflective / Pbr) additionally samples the
- * metallicRoughness slot (G = roughness, B = metallic) per-texel.  Refractive
- * materials keep their material color and ignore textures.
+ * Texture input is resolved from the hit's shared SurfaceBinding and UV before
+ * this overload is called: diffuse receives baseColor albedo, while GGX
+ * receives baseColor/metallicRoughness-derived parameters. Refractive
+ * materials keep their material color and ignore textures. The compatibility
+ * overload below performs that one-time resolution for callers without NEE.
  *
- * The hit geometry (point, normal, UV, texture slots) is passed as the
+ * The hit geometry (point, smooth/geometric normals, UV, texture slots) is passed as the
  * ShadeableIntersection record rather than as loose scalars: it is exactly
  * the surface state the traversal produced, so the caller hands over the
  * whole hit.  The exact hit point is derived inside from
@@ -162,6 +227,16 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
  *
  * You may need to change the parameter list for your purposes!
  */
+__host__ __device__ void scatterRay(
+    PathSegment& pathSegment,
+    const ShadeableIntersection& hit,
+    const Material& m,
+    const ResolvedBsdf& resolved,
+    RngState& rng);
+
+// Compatibility entry point for focused tests and callers that do not also
+// perform direct-light evaluation.  The main shading kernel resolves once and
+// calls the overload above, avoiding repeated texture work.
 __host__ __device__ void scatterRay(
     PathSegment& pathSegment,
     const ShadeableIntersection& hit,

@@ -178,6 +178,38 @@ struct TextureTable
     int          count  = 0;         // number of images in the table
 };
 
+// One world-space emissive triangle selected by direct lighting.  The index
+// refers to the BVH-flattened triangle arrays, so both shadow traversal and
+// shading use the same geometry order.  selectPmf is the exact discrete
+// probability represented by the alias table; it is retained for the MIS
+// light PDF when a BSDF ray hits this triangle.
+struct LightTriangle
+{
+    int   triangleIndex = -1;
+    float area          = 0.0f;
+    float selectPmf     = 0.0f;
+};
+
+// Walker/Vose alias-table column for O(1) emissive-triangle selection.
+// `q` is the probability of selecting this column itself; otherwise alias is
+// selected.  The corresponding LightTriangle holds the original PMF.
+struct LightAliasEntry
+{
+    float q     = 0.0f;
+    int   alias = -1;
+};
+
+// Read-only direct-light resources consumed by shading.  The reverse lookup
+// is intentionally separate from TriangleAttr: only an emission hit needs it,
+// while the BVH traversal hot loop remains position-only.
+struct LightSamplingView
+{
+    const LightTriangle*  triangles            = nullptr;
+    const LightAliasEntry* aliasEntries        = nullptr;
+    const int*            lightIndexByTriangle = nullptr;
+    int                   count                = 0;
+};
+
 // Whether a ray is entering or exiting a refractive medium.
 enum class HitSide : int
 {
@@ -272,6 +304,14 @@ struct PathSegment
     Ray ray;
     glm::vec3 throughput;          // Path weight: product of BSDF, Fresnel, RR, etc.
     glm::vec3 accumulatedRadiance; // Accumulated radiance: sum of emissive contributions
+    // Solid-angle PDF of the previous continuous BSDF event.  Zero denotes a
+    // primary ray or delta event, both of which receive MIS weight one when
+    // they reach an emitter.
+    float previousBsdfPdfOmega;
+    // Flattened triangle that spawned the current secondary ray.  Closest-hit
+    // traversal skips only this primitive as a numerical self-intersection
+    // guard; -1 marks a primary ray.
+    int previousTriangleIndex = -1;
     int pixelIndex;
     int remainingBounces;
 };
@@ -311,6 +351,7 @@ struct ShadeableIntersection
   float t;// parametric distance along the ray
   //t > 0.0f: intersection with an object
   //t < 0.0f: no intersection with an object(initial value)
+  int triangleIndex = -1; // flattened world-space primitive that was hit
   glm::vec3 surfaceNormal;
   // Per-triangle tangent aligned with the texture's +U axis (world space,
   // orthogonalized against the interpolated normal).  .xyz = unit tangent,
@@ -318,6 +359,14 @@ struct ShadeableIntersection
   // → shading computes B = cross(N, T)·w.  (0,0,0,0) sentinel = degenerate
   // UVs → tangent-space normal mapping is skipped.
   glm::vec4 tangent;
+  // Unit geometric normal from the winning triangle's world-space positions.
+  // It is used only to move secondary-ray origins; smooth/normal-mapped
+  // normals remain responsible for BSDF evaluation.
+  glm::vec3 geometricNormal{ 0.0f };
+  // Conservative world-space scale used by the ray-origin error offset.  It
+  // includes the triangle extent so a large triangle centred near the origin
+  // does not receive an under-sized fixed offset.
+  float rayOriginScale = 0.0f;
   uint32_t surfaceFeatures;
   glm::vec2 uv;   // interpolated texture coordinate at the hit point
   glm::vec3 vertexColor; // interpolated vertex color (COLOR_0), default white = no effect

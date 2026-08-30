@@ -33,9 +33,11 @@ __global__ void bvhTraverse(
     }
 
     // ---- Single closest-hit traversal over the whole scene ----
-    // Root is node 0; LARGE_T far plane (the traversal tightens it).
+    // Root is node 0; LARGE_T far plane (the traversal tightens it).  The
+    // previous primitive is skipped only as a numerical self-hit guard.
     const BvhHit hit = traverseBvhClosest(pathSegment.ray, deviceBvhNodes,
-                                          deviceTrianglePositions, LARGE_T);
+                                          deviceTrianglePositions, LARGE_T,
+                                          pathSegment.previousTriangleIndex);
 
     if (!hit.hit)
     {

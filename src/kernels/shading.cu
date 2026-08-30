@@ -1,5 +1,6 @@
 #include "shading.cuh"
 #include "intersection/triangle.h"  // interpolateTriangleAttributes
+#include "lighting/light_sampling.h"  // sampleLightTriangle
 
 // ====================================================================
 // Shading Kernel Implementation
@@ -56,6 +57,40 @@ static __device__ void handleDebugDOFOverlay(
         pathSegment.remainingBounces = 0;
     }
 }
+
+static __device__ bool normalizedTriangleNormal(
+    const TrianglePos& triangle, glm::vec3& normal)
+{
+    normal = glm::cross(triangle.v1 - triangle.v0,
+                        triangle.v2 - triangle.v0);
+    const float length2 = glm::dot(normal, normal);
+    if (!(length2 > 0.0f) || !isfinite(length2)) return false;
+    normal *= glm::inversesqrt(length2);
+    return isfinite(normal.x) && isfinite(normal.y) && isfinite(normal.z);
+}
+
+static __device__ __forceinline__ bool finiteVec3(const glm::vec3& value)
+{
+    return isfinite(value.x) && isfinite(value.y) && isfinite(value.z);
+}
+
+static __device__ void accumulateDirectLighting(
+    PathSegment& pathSegment,
+    const ShadeableIntersection& receiver,
+    const TrianglePos& receiverTriangle,
+    int receiverTriangleIndex,
+    const Material& receiverMaterial,
+    const ResolvedBsdf& receiverBsdf,
+    const ShadingSceneView& scene,
+    RngState& rng);
+
+static __device__ float emissionHitMisWeight(
+    const PathSegment& pathSegment,
+    const HitRecord& hit,
+    const TrianglePos& triangle,
+    const Material& lightMaterial,
+    const LightSamplingView& lights);
+
 __global__ void shadeMaterial(
     int iter,
     int num_paths,
@@ -122,7 +157,10 @@ __global__ void shadeMaterial(
                 &surfaceBindings[surfaceRef.surfaceBindingId + 1];
             ShadeableIntersection intersection{};
             intersection.t          = hit.t;
+            intersection.triangleIndex = hit.triangleIndex;
             intersection.surfaceFeatures = surfaceRef.features;
+            normalizedTriangleNormal(trianglePos, intersection.geometricNormal);
+            intersection.rayOriginScale = triangleRayOriginScale(trianglePos);
             interpolateTriangleAttributes(trianglePos, triangleAttr, hit.u, hit.v,
                                           (surfaceRef.features & SurfaceFeatureNormalMap) != 0,
                                           intersection.surfaceNormal,
@@ -136,10 +174,16 @@ __global__ void shadeMaterial(
                 // Light source hit (JSON Emitting): Le = texture·factor·strength
                 // (flat color when no emissive slot), scaled by the JSON emittance
                 // knob.  Accumulate and terminate the path.
-                pathSegment.accumulatedRadiance = pathSegment.throughput *
-                    resolveEmissive(*intersection.surface, scene.textures,
-                                    intersection.uv, material) *
-                    material.emittance;
+                glm::vec3 geometricNormal;
+                const glm::vec3 emittedDirection = -pathSegment.ray.direction;
+                const glm::vec3 Le = normalizedTriangleNormal(trianglePos, geometricNormal)
+                    ? evaluateEmittedRadiance(*intersection.surface, scene.textures,
+                                              intersection.uv, material,
+                                              geometricNormal, emittedDirection)
+                    : glm::vec3(0.0f);
+                pathSegment.accumulatedRadiance += pathSegment.throughput * Le *
+                    emissionHitMisWeight(pathSegment, hit, trianglePos,
+                                         material, scene.lights);
                 pathSegment.remainingBounces = 0;
             }
             else
@@ -153,18 +197,30 @@ __global__ void shadeMaterial(
                 // emissive map on a shaded surface black.)
                 if (intersection.surface->emissiveFactor != glm::vec3(0.0f))
                 {
-                    pathSegment.accumulatedRadiance += pathSegment.throughput *
-                        resolveEmissive(*intersection.surface, scene.textures,
-                                       intersection.uv, material);
+                    glm::vec3 geometricNormal;
+                    const glm::vec3 emittedDirection = -pathSegment.ray.direction;
+                    const glm::vec3 Le = normalizedTriangleNormal(trianglePos, geometricNormal)
+                        ? evaluateEmittedRadiance(*intersection.surface, scene.textures,
+                                                  intersection.uv, material,
+                                                  geometricNormal, emittedDirection)
+                        : glm::vec3(0.0f);
+                    pathSegment.accumulatedRadiance += pathSegment.throughput * Le *
+                        emissionHitMisWeight(pathSegment, hit, trianglePos,
+                                             material, scene.lights);
                 }
 
-                // ---- Indirect illumination (BSDF continuation ray) ----
-                // Surface hit: scatter the ray according to the material BSDF.
-                // The hit record carries the surface normal, UV and per-triangle
-                // texture binding, so the diffuse branch can sample the texture
-                // table; scatterRay derives the exact hit point from hit.t.
+                const ResolvedBsdf resolvedBsdf = resolveBsdf(
+                    intersection, material, scene.textures,
+                    pathSegment.ray.direction);
+                accumulateDirectLighting(pathSegment, intersection, trianglePos,
+                                         hit.triangleIndex, material, resolvedBsdf,
+                                         scene, rngScatter);
+
+                // The resolved state carries this hit's normal-map and texture
+                // inputs through the continuation, while scatterRay derives the
+                // exact hit point from hit.t.
                 scatterRay(pathSegment, intersection, material,
-                    rngScatter, scene.textures);
+                    resolvedBsdf, rngScatter);
 
                 // ---- Russian roulette ----
                 // Probabilistically terminate low-throughput paths after
@@ -185,4 +241,137 @@ __global__ void shadeMaterial(
 
         writePathActivity(pathActivityFlags, idx, pathSegment);
     }
+}
+
+static __device__ float powerHeuristic(float a, float b)
+{
+    if (!(a > 0.0f)) return 0.0f;
+    const float scale = fmaxf(a, b);
+    if (!(scale > 0.0f) || !isfinite(scale)) return 0.0f;
+    a /= scale;
+    b /= scale;
+    return (a * a) / (a * a + b * b);
+}
+
+static __device__ float lightPdfOmega(
+    const LightSamplingView& lights, int triangleIndex,
+    float distanceSquared, float lightCosine)
+{
+    if (lights.lightIndexByTriangle == nullptr || !(distanceSquared > 0.0f) ||
+        !(lightCosine > 0.0f)) return 0.0f;
+    const int lightIndex = lights.lightIndexByTriangle[triangleIndex];
+    if (lightIndex < 0 || lightIndex >= lights.count) return 0.0f;
+    const LightTriangle light = lights.triangles[lightIndex];
+    if (!(light.area > 0.0f) || !(light.selectPmf > 0.0f)) return 0.0f;
+    return light.selectPmf * distanceSquared / (light.area * lightCosine);
+}
+
+static __device__ void accumulateDirectLighting(
+    PathSegment& pathSegment,
+    const ShadeableIntersection& receiver,
+    const TrianglePos& receiverTriangle,
+    int receiverTriangleIndex,
+    const Material& receiverMaterial,
+    const ResolvedBsdf& receiverBsdf,
+    const ShadingSceneView& scene,
+    RngState& rng)
+{
+    const int lightIndex = sampleLightTriangle(scene.lights,
+        rng.next(HaltonDim::LightSelection));
+    if (lightIndex < 0 || lightIndex >= scene.lights.count) return;
+
+    const LightTriangle light = scene.lights.triangles[lightIndex];
+    // A zero-thickness triangle has zero solid angle to itself.  Sampling the
+    // same primitive would therefore create a near-zero-distance, numerically
+    // unstable shadow segment rather than a physical lighting path.
+    if (light.triangleIndex == receiverTriangleIndex) return;
+    const TrianglePos& lightTriangle = scene.trianglePositions[light.triangleIndex];
+    const TriangleAttr& lightAttr = scene.triangleAttrs[light.triangleIndex];
+    const Surface& lightSurface = scene.surfaces[lightAttr.surfaceId];
+    const Material& lightMaterial = scene.materials[lightSurface.materialId];
+    const SurfaceBinding& lightBinding =
+        scene.surfaceBindings[lightSurface.surfaceBindingId + 1];
+
+    const float s = sqrtf(rng.next(HaltonDim::LightSampleU));
+    const float b0 = 1.0f - s;
+    const float b1 = s * (1.0f - rng.next(HaltonDim::LightSampleV));
+    const float b2 = 1.0f - b0 - b1;
+    const glm::vec3 lightPoint = b0 * lightTriangle.v0 + b1 * lightTriangle.v1 + b2 * lightTriangle.v2;
+    const glm::vec2 lightUv = b0 * lightAttr.uv0 + b1 * lightAttr.uv1 + b2 * lightAttr.uv2;
+    const glm::vec3 delta = lightPoint - getExactPointOnRay(pathSegment.ray, receiver.t);
+    const float distanceSquared = glm::dot(delta, delta);
+    if (!(distanceSquared > 0.0f) || !isfinite(distanceSquared)) return;
+    const glm::vec3 wi = delta * glm::inversesqrt(distanceSquared);
+    const BsdfEvaluation bsdf = evaluateBsdf(receiverBsdf, receiverMaterial,
+        pathSegment.ray.direction, wi);
+    const float receiverCosine = glm::max(glm::dot(bsdf.shadingNormal, wi), 0.0f);
+    if (bsdf.isDelta || !(receiverCosine > 0.0f) || !(bsdf.pdfOmega > 0.0f)) return;
+
+    glm::vec3 geometricNormal = receiver.geometricNormal;
+    const float receiverNormalLength2 = glm::dot(geometricNormal, geometricNormal);
+    if (!(receiverNormalLength2 > RAY_EPSILON) || !finiteVec3(geometricNormal))
+    {
+        if (!normalizedTriangleNormal(receiverTriangle, geometricNormal)) return;
+    }
+    else
+    {
+        geometricNormal *= glm::inversesqrt(receiverNormalLength2);
+    }
+    glm::vec3 lightNormal;
+    if (!normalizedTriangleNormal(lightTriangle, lightNormal)) return;
+    const float lightCosine = emissionCosine(lightMaterial, lightNormal, -wi);
+    if (!(lightCosine > 0.0f)) return;
+    const glm::vec3 receiverPoint = getExactPointOnRay(pathSegment.ray, receiver.t);
+    const float side = glm::dot(geometricNormal, wi) >= 0.0f ? 1.0f : -1.0f;
+    const float receiverScale = (receiver.rayOriginScale > 0.0f &&
+                                 receiver.rayOriginScale < LARGE_T)
+        ? receiver.rayOriginScale : triangleRayOriginScale(receiverTriangle);
+    Ray shadowRay{ offsetRayOrigin(receiverPoint, geometricNormal, side,
+                                   receiverScale), wi };
+    const float maxT = nextafterf(glm::dot(lightPoint - shadowRay.origin, wi), 0.0f);
+    // Any-hit returns true when an occluder is found before the sampled
+    // emitter.  A visible light sample is therefore the false case; the
+    // previous negation accidentally accumulated blocked samples instead.
+    if (!(maxT > RAY_EPSILON) || traverseBvhAnyHit(
+        shadowRay, scene.bvhNodes, scene.trianglePositions, maxT,
+        receiverTriangleIndex)) return;
+
+    const float pLight = lightPdfOmega(scene.lights, light.triangleIndex,
+                                       distanceSquared, lightCosine);
+    if (!(pLight > 0.0f) || !isfinite(pLight)) return;
+    const glm::vec3 Le = evaluateEmittedRadiance(lightBinding, scene.textures,
+                                                   lightUv, lightMaterial,
+                                                   lightNormal, -wi);
+    const float areaPdf = light.selectPmf / light.area;
+    const glm::vec3 contribution = pathSegment.throughput * Le * bsdf.value *
+        (receiverCosine * lightCosine / (distanceSquared * areaPdf)) *
+        powerHeuristic(pLight, bsdf.pdfOmega);
+    // The BSDF owns validation of its value/PDF.  This boundary owns the
+    // product of path throughput, emission, geometry and MIS, where a finite
+    // factor combination can still overflow or form Inf*0.
+    if (finiteVec3(contribution))
+    {
+        pathSegment.accumulatedRadiance += contribution;
+    }
+}
+
+static __device__ float emissionHitMisWeight(
+    const PathSegment& pathSegment,
+    const HitRecord& hit,
+    const TrianglePos& triangle,
+    const Material& lightMaterial,
+    const LightSamplingView& lights)
+{
+    // Primary rays and delta events have no competing continuous BSDF PDF.
+    if (!(pathSegment.previousBsdfPdfOmega > 0.0f)) return 1.0f;
+
+    glm::vec3 lightNormal;
+    if (!normalizedTriangleNormal(triangle, lightNormal)) return 1.0f;
+    const float lightCosine = emissionCosine(
+        lightMaterial, lightNormal, -pathSegment.ray.direction);
+    if (!(lightCosine > 0.0f)) return 1.0f;
+    const float pLight = lightPdfOmega(lights, hit.triangleIndex,
+                                       hit.t * hit.t, lightCosine);
+    return (pLight > 0.0f && isfinite(pLight))
+        ? powerHeuristic(pathSegment.previousBsdfPdfOmega, pLight) : 1.0f;
 }

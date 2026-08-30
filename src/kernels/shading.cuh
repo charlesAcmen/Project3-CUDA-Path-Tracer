@@ -14,6 +14,7 @@
 #include "interactions/interactions.h"   // scatterRay
 #include "rng/rng.h"
 #include "constants.h"
+#include "bvh/bvh.h"
 
 // Read-only scene resources consumed together by the shading stage.
 // DeviceBuffers owns these allocations; this view only exposes the subset
@@ -26,6 +27,8 @@ struct ShadingSceneView
     const Surface* surfaces;
     const SurfaceBinding* surfaceBindings;
     TextureTable textures;
+    LightSamplingView lights;
+    const BvhNode* bvhNodes;
 };
 
 // Per-launch shading inputs and outputs.  Keeping these separate from the
@@ -69,7 +72,8 @@ __device__ bool russianRouletteTerminate(
  *     direct radiance into `image` additively (Lo = Le + ∫BRDF·Li), then
  *     CONTINUE scattering — the surface is still shaded by its BSDF.
  *   - Surface hit       → scatter the ray according to material BSDF
- *                         (diffuse, glossy, specular, refractive), then
+ *                         (diffuse, glossy, specular, refractive), carry the
+ *                         previous primitive self-hit guard, then
  *                         apply Russian roulette for early termination.
  *   - Miss              → terminate with background colour (black).
  *
