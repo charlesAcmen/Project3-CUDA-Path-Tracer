@@ -26,6 +26,7 @@
 #include "profiler/profiler.h"
 #include "kernels/kernel_config.h"
 #include "kernels/bvh_traversal.cuh"      // bvhTraverse (BVH GPU traversal)
+#include "lighting/light_sampling.h"       // emissive-triangle alias table
 #include "rng/rng.h"
 #include "bvh/bvh.h"                      // bvh::buildSceneBvh, uploadToDevice, freeDevice
 #include "efficient.h"       // StreamCompaction::Efficient
