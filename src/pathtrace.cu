@@ -139,8 +139,12 @@ void pathtraceInit(Scene* scene)
 
         for (Surface& surface : g_dev.bvh.hostSurfaces)
         {
+            if (surface.surfaceBindingId < -1 ||
+                surface.surfaceBindingId >= (int)scene->surfaceBindings.size())
+            {
+                surface.surfaceBindingId = -1;
+            }
             if (surface.surfaceBindingId >= 0 &&
-                surface.surfaceBindingId < (int)scene->surfaceBindings.size() &&
                 scene->surfaceBindings[surface.surfaceBindingId].normal >= 0)
             {
                 surface.features |= SurfaceFeatureNormalMap;
