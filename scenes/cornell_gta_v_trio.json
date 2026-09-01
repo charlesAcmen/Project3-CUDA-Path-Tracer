@@ -1,0 +1,26 @@
+{
+  "Materials": {
+    "wall_white": { "TYPE": "Diffuse", "RGB": [0.73, 0.73, 0.73] },
+    "wall_red": { "TYPE": "Diffuse", "RGB": [0.63, 0.065, 0.05] },
+    "wall_green": { "TYPE": "Diffuse", "RGB": [0.14, 0.45, 0.091] },
+    "area_light": { "TYPE": "Emitting", "RGB": [1.0, 1.0, 1.0], "EMITTANCE": 30.0 },
+    "asset_pbr": { "TYPE": "PBR", "RGB": [1.0, 1.0, 1.0] }
+  },
+  "Objects": [
+    { "FILE": "box/floor.obj",       "MATERIAL": "wall_white", "TRANS": [-5, 0, -5], "ROTAT": [0, 0, 0], "SCALE": [10, 1, 10] },
+    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-5, 6, -5], "ROTAT": [0, 0, 0], "SCALE": [10, 1, 10] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-5, 0, 5],  "ROTAT": [0, 0, 0], "SCALE": [10, 6, 1] },
+    { "FILE": "box/left_red.obj",    "MATERIAL": "wall_red",   "TRANS": [5, 0, -5],  "ROTAT": [0, 0, 0], "SCALE": [1, 6, 10] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "wall_green", "TRANS": [-5, 0, -5], "ROTAT": [0, 0, 0], "SCALE": [1, 6, 10] },
+    { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-2, 5.98, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
+    { "FILE": "Models/gta_v_-_avon_hertz/scene.gltf",                       "MATERIAL": "asset_pbr", "TRANS": [-2, 1, 1], "ROTAT": [0, 150, 0], "SCALE": [1.0, 1.0, 1.0] },
+    { "FILE": "Models/gta_v_-_cliffford_mercenaries_juggernaut/scene.gltf", "MATERIAL": "asset_pbr", "TRANS": [2, 1, -1],  "ROTAT": [0, -150, 0], "SCALE": [1.0, 1.0, 1.0] },
+    { "FILE": "Models/gta_v_mod_-_delorean_dmc_12_time_machine/scene.gltf", "MATERIAL": "asset_pbr", "TRANS": [0, 0, 0], "ROTAT": [0, 45, 0], "SCALE": [1.0, 1.0, 1.0] }
+  ],
+  "Camera": {
+    "RES": [1920,1080], "FOVY": 60, "ITERATIONS": 5000, "DEPTH": 8, "RR_DEPTH": 3,
+    "FILE": "cornell_gta_v_trio.png","EYE": [-0.1498, 2.6392, -5.0656],
+"LOOKAT": [0.0928, -1.4623, 5.7663],
+"UP": [0.0079, 0.9352, 0.3539]
+  }
+}

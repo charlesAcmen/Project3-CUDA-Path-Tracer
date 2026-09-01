@@ -15,7 +15,7 @@
     "area_light": {
       "TYPE": "Emitting",
       "RGB": [1.0, 1.0, 1.0],
-      "EMITTANCE": 20.0
+      "EMITTANCE": 40.0
     },
     "ABeautifulGame": {
       "TYPE": "PBR",
@@ -24,7 +24,6 @@
   },
   "Objects": [
     { "FILE": "box/floor.obj",       "MATERIAL": "wall_white", "TRANS": [-2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
-    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-2, 4, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
     { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-2, 0, 2],  "ROTAT": [0, 0, 0], "SCALE": [4, 4, 1] },
     { "FILE": "box/left_red.obj",    "MATERIAL": "wall_red",   "TRANS": [2, 0, -2],  "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
     { "FILE": "box/right_green.obj", "MATERIAL": "wall_green", "TRANS": [-2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
@@ -32,14 +31,14 @@
     { "FILE": "Models/ABeautifulGame/glTF/ABeautifulGame.gltf", "MATERIAL": "ABeautifulGame", "TRANS": [0, 0, 0], "ROTAT": [0, 0, 0], "SCALE": [5, 5, 5] }
   ],
   "Camera": {
-    "RES": [1500,1500],
+    "RES": [1920, 1080],
     "FOVY": 60,
     "ITERATIONS": 5000,
     "DEPTH": 8,
     "RR_DEPTH": 3,
     "FILE": "cornell_box_ABeautifulGame.png",
-    "EYE": [296.6197, 294.3821, -652.1829],
-    "LOOKAT": [290.7936, -200.6258, 625.6352],
-    "UP": [-0.0016, 0.9325, 0.3612]
+    "EYE": [-0.7629, 3.1312, -5.0667],
+    "LOOKAT": [144.6773, -389.5371, 1299.7493],
+    "UP": [0.0317, 0.9581, 0.2848]
   }
 }

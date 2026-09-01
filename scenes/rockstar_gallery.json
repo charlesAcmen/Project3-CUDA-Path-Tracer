@@ -51,7 +51,7 @@
     { "FILE": "Models/ROCKSTAR/trevor_gta_5/scene.gltf",                                         "MATERIAL": "rockstar_pbr", "TRANS": [500, 160, 20], "ROTAT": [0, 180, 0], "SCALE": [100, 100, 100] }
   ],
   "Camera": {
-    "RES": [1000,1000],
+    "RES": [1920, 1080],
     "FOVY": 60,
     "ITERATIONS": 5000,
     "DEPTH": 8,

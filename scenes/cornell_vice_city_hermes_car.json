@@ -1,0 +1,30 @@
+{
+  "Materials": {
+    "wall_white": { "TYPE": "Diffuse", "RGB": [0.73, 0.73, 0.73] },
+    "wall_red": { "TYPE": "Diffuse", "RGB": [0.63, 0.065, 0.05] },
+    "wall_green": { "TYPE": "Diffuse", "RGB": [0.14, 0.45, 0.091] },
+    "area_light": { "TYPE": "Emitting", "RGB": [1.0, 1.0, 1.0], "EMITTANCE": 35.0 },
+    "car_pbr": { "TYPE": "PBR" }
+  },
+  "Objects": [
+    { "FILE": "box/floor.obj",       "MATERIAL": "wall_white", "TRANS": [-22, 0, -21], "ROTAT": [0, 0, 0], "SCALE": [44, 1, 42] },
+    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-22, 28, -21], "ROTAT": [0, 0, 0], "SCALE": [44, 1, 42] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-22, 0, 21],  "ROTAT": [0, 0, 0], "SCALE": [44, 28, 1] },
+    { "FILE": "box/left_red.obj",    "MATERIAL": "wall_red",   "TRANS": [22, 0, -21],  "ROTAT": [0, 0, 0], "SCALE": [1, 28, 42] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "wall_green", "TRANS": [-22, 0, -21], "ROTAT": [0, 0, 0], "SCALE": [1, 28, 42] },
+    { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-9, 27.98, -9], "ROTAT": [0, 0, 0], "SCALE": [18, 1, 18] },
+
+    { "FILE": "models/vice_city_-_hermes_car/scene.gltf", "MATERIAL": "car_pbr", "TRANS": [2, 1, -10], "ROTAT": [0, 270, 0], "SCALE": [0.15, 0.15, 0.15] }
+  ],
+  "Camera": {
+    "RES": [1920, 1080],
+    "FOVY": 55,
+    "ITERATIONS": 5000,
+    "DEPTH": 8,
+    "RR_DEPTH": 3,
+    "FILE": "cornell_vice_city_hermes_car.png",
+    "EYE": [0, 14, -42],
+    "LOOKAT": [0, 11, 0],
+    "UP": [0, 1, 0]
+  }
+}

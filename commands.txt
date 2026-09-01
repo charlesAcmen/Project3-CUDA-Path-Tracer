@@ -121,3 +121,11 @@ https://192.168.1.1/
 
 .\build\bin\Release\cis565_path_tracer.exe scenes\stanford_dragon_pbr.json
 .\build\bin\Release\cis565_path_tracer.exe scenes\stanford_dragon_refractive.json
+
+# Cornell Box 资产场景 (2026-09-01)
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_money_props.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_stanford_bunny.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_cj_gta_san_andreas.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_gta_v_trio.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_vice_city_showroom.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_vice_city_hermes_car.json
