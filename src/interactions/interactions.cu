@@ -739,23 +739,17 @@ static __host__ __device__ void scatterGgxSurface(
     PathSegment& pathSegment,
     const glm::vec3& intersect,
     const glm::vec3& rayDir,
-    const glm::vec3& shadingNormal,
-    const glm::vec2& uv,
-    const SurfaceBinding& tex,
+    const ResolvedBsdf& resolved,
+    const glm::vec3& geometricNormal,
+    float rayOriginScale,
     const Material& m,
-    RngState& rng,
-    const TextureTable& textures,
-    const glm::vec3& vertexColor)
+    RngState& rng)
 {
-    // Unified metallic-roughness GGX surface (legacy JSON Specular →
-    // Reflective is just the metallic=1 chrome case).  Resolve the
-    // per-hit surface params: roughness (mirror threshold below
-    // ROUGHNESS_THRESHOLD), alpha = r², conductor F0, diffuse albedo.
-    float r, metallic, alpha;
-    glm::vec3 F0, diffuseColor;
-    resolvePbrSurfaceParams(r, metallic, alpha, F0, diffuseColor, tex, textures, uv, m, vertexColor);
-
-    const float NdotV      = glm::clamp(glm::dot(shadingNormal, -rayDir), 1e-4f, 1.0f);
+    const glm::vec3& shadingNormal = resolved.shadingNormal;
+    const float NdotV = glm::clamp(glm::dot(shadingNormal, -rayDir), 1e-4f, 1.0f);
+    const glm::vec3 F0 = glm::mix(glm::vec3(0.04f), resolved.baseColor,
+                                  resolved.metallic);
+    const glm::vec3 diffuseColor = resolved.baseColor * (1.0f - resolved.metallic);
     const glm::vec3 F_view = fresnelSchlickF0(NdotV, F0);
     // Diffuse/specular split probability from the graze Fresnel, so a
     // surface that is mostly specular (metal, or dielectric at grazing
@@ -771,16 +765,19 @@ static __host__ __device__ void scatterGgxSurface(
     // independent of metallic (a naive specProb = 1 would blow it up).
     const float clampedProb = glm::clamp(luminance(F_view), 0.05f, 0.95f);
     const float specProb    = glm::mix(clampedProb, 1.0f,
-                                       glm::clamp(metallic, 0.0f, 1.0f));
+                                        glm::clamp(resolved.metallic, 0.0f, 1.0f));
 
     glm::vec3 scatterDir;
     glm::vec3 throughput;
+    bool sampledDelta = false;
 
-    if (r < ROUGHNESS_THRESHOLD && metallic > PBR_MIRROR_METALLIC_THRESHOLD)
+    if (resolved.roughness < ROUGHNESS_THRESHOLD &&
+        resolved.metallic > PBR_MIRROR_METALLIC_THRESHOLD)
     {
         ggxScatterMirror(scatterDir, throughput, rayDir, shadingNormal, NdotV, F0);
+        sampledDelta = true;
     }
-    else if (r < ROUGHNESS_THRESHOLD)
+    else if (resolved.roughness < ROUGHNESS_THRESHOLD)
     {
         // Type: Pbr, metallic ≤ 0.95 (smooth dielectric / mid metal).
         // F0 ≈ 0.04, so most energy is diffuse.  Same probabilistic
@@ -791,26 +788,75 @@ static __host__ __device__ void scatterGgxSurface(
         // diffuse energy).
         if (rng.next(HaltonDim::PbrSplit) < specProb)
         {
-            ggxScatterSmoothSpecular(scatterDir, throughput, rayDir, shadingNormal, NdotV, F0, specProb);
+            ggxScatterSmoothSpecular(scatterDir, throughput, rayDir, shadingNormal,
+                                     NdotV, F0, specProb);
+            sampledDelta = true;
         }
         else
         {
-            ggxScatterDiffuse(scatterDir, throughput, shadingNormal, diffuseColor, F_view, specProb, rng);
+            ggxScatterDiffuse(scatterDir, throughput, shadingNormal,
+                              diffuseColor, F_view, specProb, rng);
         }
     }
     else if (rng.next(HaltonDim::PbrSplit) < specProb)   // dim 10 (prime 31): GGX split
     {
-        ggxScatterRoughSpecular(scatterDir, throughput, rayDir, shadingNormal, alpha, NdotV, F0, specProb, rng);
+        ggxScatterRoughSpecular(scatterDir, throughput, rayDir, shadingNormal,
+                                resolved.roughness * resolved.roughness,
+                                NdotV, F0, specProb, rng);
     }
     else
     {
-        ggxScatterDiffuse(scatterDir, throughput, shadingNormal, diffuseColor, F_view, specProb, rng);
+        ggxScatterDiffuse(scatterDir, throughput, shadingNormal,
+                          diffuseColor, F_view, specProb, rng);
     }
 
-    pathSegment.throughput *= throughput;
-    float offsetSign = glm::dot(scatterDir, shadingNormal) > 0.0f ? 1.0f : -1.0f;
-    pathSegment.ray.origin = offsetRayOrigin(intersect, shadingNormal, offsetSign);
-    pathSegment.ray.direction = scatterDir;
+    if (sampledDelta)
+    {
+        pathSegment.previousBsdfPdfOmega = 0.0f;
+    }
+    else
+    {
+        // ggxScatterRoughSpecular rejects a sampled below-surface lobe by
+        // returning zero throughput.  Keep that rejection instead of
+        // evaluating the fallback reflection as if it were the original
+        // continuous sample.
+        if (glm::dot(throughput, throughput) == 0.0f)
+        {
+            pathSegment.previousBsdfPdfOmega = 0.0f;
+        }
+        else
+        {
+            const BsdfEvaluation evaluation = evaluateBsdf(
+                resolved, m, rayDir, scatterDir);
+            const float cosine = glm::max(glm::dot(evaluation.shadingNormal, scatterDir), 0.0f);
+            if (evaluation.pdfOmega > 0.0f && cosine > 0.0f)
+            {
+                throughput = evaluation.value * (cosine / evaluation.pdfOmega);
+                pathSegment.previousBsdfPdfOmega = evaluation.pdfOmega;
+            }
+            else
+            {
+                throughput = glm::vec3(0.0f);
+                pathSegment.previousBsdfPdfOmega = 0.0f;
+            }
+        }
+    }
+
+    // This is the only path-state write for the GGX sample.  A finite BSDF
+    // evaluation can still overflow while dividing by an extremely small PDF,
+    // so reject that invalid path rather than altering any finite weight.
+    const glm::vec3 nextThroughput = pathSegment.throughput * throughput;
+    if (!finiteVec3(scatterDir) || !finiteVec3(throughput) ||
+        !finiteVec3(nextThroughput))
+    {
+        pathSegment.throughput = glm::vec3(0.0f);
+        pathSegment.previousBsdfPdfOmega = 0.0f;
+        pathSegment.remainingBounces = 0;
+        return;
+    }
+    pathSegment.throughput = nextThroughput;
+    pathSegment.ray = spawnRayFromSurface(intersect, geometricNormal,
+                                          scatterDir, rayOriginScale);
 }
 
 // Per-material helper: Fresnel-weighted Russian roulette between reflection
