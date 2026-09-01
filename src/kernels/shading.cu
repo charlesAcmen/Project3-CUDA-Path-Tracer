@@ -1,5 +1,6 @@
 #include "shading.cuh"
 #include "intersection/triangle.h"  // interpolateTriangleAttributes
+#include "lighting/light_sampling.h"  // sampleLightTriangle
 
 // ====================================================================
 // Shading Kernel Implementation
