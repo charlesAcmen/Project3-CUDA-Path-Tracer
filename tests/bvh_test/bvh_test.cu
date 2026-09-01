@@ -887,10 +887,13 @@ bool testScaleAwareRayOffset()
     const glm::vec3 positive = offsetRayOrigin(point, normal, 1.0f);
     const glm::vec3 negative = offsetRayOrigin(point, normal, -1.0f);
     const glm::vec3 nearOrigin = offsetRayOrigin(glm::vec3(0.0f), normal, 1.0f);
-    const Ray spawnedPositive = spawnRayFromSurface(point, normal,
-                                                     glm::vec3(1.0f, 0.0f, 0.0f));
-    const Ray spawnedNegative = spawnRayFromSurface(point, normal,
-                                                     glm::vec3(-1.0f, 0.0f, 0.0f));
+    const SurfaceRaySpawnContext surface = makeSurfaceRaySpawnContext(point, normal);
+    const Ray spawnedPositive = spawnReflectionRay(
+        surface, glm::vec3(1.0f, 0.0f, 0.0f));
+    const Ray spawnedNegative = spawnTransmissionRay(
+        surface, glm::vec3(-1.0f, 0.0f, 0.0f));
+    const Ray spawnedShadow = spawnShadowRay(
+        surface, glm::vec3(1.0f, 0.0f, 0.0f));
 
     const glm::vec3 obliqueNormal = glm::normalize(glm::vec3(1.0f, 2.0f, 3.0f));
     const glm::vec3 obliqueDelta =
@@ -904,10 +907,11 @@ bool testScaleAwareRayOffset()
     const glm::vec3 centredOffset = offsetRayOrigin(
         glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 1.0f, centredScale);
     if (!(positive.x > point.x) || !(negative.x < point.x) ||
-        !(nearOrigin.x >= EPSILON) ||
-        !(spawnedPositive.origin.x > point.x) ||
-        !(spawnedNegative.origin.x < point.x) ||
-        !glm::all(glm::equal(spawnedPositive.direction,
+         !(nearOrigin.x >= EPSILON) ||
+         !(spawnedPositive.origin.x > point.x) ||
+         !(spawnedNegative.origin.x < point.x) ||
+         !glm::all(glm::equal(spawnedShadow.origin, spawnedPositive.origin)) ||
+         !glm::all(glm::equal(spawnedPositive.direction,
                               glm::vec3(1.0f, 0.0f, 0.0f))) ||
         !glm::all(glm::equal(spawnedNegative.direction,
                               glm::vec3(-1.0f, 0.0f, 0.0f))) ||
