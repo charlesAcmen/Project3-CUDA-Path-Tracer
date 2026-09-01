@@ -69,7 +69,8 @@ __device__ bool russianRouletteTerminate(
  *     direct radiance into `image` additively (Lo = Le + ∫BRDF·Li), then
  *     CONTINUE scattering — the surface is still shaded by its BSDF.
  *   - Surface hit       → scatter the ray according to material BSDF
- *                         (diffuse, glossy, specular, refractive), then
+ *                         (diffuse, glossy, specular, refractive), carry the
+ *                         previous primitive self-hit guard, then
  *                         apply Russian roulette for early termination.
  *   - Miss              → terminate with background colour (black).
  *
