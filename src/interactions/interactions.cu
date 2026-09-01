@@ -421,16 +421,27 @@ static __host__ __device__ void resolvePbrInputs(
 
     // baseColor role per type: legacy chrome uses specular.color as its metal
     // tint (F0); the Pbr surface resolves the albedo like the diffuse branch.
-    glm::vec3 baseColor;
     if (m.type == MaterialType::Reflective)
         baseColor = m.specular.color;
     else
         baseColor = resolveBaseColor(tex, textures, uv, m, vertexColor);  
 
-    roughness     = r;
-    alpha         = r * r;
-    F0            = glm::mix(glm::vec3(0.04f), baseColor, metallic);
-    diffuseColor  = baseColor * (1.0f - metallic);
+    roughness = r;
+}
+
+// Resolve the per-hit GGX surface parameters for focused callers/tests. The
+// shading kernel instead retains resolvePbrInputs' compact source state and
+// derives these values at each BSDF evaluation without re-sampling textures.
+__host__ __device__ void resolvePbrSurfaceParams(
+    float& roughness, float& metallic, float& alpha, glm::vec3& F0, glm::vec3& diffuseColor,
+    const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const Material& m, const glm::vec3& vertexColor)
+{
+    glm::vec3 baseColor;
+    resolvePbrInputs(baseColor, roughness, metallic, tex, textures, uv, m, vertexColor);
+    alpha        = roughness * roughness;
+    F0           = glm::mix(glm::vec3(0.04f), baseColor, metallic);
+    diffuseColor = baseColor * (1.0f - metallic);
 }
 
 // Resolve the per-hit SHADING normal from a glTF normal texture (tangent
