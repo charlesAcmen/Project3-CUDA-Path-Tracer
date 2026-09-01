@@ -122,7 +122,17 @@ __global__ void shadeMaterial(
                 &surfaceBindings[surfaceRef.surfaceBindingId + 1];
             ShadeableIntersection intersection{};
             intersection.t          = hit.t;
+            intersection.triangleIndex = hit.triangleIndex;
             intersection.surfaceFeatures = surfaceRef.features;
+            intersection.hasGeometricNormal = normalizedTriangleNormal(
+                trianglePos, intersection.geometricNormal);
+            if (!intersection.hasGeometricNormal)
+            {
+                pathSegment.remainingBounces = 0;
+                writePathActivity(pathActivityFlags, idx, pathSegment);
+                return;
+            }
+            intersection.rayOriginScale = triangleRayOriginScale(trianglePos);
             interpolateTriangleAttributes(trianglePos, triangleAttr, hit.u, hit.v,
                                           (surfaceRef.features & SurfaceFeatureNormalMap) != 0,
                                           intersection.surfaceNormal,
@@ -136,10 +146,14 @@ __global__ void shadeMaterial(
                 // Light source hit (JSON Emitting): Le = texture·factor·strength
                 // (flat color when no emissive slot), scaled by the JSON emittance
                 // knob.  Accumulate and terminate the path.
-                pathSegment.accumulatedRadiance = pathSegment.throughput *
-                    resolveEmissive(*intersection.surface, scene.textures,
-                                    intersection.uv, material) *
-                    material.emittance;
+                const glm::vec3 emittedDirection = -pathSegment.ray.direction;
+                const glm::vec3 Le = evaluateEmittedRadiance(
+                    *intersection.surface, scene.textures, intersection.uv, material,
+                    intersection.geometricNormal, emittedDirection);
+                pathSegment.accumulatedRadiance += pathSegment.throughput * Le *
+                    emissionHitMisWeight(pathSegment, hit,
+                                         intersection.geometricNormal,
+                                         material, scene.lights);
                 pathSegment.remainingBounces = 0;
             }
             else
