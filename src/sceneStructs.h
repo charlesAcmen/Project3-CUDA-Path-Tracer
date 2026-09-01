@@ -178,6 +178,38 @@ struct TextureTable
     int          count  = 0;         // number of images in the table
 };
 
+// One world-space emissive triangle selected by direct lighting.  The index
+// refers to the BVH-flattened triangle arrays, so both shadow traversal and
+// shading use the same geometry order.  selectPmf is the exact discrete
+// probability represented by the alias table; it is retained for the MIS
+// light PDF when a BSDF ray hits this triangle.
+struct LightTriangle
+{
+    int   triangleIndex = -1;
+    float area          = 0.0f;
+    float selectPmf     = 0.0f;
+};
+
+// Walker/Vose alias-table column for O(1) emissive-triangle selection.
+// `q` is the probability of selecting this column itself; otherwise alias is
+// selected.  The corresponding LightTriangle holds the original PMF.
+struct LightAliasEntry
+{
+    float q     = 0.0f;
+    int   alias = -1;
+};
+
+// Read-only direct-light resources consumed by shading.  The reverse lookup
+// is intentionally separate from TriangleAttr: only an emission hit needs it,
+// while the BVH traversal hot loop remains position-only.
+struct LightSamplingView
+{
+    const LightTriangle*  triangles            = nullptr;
+    const LightAliasEntry* aliasEntries        = nullptr;
+    const int*            lightIndexByTriangle = nullptr;
+    int                   count                = 0;
+};
+
 // Whether a ray is entering or exiting a refractive medium.
 enum class HitSide : int
 {
