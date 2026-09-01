@@ -971,8 +971,8 @@ __host__ __device__ void scatterRay(
     PathSegment & pathSegment,
     const ShadeableIntersection &hit,
     const Material &m,
-    RngState &rng,
-    const TextureTable &textures)
+    const ResolvedBsdf& resolved,
+    RngState &rng)
 {
     // Scatter a ray according to the material's BSDF.
     // Diffuse: cosine-weighted hemisphere sampling.
@@ -1029,5 +1029,17 @@ __host__ __device__ void scatterRay(
 
     // Decrement remaining bounces
     pathSegment.remainingBounces--;
+}
+
+__host__ __device__ void scatterRay(
+    PathSegment& pathSegment,
+    const ShadeableIntersection& hit,
+    const Material& m,
+    RngState& rng,
+    const TextureTable& textures)
+{
+    const ResolvedBsdf resolved = resolveBsdf(
+        hit, m, textures, pathSegment.ray.direction);
+    scatterRay(pathSegment, hit, m, resolved, rng);
 }
 
