@@ -915,9 +915,8 @@ static __host__ __device__ void scatterRefractive(
     if (tir || rng.next(HaltonDim::FresnelRR) < reflectance)  // dim 8 (prime 23): Fresnel roulette
     {
         glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
-        const float offsetSign = entering ? 1.0f : -1.0f;
-        pathSegment.ray.origin = offsetRayOrigin(intersect, normal, offsetSign);
-        pathSegment.ray.direction = reflectedDir;
+        pathSegment.ray = spawnRayFromSurface(intersect, geometricNormal,
+                                              reflectedDir, rayOriginScale);
         // Internal reflection / TIR happens inside the colored medium;
         // external Fresnel reflection off the outer boundary is achromatic (uncolored).
         if (!entering)
@@ -929,9 +928,8 @@ static __host__ __device__ void scatterRefractive(
     {
         // !tir here ⇒ refractedDir is a finite unit vector; the offset
         // pushes to the far side of the surface.
-        const float offsetSign = entering ? -1.0f : 1.0f;
-        pathSegment.ray.origin = offsetRayOrigin(intersect, normal, offsetSign);
-        pathSegment.ray.direction = refractedDir;
+        pathSegment.ray = spawnRayFromSurface(intersect, geometricNormal,
+                                              refractedDir, rayOriginScale);
         // Light traverses into / out of the colored medium: apply transmission attenuation
         pathSegment.throughput *= m.color;
     }
@@ -956,7 +954,8 @@ static __host__ __device__ void scatterDiffuse(
     //   offset along newDirection has almost zero normal component
     // - This causes the ray to start below the surface -> self-intersection -> shadow acne
     glm::vec3 newDirection = calculateRandomDirectionInHemisphere(shadingNormal, rng);
-    pathSegment.ray.origin = offsetRayOrigin(intersect, shadingNormal, 1.0f);
+    pathSegment.ray = spawnRayFromSurface(intersect, geometricNormal,
+                                          newDirection, rayOriginScale);
     // Apply diffuse material color (energy attenuation)
     // multiplier = fr * cos theta/pdf(omega)
     // where pdf(omega) = cos theta / PI
