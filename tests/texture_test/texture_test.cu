@@ -224,6 +224,20 @@ static void testResolvePbrSurfaceParams()
               "glTF baseColorFactor × texture → diffuse = texel·factor");
     }
 
+    // ---- factor-only glTF colors do not require a roughness factor ----
+    {
+        Material m; m.type = MaterialType::Pbr;
+        m.color = glm::vec3(-1.0f);  // glTF-material sentinel
+        SurfaceBinding tex;
+        tex.metallicFactor = 0.0f;   // Rockstar logo's Black material
+        tex.baseColorFactor = glm::vec3(0.0f);
+        float rr, mm, aa; glm::vec3 f0, dd;
+        resolvePbrSurfaceParams(rr, mm, aa, f0, dd, tex, table,
+                                glm::vec2(0.0f), m, glm::vec3(1.0f));
+        check(closeTo(dd, glm::vec3(0.0f)),
+              "factor-only glTF black stays black without roughnessFactor");
+    }
+
     std::printf("\n");
 }
 
