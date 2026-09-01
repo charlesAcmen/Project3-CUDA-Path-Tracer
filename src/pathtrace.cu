@@ -147,6 +147,14 @@ void pathtraceInit(Scene* scene)
             }
         }
 
+        const HostLightSampling hostLights = buildLightSampling(
+            g_dev.bvh.hostTrianglePositions,
+            g_dev.bvh.hostTriangleAttrs,
+            g_dev.bvh.hostSurfaces,
+            scene->materials,
+            scene->surfaceBindings,
+            scene->textures);
+
         const int n = (int)g_dev.bvh.hostTrianglePositions.size();
         if (n > 0)
         {
@@ -165,6 +173,27 @@ void pathtraceInit(Scene* scene)
                        g_dev.bvh.hostSurfaces.size() * sizeof(Surface));
             cudaMemcpy(g_dev.deviceSurfaces, g_dev.bvh.hostSurfaces.data(),
                        g_dev.bvh.hostSurfaces.size() * sizeof(Surface),
+                       cudaMemcpyHostToDevice);
+        }
+
+        if (!hostLights.triangles.empty())
+        {
+            g_dev.lightCount = static_cast<int>(hostLights.triangles.size());
+            cudaMalloc(&g_dev.lightTriangles,
+                       hostLights.triangles.size() * sizeof(LightTriangle));
+            cudaMemcpy(g_dev.lightTriangles, hostLights.triangles.data(),
+                       hostLights.triangles.size() * sizeof(LightTriangle),
+                       cudaMemcpyHostToDevice);
+            cudaMalloc(&g_dev.lightAliasEntries,
+                       hostLights.aliasEntries.size() * sizeof(LightAliasEntry));
+            cudaMemcpy(g_dev.lightAliasEntries, hostLights.aliasEntries.data(),
+                       hostLights.aliasEntries.size() * sizeof(LightAliasEntry),
+                       cudaMemcpyHostToDevice);
+            cudaMalloc(&g_dev.lightIndexByTriangle,
+                       hostLights.lightIndexByTriangle.size() * sizeof(int));
+            cudaMemcpy(g_dev.lightIndexByTriangle,
+                       hostLights.lightIndexByTriangle.data(),
+                       hostLights.lightIndexByTriangle.size() * sizeof(int),
                        cudaMemcpyHostToDevice);
         }
 
@@ -268,6 +297,13 @@ void pathtraceFree()
     g_dev.deviceSurfaces = nullptr;
     cudaFree(g_dev.deviceSurfaceBindings);
     g_dev.deviceSurfaceBindings = nullptr;
+    cudaFree(g_dev.lightTriangles);
+    g_dev.lightTriangles = nullptr;
+    cudaFree(g_dev.lightAliasEntries);
+    g_dev.lightAliasEntries = nullptr;
+    cudaFree(g_dev.lightIndexByTriangle);
+    g_dev.lightIndexByTriangle = nullptr;
+    g_dev.lightCount = 0;
     cudaFree(g_dev.textures.pixels);
     g_dev.textures.pixels = nullptr;
     cudaFree(g_dev.textures.infos);
@@ -404,7 +440,10 @@ void pathtrace(uchar4* pbo, int iter)
             g_dev.deviceTriangleAttrs,
             g_dev.deviceSurfaces,
             g_dev.deviceSurfaceBindings,
-            g_dev.textures
+            g_dev.textures,
+            LightSamplingView{ g_dev.lightTriangles, g_dev.lightAliasEntries,
+                               g_dev.lightIndexByTriangle, g_dev.lightCount },
+            g_dev.bvh.deviceNodes
         };
         ShadingBufferView shadingBuffers = {
             g_dev.intersections,
