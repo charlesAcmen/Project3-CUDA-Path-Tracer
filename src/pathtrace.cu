@@ -231,12 +231,6 @@ void pathtraceInit(Scene* scene)
     // Gaussian weight buffer (small: max 65 floats ≈ 260 bytes)
     cudaMalloc(&g_dev.bloomWeights, (2 * MAX_BLOOM_RADIUS + 1) * sizeof(float));
 
-    // Sort buffers — always allocated (negligible overhead); sorting
-    // early-returns when g_opts.sortByMaterial is false at runtime.
-    cudaMalloc(&g_dev.sortKeys, pixelcount * sizeof(int));
-    cudaMalloc(&g_dev.sortIndices, pixelcount * sizeof(int));
-    cudaMalloc(&g_dev.intersectionsSorted, pixelcount * sizeof(HitRecord));
-
     s_initialized = true;
 
     checkCUDAError("pathtraceInit");
@@ -257,8 +251,11 @@ void pathtraceFree()
     cudaFree(g_dev.materials);
     cudaFree(g_dev.intersections);
     cudaFree(g_dev.sortKeys);
+    g_dev.sortKeys = nullptr;
     cudaFree(g_dev.sortIndices);
+    g_dev.sortIndices = nullptr;
     cudaFree(g_dev.intersectionsSorted);
+    g_dev.intersectionsSorted = nullptr;
     cudaFree(g_dev.imageDisplay);  // post-process LDR display buffer
     cudaFree(g_dev.bloomBufA);     // bloom ping-pong buffer A
     cudaFree(g_dev.bloomBufB);     // bloom ping-pong buffer B

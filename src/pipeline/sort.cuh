@@ -52,13 +52,31 @@ __global__ void buildMaterialSortKeys(
  *   5. thrust::gather      — reorder intersections into intersectionsSorted
  *   6. std::swap           — the sorted buffers become the "live" ones
  *
- * No-op when g_opts.sortByMaterial is false (runtime toggle, no rebuild
- * needed).
+ * No-op when g_opts.sortByMaterial is false.  The first enabled sort lazily
+ * allocates its three screen-sized work buffers at full pixel capacity; later
+ * ImGui toggles reuse them without reallocating.
  */
+static void ensureMaterialSortBuffers()
+{
+    if (g_dev.sortKeys != nullptr) return;
+
+    // `num_paths` can be smaller after compaction, but every new iteration
+    // starts from one path per pixel, so the workspaces must cover the full
+    // render resolution rather than this bounce's survivor count.
+    const int pixelcount = hst_scene->state.camera.resolution.x *
+                           hst_scene->state.camera.resolution.y;
+    cudaMalloc(&g_dev.sortKeys, pixelcount * sizeof(int));
+    cudaMalloc(&g_dev.sortIndices, pixelcount * sizeof(int));
+    cudaMalloc(&g_dev.intersectionsSorted, pixelcount * sizeof(HitRecord));
+    checkCUDAError("allocate material-sort buffers");
+}
+
 static void sortPathsByMaterial(int num_paths)
 {
     if (!g_opts.sortByMaterial) return;
     if (num_paths <= 1) return;
+
+    ensureMaterialSortBuffers();
 
     // 1. Resolve material keys through TriangleAttr.surfaceId → Surface.
     LAUNCH_KERNEL_AUTO(buildMaterialSortKeys, num_paths,
