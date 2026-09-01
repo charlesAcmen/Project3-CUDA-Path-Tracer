@@ -942,12 +942,10 @@ static __host__ __device__ void scatterDiffuse(
     PathSegment& pathSegment,
     const glm::vec3& intersect,
     const glm::vec3& shadingNormal,
-    const glm::vec2& uv,
-    const SurfaceBinding& tex,
-    const Material& m,
+    const glm::vec3& geometricNormal,
+    float rayOriginScale,
     RngState& rng,
-    const TextureTable& textures,
-    const glm::vec3& vertexColor)
+    const glm::vec3& albedo)
 {
     // Generate new random direction for diffuse reflection (cosine-weighted hemisphere sampling)
     // Common mistake: offsetting along newDirection instead of normal
@@ -961,11 +959,12 @@ static __host__ __device__ void scatterDiffuse(
     // multiplier = fr * cos theta/pdf(omega)
     // where pdf(omega) = cos theta / PI
     // BSDF of diffuse reflection: fr = R / PI
-    pathSegment.ray.direction = newDirection;
+    pathSegment.previousBsdfPdfOmega =
+        glm::max(glm::dot(shadingNormal, newDirection), 0.0f) * (1.0f / PI);
 
     // Resolve the diffuse albedo from the mesh's baseColor binding, falling
     // back to the flat material color.  Vertex colors multiply the result.
-    pathSegment.throughput *= resolveBaseColor(tex, textures, uv, m, vertexColor);
+    pathSegment.throughput *= albedo;
 }
 
 __host__ __device__ void scatterRay(
