@@ -206,6 +206,110 @@ __global__ void shadeMaterial(
     }
 }
 
+// Expands attributes only for the selected closest triangle.  Traversal stays
+// position-only for every rejected candidate, exactly as before this split.
+static __device__ bool resolveShadeableIntersection(
+    const HitRecord& hit,
+    const ShadingSceneView& scene,
+    ShadeableIntersection& intersection,
+    const Material*& material)
+{
+    const TrianglePos& trianglePos = scene.trianglePositions[hit.triangleIndex];
+    const TriangleAttr& triangleAttr = scene.triangleAttrs[hit.triangleIndex];
+    const Surface& surfaceRef = scene.surfaces[triangleAttr.surfaceId];
+    material = &scene.materials[surfaceRef.materialId];
+    // Device binding slot 0 is the default empty binding.  Source binding ids
+    // are shifted by one, mapping -1 to 0.
+    const SurfaceBinding* surface =
+        &scene.surfaceBindings[surfaceRef.surfaceBindingId + 1];
+
+    intersection.t = hit.t;
+    intersection.triangleIndex = hit.triangleIndex;
+    intersection.surfaceFeatures = surfaceRef.features;
+    intersection.hasGeometricNormal = normalizedTriangleNormal(
+        trianglePos, intersection.geometricNormal);
+    if (!intersection.hasGeometricNormal) return false;
+
+    intersection.rayOriginScale = triangleRayOriginScale(trianglePos);
+    interpolateTriangleAttributes(trianglePos, triangleAttr, hit.u, hit.v,
+                                  (surfaceRef.features & SurfaceFeatureNormalMap) != 0,
+                                  intersection.surfaceNormal,
+                                  intersection.uv,
+                                  intersection.tangent,
+                                  intersection.vertexColor);
+    intersection.surface = surface;
+    return true;
+}
+
+// Reconstructs emitted radiance and the competing light PDF/MIS weight for a
+// path that reached an emitter through BSDF sampling.  The caller alone
+// decides whether the hit terminates (JSON emitter) or continues (auto-glow).
+static __device__ void accumulateHitEmission(
+    const EmissionHitContext& context)
+{
+    const glm::vec3 emittedDirection = -context.pathSegment.ray.direction;
+    const glm::vec3 Le = evaluateEmittedRadiance(
+        *context.intersection.surface, context.scene.textures,
+        context.intersection.uv, context.material,
+        context.intersection.geometricNormal, emittedDirection);
+    context.pathSegment.accumulatedRadiance += context.pathSegment.throughput * Le *
+        emissionHitMisWeight(context.pathSegment, context.hit,
+                             context.intersection.geometricNormal,
+                             context.material, context.scene.lights);
+}
+
+static __device__ void shadeSurfaceHit(
+    const SurfaceShadingContext& context)
+{
+    ShadeableIntersection intersection{};
+    const Material* material = nullptr;
+    if (!resolveShadeableIntersection(context.hit, context.scene, intersection, material))
+    {
+        context.pathSegment.remainingBounces = 0;
+        return;
+    }
+
+    const EmissionHitContext emission{
+        context.pathSegment, context.hit, intersection, *material, context.scene
+    };
+    if (material->emittance > 0.0f)
+    {
+        // JSON Emitting surfaces contribute and terminate.
+        accumulateHitEmission(emission);
+        context.pathSegment.remainingBounces = 0;
+        return;
+    }
+
+    // A glTF/OBJ emissive factor is additive auto-glow: it contributes first,
+    // then the same surface continues through its BSDF.
+    if (intersection.surface->emissiveFactor != glm::vec3(0.0f))
+    {
+        accumulateHitEmission(emission);
+    }
+
+    const ResolvedBsdf resolvedBsdf = resolveBsdf(
+        intersection, *material, context.scene.textures,
+        context.pathSegment.ray.direction);
+    const DirectLightingContext directLighting{
+        context.pathSegment, intersection, *material, resolvedBsdf, context.scene
+    };
+    accumulateDirectLighting(directLighting, context.rng);
+
+    // The resolved state carries this hit's normal-map and texture inputs
+    // through continuation, while scatterRay derives the exact point from hit.t.
+    scatterRay(context.pathSegment, intersection, *material,
+        resolvedBsdf, context.rng);
+
+    // Probabilistically terminate low-throughput paths after the guaranteed
+    // minimum bounce count.  scatterRay has already decremented the count.
+    if (russianRouletteTerminate(context.pathSegment.throughput,
+        context.pathSegment.remainingBounces, context.config.traceDepth,
+        context.config.rrMinBounces, context.rng))
+    {
+        context.pathSegment.remainingBounces = 0;
+    }
+}
+
 static __device__ float powerHeuristic(float a, float b)
 {
     if (!(a > 0.0f)) return 0.0f;
