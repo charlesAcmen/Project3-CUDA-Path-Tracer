@@ -861,21 +861,22 @@ static __host__ __device__ void scatterGgxSurface(
 
 // Per-material helper: Fresnel-weighted Russian roulette between reflection
 // and refraction for a Refractive material.  Keys entry/exit off the TRUE
-// surface normal (never the shading normal), and offsets the origin by
-// EPSILON into the correct side of the surface.
+// surface normal (never the shading normal), and offsets the origin along the
+// geometric normal on the side selected by the outgoing direction.
 static __host__ __device__ void scatterRefractive(
     PathSegment& pathSegment,
     const glm::vec3& intersect,
     const glm::vec3& normal,
+    const glm::vec3& geometricNormal,
+    float rayOriginScale,
     const Material& m,
     RngState& rng)
 {
+    pathSegment.previousBsdfPdfOmega = 0.0f;
     float cosThetaI;
     const HitSide hitSide = classifyRefraction(pathSegment.ray.direction, normal, cosThetaI);
     const bool entering = (hitSide == HitSide::Outside);
     // Use invIndexOfRefraction to avoid division on entry.
-    // The offset sign is keyed off the entering/exiting state rather than
-    // the new direction's dot product, which is numerically unstable near grazing angles.
     const float etaRatio = entering ? m.invIndexOfRefraction : m.indexOfRefraction;
     const glm::vec3 refractNormal = entering ? normal : -normal;
 
