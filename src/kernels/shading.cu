@@ -186,3 +186,118 @@ __global__ void shadeMaterial(
         writePathActivity(pathActivityFlags, idx, pathSegment);
     }
 }
+
+static __device__ float powerHeuristic(float a, float b)
+{
+    if (!(a > 0.0f)) return 0.0f;
+    const float scale = fmaxf(a, b);
+    if (!(scale > 0.0f) || !isfinite(scale)) return 0.0f;
+    a /= scale;
+    b /= scale;
+    return (a * a) / (a * a + b * b);
+}
+
+static __device__ float lightPdfOmega(
+    const LightSamplingView& lights, int triangleIndex,
+    float distanceSquared, float lightCosine)
+{
+    if (lights.lightIndexByTriangle == nullptr || !(distanceSquared > 0.0f) ||
+        !(lightCosine > 0.0f)) return 0.0f;
+    const int lightIndex = lights.lightIndexByTriangle[triangleIndex];
+    if (lightIndex < 0 || lightIndex >= lights.count) return 0.0f;
+    const LightTriangle light = lights.triangles[lightIndex];
+    if (!(light.area > 0.0f) || !(light.selectPmf > 0.0f)) return 0.0f;
+    return light.selectPmf * distanceSquared / (light.area * lightCosine);
+}
+
+static __device__ void accumulateDirectLighting(
+    PathSegment& pathSegment,
+    const ShadeableIntersection& receiver,
+    const Material& receiverMaterial,
+    const ResolvedBsdf& receiverBsdf,
+    const ShadingSceneView& scene,
+    RngState& rng)
+{
+    const int lightIndex = sampleLightTriangle(scene.lights,
+        rng.next(HaltonDim::LightSelection));
+    if (lightIndex < 0) return;
+
+    const LightTriangle light = scene.lights.triangles[lightIndex];
+    // A zero-thickness triangle has zero solid angle to itself.  Sampling the
+    // same primitive would therefore create a near-zero-distance, numerically
+    // unstable shadow segment rather than a physical lighting path.
+    if (light.triangleIndex == receiver.triangleIndex) return;
+    const TrianglePos& lightTriangle = scene.trianglePositions[light.triangleIndex];
+    const TriangleAttr& lightAttr = scene.triangleAttrs[light.triangleIndex];
+    const Surface& lightSurface = scene.surfaces[lightAttr.surfaceId];
+    const Material& lightMaterial = scene.materials[lightSurface.materialId];
+    const SurfaceBinding& lightBinding =
+        scene.surfaceBindings[lightSurface.surfaceBindingId + 1];
+
+    const float s = sqrtf(rng.next(HaltonDim::LightSampleU));
+    const float b0 = 1.0f - s;
+    const float b1 = s * (1.0f - rng.next(HaltonDim::LightSampleV));
+    const float b2 = 1.0f - b0 - b1;
+    const glm::vec3 lightPoint = b0 * lightTriangle.v0 + b1 * lightTriangle.v1 + b2 * lightTriangle.v2;
+    const glm::vec2 lightUv = b0 * lightAttr.uv0 + b1 * lightAttr.uv1 + b2 * lightAttr.uv2;
+    const glm::vec3 delta = lightPoint - getExactPointOnRay(pathSegment.ray, receiver.t);
+    const float distanceSquared = glm::dot(delta, delta);
+    if (!(distanceSquared > 0.0f) || !isfinite(distanceSquared)) return;
+    const glm::vec3 wi = delta * glm::inversesqrt(distanceSquared);
+    const BsdfEvaluation bsdf = evaluateBsdf(receiverBsdf, receiverMaterial,
+        pathSegment.ray.direction, wi);
+    const float receiverCosine = glm::max(glm::dot(bsdf.shadingNormal, wi), 0.0f);
+    if (bsdf.isDelta || !(receiverCosine > 0.0f) || !(bsdf.pdfOmega > 0.0f)) return;
+
+    const glm::vec3& geometricNormal = receiver.geometricNormal;
+    glm::vec3 lightNormal;
+    if (!normalizedTriangleNormal(lightTriangle, lightNormal)) return;
+    const float lightCosine = emissionCosine(lightMaterial, lightNormal, -wi);
+    if (!(lightCosine > 0.0f)) return;
+    const glm::vec3 receiverPoint = getExactPointOnRay(pathSegment.ray, receiver.t);
+    Ray shadowRay = spawnRayFromSurface(receiverPoint, geometricNormal, wi,
+                                        receiver.rayOriginScale);
+    const float maxT = nextafterf(glm::dot(lightPoint - shadowRay.origin, wi), 0.0f);
+    // Any-hit returns true when an occluder is found before the sampled
+    // emitter.  A visible light sample is therefore the false case; the
+    // previous negation accidentally accumulated blocked samples instead.
+    if (!(maxT > RAY_EPSILON) || traverseBvhAnyHit(
+        shadowRay, scene.bvhNodes, scene.trianglePositions, maxT,
+        receiver.triangleIndex)) return;
+
+    const float pLight = lightPdfOmega(scene.lights, light.triangleIndex,
+                                       distanceSquared, lightCosine);
+    if (!(pLight > 0.0f) || !isfinite(pLight)) return;
+    const glm::vec3 Le = evaluateEmittedRadiance(lightBinding, scene.textures,
+                                                   lightUv, lightMaterial,
+                                                   lightNormal, -wi);
+    const float areaPdf = light.selectPmf / light.area;
+    const glm::vec3 contribution = pathSegment.throughput * Le * bsdf.value *
+        (receiverCosine * lightCosine / (distanceSquared * areaPdf)) *
+        powerHeuristic(pLight, bsdf.pdfOmega);
+    // The BSDF owns validation of its value/PDF.  This boundary owns the
+    // product of path throughput, emission, geometry and MIS, where a finite
+    // factor combination can still overflow or form Inf*0.
+    if (finiteVec3(contribution))
+    {
+        pathSegment.accumulatedRadiance += contribution;
+    }
+}
+
+static __device__ float emissionHitMisWeight(
+    const PathSegment& pathSegment,
+    const HitRecord& hit,
+    const glm::vec3& lightNormal,
+    const Material& lightMaterial,
+    const LightSamplingView& lights)
+{
+    // Primary rays and delta events have no competing continuous BSDF PDF.
+    if (!(pathSegment.previousBsdfPdfOmega > 0.0f)) return 1.0f;
+    const float lightCosine = emissionCosine(
+        lightMaterial, lightNormal, -pathSegment.ray.direction);
+    if (!(lightCosine > 0.0f)) return 1.0f;
+    const float pLight = lightPdfOmega(lights, hit.triangleIndex,
+                                       hit.t * hit.t, lightCosine);
+    return (pLight > 0.0f && isfinite(pLight))
+        ? powerHeuristic(pathSegment.previousBsdfPdfOmega, pLight) : 1.0f;
+}
