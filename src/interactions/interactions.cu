@@ -735,16 +735,25 @@ static __host__ __device__ void ggxScatterDiffuse(
 
 // ---- Per-material scatter helpers (level-1 split of scatterRay) ----------
 
+// Per-hit values shared by every continuation lobe.  This is a non-owning
+// stack view: it does not change the PathSegment layout or allocate memory.
+// Most importantly, the ray-spawn context always carries the geometric normal
+// and extent-aware scale together.
+struct ScatterContext
+{
+    const glm::vec3& incidentDirection;
+    const glm::vec3& surfaceNormal;
+    const SurfaceRaySpawnContext& raySpawn;
+};
+
 static __host__ __device__ void scatterGgxSurface(
     PathSegment& pathSegment,
-    const glm::vec3& intersect,
-    const glm::vec3& rayDir,
+    const ScatterContext& context,
     const ResolvedBsdf& resolved,
-    const glm::vec3& geometricNormal,
-    float rayOriginScale,
     const Material& m,
     RngState& rng)
 {
+    const glm::vec3& rayDir = context.incidentDirection;
     const glm::vec3& shadingNormal = resolved.shadingNormal;
     const float NdotV = glm::clamp(glm::dot(shadingNormal, -rayDir), 1e-4f, 1.0f);
     const glm::vec3 F0 = glm::mix(glm::vec3(0.04f), resolved.baseColor,
@@ -855,8 +864,7 @@ static __host__ __device__ void scatterGgxSurface(
         return;
     }
     pathSegment.throughput = nextThroughput;
-    pathSegment.ray = spawnRayFromSurface(intersect, geometricNormal,
-                                          scatterDir, rayOriginScale);
+    pathSegment.ray = spawnReflectionRay(context.raySpawn, scatterDir);
 }
 
 // Per-material helper: Fresnel-weighted Russian roulette between reflection
@@ -865,13 +873,11 @@ static __host__ __device__ void scatterGgxSurface(
 // geometric normal on the side selected by the outgoing direction.
 static __host__ __device__ void scatterRefractive(
     PathSegment& pathSegment,
-    const glm::vec3& intersect,
-    const glm::vec3& normal,
-    const glm::vec3& geometricNormal,
-    float rayOriginScale,
+    const ScatterContext& context,
     const Material& m,
     RngState& rng)
 {
+    const glm::vec3& normal = context.surfaceNormal;
     pathSegment.previousBsdfPdfOmega = 0.0f;
     float cosThetaI;
     const HitSide hitSide = classifyRefraction(pathSegment.ray.direction, normal, cosThetaI);
@@ -916,8 +922,7 @@ static __host__ __device__ void scatterRefractive(
     if (tir || rng.next(HaltonDim::FresnelRR) < reflectance)  // dim 8 (prime 23): Fresnel roulette
     {
         glm::vec3 reflectedDir = glm::reflect(pathSegment.ray.direction, normal);
-        pathSegment.ray = spawnRayFromSurface(intersect, geometricNormal,
-                                              reflectedDir, rayOriginScale);
+        pathSegment.ray = spawnReflectionRay(context.raySpawn, reflectedDir);
         // Internal reflection / TIR happens inside the colored medium;
         // external Fresnel reflection off the outer boundary is achromatic (uncolored).
         if (!entering)
@@ -929,8 +934,7 @@ static __host__ __device__ void scatterRefractive(
     {
         // !tir here ⇒ refractedDir is a finite unit vector; the offset
         // pushes to the far side of the surface.
-        pathSegment.ray = spawnRayFromSurface(intersect, geometricNormal,
-                                              refractedDir, rayOriginScale);
+        pathSegment.ray = spawnTransmissionRay(context.raySpawn, refractedDir);
         // Light traverses into / out of the colored medium: apply transmission attenuation
         pathSegment.throughput *= m.color;
     }
@@ -940,10 +944,8 @@ static __host__ __device__ void scatterRefractive(
 // resolveBaseColor (mesh baseColor binding > flat material color).
 static __host__ __device__ void scatterDiffuse(
     PathSegment& pathSegment,
-    const glm::vec3& intersect,
+    const ScatterContext& context,
     const glm::vec3& shadingNormal,
-    const glm::vec3& geometricNormal,
-    float rayOriginScale,
     RngState& rng,
     const glm::vec3& albedo)
 {
@@ -953,8 +955,7 @@ static __host__ __device__ void scatterDiffuse(
     //   offset along newDirection has almost zero normal component
     // - This causes the ray to start below the surface -> self-intersection -> shadow acne
     glm::vec3 newDirection = calculateRandomDirectionInHemisphere(shadingNormal, rng);
-    pathSegment.ray = spawnRayFromSurface(intersect, geometricNormal,
-                                          newDirection, rayOriginScale);
+    pathSegment.ray = spawnReflectionRay(context.raySpawn, newDirection);
     // Apply diffuse material color (energy attenuation)
     // multiplier = fr * cos theta/pdf(omega)
     // where pdf(omega) = cos theta / PI
@@ -992,13 +993,17 @@ __host__ __device__ void scatterRay(
     // from the path ray (unit length) and hit.t — identical to what the
     // caller's getExactPointOnRay would compute, so passing it separately
     // would be redundant.
-    const glm::vec3        intersect = pathSegment.ray.origin + hit.t * pathSegment.ray.direction;
-    const glm::vec3        normal    = hit.surfaceNormal;
-    const glm::vec3 geometricNormal = hit.geometricNormal;
-    const float rayOriginScale = hit.rayOriginScale;
+    const glm::vec3 intersectionPoint =
+        pathSegment.ray.origin + hit.t * pathSegment.ray.direction;
+    const SurfaceRaySpawnContext raySpawn = makeSurfaceRaySpawnContext(
+        intersectionPoint, hit.geometricNormal, hit.rayOriginScale);
     // Opaque normal-map orientation and texture material parameters were
     // resolved by shadeMaterial before direct lighting, and are reused below.
-    const glm::vec3 rayDir = pathSegment.ray.direction;
+    const ScatterContext context{
+        pathSegment.ray.direction,
+        hit.surfaceNormal,
+        raySpawn
+    };
 
     // Offset the new ray origin along the geometric normal.  Shading normals
     // (including normal maps) control the BSDF direction, but must not move a
@@ -1006,18 +1011,15 @@ __host__ __device__ void scatterRay(
     switch (m.type)
     {
         case MaterialType::Refractive:
-            scatterRefractive(pathSegment, intersect, normal, geometricNormal,
-                              rayOriginScale, m, rng);
+            scatterRefractive(pathSegment, context, m, rng);
             break;
         case MaterialType::Reflective:
         case MaterialType::Pbr:
-            scatterGgxSurface(pathSegment, intersect, rayDir, resolved,
-                              geometricNormal, rayOriginScale, m, rng);
+            scatterGgxSurface(pathSegment, context, resolved, m, rng);
             break;
         case MaterialType::Diffuse:
         default:
-            scatterDiffuse(pathSegment, intersect, resolved.shadingNormal,
-                           geometricNormal, rayOriginScale, rng,
+            scatterDiffuse(pathSegment, context, resolved.shadingNormal, rng,
                            resolved.baseColor);
             break;
     }
