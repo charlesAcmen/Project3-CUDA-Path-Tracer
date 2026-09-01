@@ -56,6 +56,38 @@ static __device__ void handleDebugDOFOverlay(
         pathSegment.remainingBounces = 0;
     }
 }
+
+static __device__ bool normalizedTriangleNormal(
+    const TrianglePos& triangle, glm::vec3& normal)
+{
+    normal = glm::cross(triangle.v1 - triangle.v0,
+                        triangle.v2 - triangle.v0);
+    const float length2 = glm::dot(normal, normal);
+    if (!(length2 > 0.0f) || !isfinite(length2)) return false;
+    normal *= glm::inversesqrt(length2);
+    return isfinite(normal.x) && isfinite(normal.y) && isfinite(normal.z);
+}
+
+static __device__ __forceinline__ bool finiteVec3(const glm::vec3& value)
+{
+    return isfinite(value.x) && isfinite(value.y) && isfinite(value.z);
+}
+
+static __device__ void accumulateDirectLighting(
+    PathSegment& pathSegment,
+    const ShadeableIntersection& receiver,
+    const Material& receiverMaterial,
+    const ResolvedBsdf& receiverBsdf,
+    const ShadingSceneView& scene,
+    RngState& rng);
+
+static __device__ float emissionHitMisWeight(
+    const PathSegment& pathSegment,
+    const HitRecord& hit,
+    const glm::vec3& lightNormal,
+    const Material& lightMaterial,
+    const LightSamplingView& lights);
+
 __global__ void shadeMaterial(
     int iter,
     int num_paths,
