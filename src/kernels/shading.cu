@@ -167,18 +167,27 @@ __global__ void shadeMaterial(
                 // emissive map on a shaded surface black.)
                 if (intersection.surface->emissiveFactor != glm::vec3(0.0f))
                 {
-                    pathSegment.accumulatedRadiance += pathSegment.throughput *
-                        resolveEmissive(*intersection.surface, scene.textures,
-                                       intersection.uv, material);
+                    const glm::vec3 emittedDirection = -pathSegment.ray.direction;
+                    const glm::vec3 Le = evaluateEmittedRadiance(
+                        *intersection.surface, scene.textures, intersection.uv, material,
+                        intersection.geometricNormal, emittedDirection);
+                    pathSegment.accumulatedRadiance += pathSegment.throughput * Le *
+                        emissionHitMisWeight(pathSegment, hit,
+                                             intersection.geometricNormal,
+                                             material, scene.lights);
                 }
 
-                // ---- Indirect illumination (BSDF continuation ray) ----
-                // Surface hit: scatter the ray according to the material BSDF.
-                // The hit record carries the surface normal, UV and per-triangle
-                // texture binding, so the diffuse branch can sample the texture
-                // table; scatterRay derives the exact hit point from hit.t.
+                const ResolvedBsdf resolvedBsdf = resolveBsdf(
+                    intersection, material, scene.textures,
+                    pathSegment.ray.direction);
+                accumulateDirectLighting(pathSegment, intersection, material,
+                                         resolvedBsdf, scene, rngScatter);
+
+                // The resolved state carries this hit's normal-map and texture
+                // inputs through the continuation, while scatterRay derives the
+                // exact hit point from hit.t.
                 scatterRay(pathSegment, intersection, material,
-                    rngScatter, scene.textures);
+                    resolvedBsdf, rngScatter);
 
                 // ---- Russian roulette ----
                 // Probabilistically terminate low-throughput paths after
