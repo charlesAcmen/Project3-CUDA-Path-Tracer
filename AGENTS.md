@@ -7,7 +7,13 @@ This document describes the current source tree. Treat `src/` as the implementat
 - Windows / Visual Studio: `cmake -B build`, then `cmake --build build --config Release`.
 - Linux / WSL: `make` or `make Release` (CMake output is under `build/`).
 - Run: `build/bin/Release/cis565_path_tracer <scene.json>`, for example `build/bin/Release/cis565_path_tracer scenes/cornell_box.json`.
-- Standalone projects under `tests/` are not wired into the root CMake build. Generate each one separately with Visual Studio 2022 x64, then build its Release configuration. Rendering changes are primarily validated by the user through visual inspection.
+- Standalone projects under `tests/` are not wired into the root CMake build. Generate each one separately with Visual Studio 2022 x64 **and the installed CUDA toolset**, then build its Release configuration. With the current CUDA 12.8 installation, use (from the repo root):
+  `cmake -S tests/bvh_test -B tests/bvh_test/build -G "Visual Studio 17 2022" -A x64 -T cuda=12.8`, then
+  `cmake --build tests/bvh_test/build --config Release`, then
+  `tests/bvh_test/build/Release/bvh_test.exe`.
+  The CUDA installer must have installed Visual Studio Integration for VS 2022: the file
+  `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VC\v170\BuildCustomizations\CUDA 12.8.props`
+  must exist. `nvcc --version` alone is insufficient; if CMake reports that this `.props` file is missing, repair or modify CUDA 12.8 and select Visual Studio Integration before retrying. Rendering changes are primarily validated by the user through visual inspection.
 
 Do not run builds or render scenes merely to validate a source change. State the exact command for the user to run and the expected visual or console result instead.
 
