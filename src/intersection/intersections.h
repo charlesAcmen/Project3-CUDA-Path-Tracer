@@ -26,21 +26,51 @@ __host__ __device__ inline glm::vec3 getExactPointOnRay(Ray r, float t)
     return r.origin + t * r.direction;
 }
 
+// A hit point can be close to the origin even when its triangle is large
+// (for example, a large floor centred at (0,0,0)).  The interpolation error
+// is then governed by the triangle extent rather than by |point| alone.
+// Return a conservative scalar in world units for the origin offset.
+__host__ __device__ inline float triangleRayOriginScale(const TrianglePos& tri)
+{
+    const glm::vec3 e1 = tri.v1 - tri.v0;
+    const glm::vec3 e2 = tri.v2 - tri.v0;
+    const glm::vec3 e3 = tri.v2 - tri.v1;
+    const glm::vec3 vertexAbs = glm::max(glm::abs(tri.v0),
+        glm::max(glm::abs(tri.v1), glm::abs(tri.v2)));
+    const glm::vec3 edgeAbs = glm::max(glm::abs(e1),
+        glm::max(glm::abs(e2), glm::abs(e3)));
+    const glm::vec3 scale = glm::max(vertexAbs, edgeAbs);
+    return glm::max(1.0f, glm::max(scale.x, glm::max(scale.y, scale.z)));
+}
+
 /**
  * Moves a secondary-ray origin to the requested side of a surface.
  *
  * A fixed world-space epsilon can round back to the original float coordinate
- * in large scenes.  Scaling each component by the hit-point magnitude keeps
- * the offset representable while retaining the existing near-origin epsilon.
+ * in large scenes.  A scale-aware scalar keeps the offset representable while
+ * preserving the requested direction exactly along the geometric normal.  The
+ * optional geometryScale covers large triangles whose hit point is near the
+ * world origin, where point magnitude alone underestimates interpolation
+ * error.
  */
 __host__ __device__ inline glm::vec3 offsetRayOrigin(
     const glm::vec3& point,
     const glm::vec3& normal,
-    float side)
+    float side,
+    float geometryScale = 0.0f)
 {
     const glm::vec3 magnitude = glm::max(glm::abs(point), glm::vec3(1.0f));
-    const glm::vec3 offset = glm::max(
-        glm::vec3(EPSILON), magnitude * RAY_ORIGIN_RELATIVE_EPSILON);
+    const float maxMagnitude = glm::max(magnitude.x,
+        glm::max(magnitude.y, magnitude.z));
+    // NaN fails both comparisons and infinity is not a usable scene scale;
+    // treat either as absent rather than allowing an invalid origin to enter
+    // the traversal.
+    const float safeGeometryScale = (geometryScale > 0.0f &&
+                                     geometryScale < LARGE_T)
+        ? geometryScale : 0.0f;
+    const float scale = glm::max(maxMagnitude, safeGeometryScale);
+    const float offset = glm::max(EPSILON,
+        scale * RAY_ORIGIN_RELATIVE_EPSILON);
     return point + normal * (side * offset);
 }
 
