@@ -304,6 +304,14 @@ struct PathSegment
     Ray ray;
     glm::vec3 throughput;          // Path weight: product of BSDF, Fresnel, RR, etc.
     glm::vec3 accumulatedRadiance; // Accumulated radiance: sum of emissive contributions
+    // Solid-angle PDF of the previous continuous BSDF event.  Zero denotes a
+    // primary ray or delta event, both of which receive MIS weight one when
+    // they reach an emitter.
+    float previousBsdfPdfOmega;
+    // Flattened triangle that spawned the current secondary ray.  Closest-hit
+    // traversal skips only this primitive as a numerical self-intersection
+    // guard; -1 marks a primary ray.
+    int previousTriangleIndex = -1;
     int pixelIndex;
     int remainingBounces;
 };
