@@ -124,6 +124,54 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
     const TextureTable& textures,
     glm::vec2 uv);
 
+// Continuous BSDF evaluation used by direct-light sampling and MIS.  `value`
+// is f(wo, wi); pdfOmega is in solid-angle measure.  Delta events return
+// isDelta=true and pdfOmega=0 because a finite-area light sample cannot
+// generate their single direction.  Invalid numerical evaluations return the
+// zero-initialized result, preserving this same no-continuous-contribution
+// contract without clamping valid samples.
+struct BsdfEvaluation
+{
+    glm::vec3 value{ 0.0f };
+    glm::vec3 shadingNormal{ 0.0f };
+    float pdfOmega = 0.0f;
+    bool isDelta = false;
+};
+
+// Texture-resolved, incident-direction-dependent BSDF state for one hit.
+// Direct lighting and continuation scattering consume the same values, so a
+// normal/base-color/ORM lookup happens once per shaded non-emissive hit.
+// This deliberately contains only material parameters; light samples and
+// shadow-traversal temporaries remain local to the direct-light path.
+struct ResolvedBsdf
+{
+    glm::vec3 shadingNormal{ 0.0f };
+    glm::vec3 baseColor{ 0.0f }; // Lambert albedo, PBR baseColor, or Reflective tint
+    float roughness = 0.0f;
+    float metallic = 0.0f;
+};
+
+__host__ __device__ ResolvedBsdf resolveBsdf(
+    const ShadeableIntersection& hit,
+    const Material& material,
+    const TextureTable& textures,
+    const glm::vec3& incidentRayDirection);
+
+__host__ __device__ BsdfEvaluation evaluateBsdf(
+    const ResolvedBsdf& resolved,
+    const Material& material,
+    const glm::vec3& incidentRayDirection,
+    const glm::vec3& outgoingDirection);
+
+// Compatibility entry point for focused BSDF tests.  Shading code should
+// resolve once, then use the overload above for every direction at that hit.
+__host__ __device__ BsdfEvaluation evaluateBsdf(
+    const ShadeableIntersection& hit,
+    const Material& material,
+    const TextureTable& textures,
+    const glm::vec3& incidentRayDirection,
+    const glm::vec3& outgoingDirection);
+
 /**
  * Scatter a ray with some probabilities according to the material properties.
  * For example, a diffuse surface scatters in a cosine-weighted hemisphere.
