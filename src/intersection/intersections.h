@@ -74,24 +74,79 @@ __host__ __device__ inline glm::vec3 offsetRayOrigin(
     return point + normal * (side * offset);
 }
 
+// All secondary-ray kinds share the same geometric-origin policy.  Keeping
+// this small value object explicit prevents a caller from accidentally using
+// a shading normal, omitting the triangle scale, or reconstructing a point
+// from a different ray.  It is stack-only and is passed by reference.
+struct SurfaceRaySpawnContext
+{
+    glm::vec3 point;
+    glm::vec3 geometricNormal;
+    float geometryScale;
+};
+
+__host__ __device__ __forceinline__ SurfaceRaySpawnContext makeSurfaceRaySpawnContext(
+    const glm::vec3& point,
+    const glm::vec3& geometricNormal,
+    float geometryScale = 0.0f)
+{
+    return SurfaceRaySpawnContext{ point, geometricNormal, geometryScale };
+}
+
 /**
  * Spawn a ray that leaves a surface without numerically re-entering its
  * triangle.  The geometric normal determines the side of the surface; the
  * outgoing direction is otherwise preserved exactly.  Shadow rays can use
  * this helper too, then apply their own finite tMax policy.
  */
-__host__ __device__ inline Ray spawnRayFromSurface(
+__host__ __device__ __forceinline__ Ray spawnRayFromSurface(
+    const SurfaceRaySpawnContext& surface,
+    const glm::vec3& direction)
+{
+    const float side = glm::dot(direction, surface.geometricNormal) >= 0.0f
+        ? 1.0f : -1.0f;
+    return Ray{
+        offsetRayOrigin(surface.point, surface.geometricNormal, side,
+                        surface.geometryScale),
+        direction
+    };
+}
+
+// Semantic names make the intent at the call site obvious.  They deliberately
+// share one implementation: the outgoing direction alone selects the side of
+// the geometric plane, preserving reflection, transmission, and NEE behavior.
+__host__ __device__ __forceinline__ Ray spawnReflectionRay(
+    const SurfaceRaySpawnContext& surface,
+    const glm::vec3& direction)
+{
+    return spawnRayFromSurface(surface, direction);
+}
+
+__host__ __device__ __forceinline__ Ray spawnTransmissionRay(
+    const SurfaceRaySpawnContext& surface,
+    const glm::vec3& direction)
+{
+    return spawnRayFromSurface(surface, direction);
+}
+
+__host__ __device__ __forceinline__ Ray spawnShadowRay(
+    const SurfaceRaySpawnContext& surface,
+    const glm::vec3& direction)
+{
+    return spawnRayFromSurface(surface, direction);
+}
+
+// Source-compatible entry point for focused tests and callers which only have
+// loose surface values.  New shading code should retain a context for the
+// entire scatter/visibility operation.
+__host__ __device__ __forceinline__ Ray spawnRayFromSurface(
     const glm::vec3& point,
     const glm::vec3& geometricNormal,
     const glm::vec3& direction,
     float geometryScale = 0.0f)
 {
-    const float side = glm::dot(direction, geometricNormal) >= 0.0f
-        ? 1.0f : -1.0f;
-    return Ray{
-        offsetRayOrigin(point, geometricNormal, side, geometryScale),
-        direction
-    };
+    return spawnRayFromSurface(
+        makeSurfaceRaySpawnContext(point, geometricNormal, geometryScale), direction);
 }
 
 /**
