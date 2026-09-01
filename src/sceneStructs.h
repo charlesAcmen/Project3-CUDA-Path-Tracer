@@ -37,11 +37,9 @@ struct SurfaceBinding
     // fallback for metallic when there is no ORM texture and the scene JSON
     // left METALLIC unspecified.  -1 = not a glTF material (plain OBJ).
     float metallicFactor = -1.0f;
-    // glTF pbrMetallicRoughness.baseColorFactor (RGBA; alpha ignored).  Applied
-    // only when the winning baseColor is the glTF baseColor texture: the
-    // sampler returns texture.rgb · factor, matching glTF semantics.  Default
-    // (1,1,1) is a no-op; for non-glTF meshes it is never applied because
-    // tex.baseColor < 0.
+    // glTF pbrMetallicRoughness.baseColorFactor (RGBA; alpha ignored). Applied
+    // to the glTF baseColor texture when present, or used directly by a
+    // factor-only glTF material. Default (1,1,1) is a no-op.
     glm::vec3 baseColorFactor{ 1.0f, 1.0f, 1.0f };
     // glTF emissiveFactor (spec default [0,0,0] = no emission).  The emissive
     // texture is optional: when absent, emission is factor · strength; when

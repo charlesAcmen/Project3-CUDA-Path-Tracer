@@ -316,13 +316,14 @@ __host__ __device__ glm::vec3 resolveBaseColor(
         albedo = sampleTexture(textures.pixels, textures.infos[tex.baseColor], uv);
         albedo *= glm::vec3(tex.baseColorFactor);
     }
-    else if (tex.roughnessFactor >= 0.0f && useGltfOnly)
+    else if (useGltfOnly &&
+             (tex.roughnessFactor >= 0.0f || tex.metallicFactor >= 0.0f ||
+              tex.baseColorFactor != glm::vec3(1.0f)))
     {
         // glTF material whose color is factor-only (no baseColorTexture):
-        // baseColorFactor IS the glTF material's own tint (e.g. the flat
-        // red/yellow spheres in transmission_test).  Only glTF triangles
-        // carry roughnessFactor >= 0 (OBJ keeps the -1 sentinel), so the
-        // scene JSON color still governs plain meshes.
+        // baseColorFactor IS the material tint. At least one recorded scalar
+        // factor, or a non-default color factor, identifies this as a glTF
+        // binding without changing the default Pbr fallback for plain meshes.
         albedo = glm::vec3(tex.baseColorFactor);
     }
 

@@ -69,6 +69,7 @@ __host__ __device__ glm::vec3 sampleGgxHalfVector(const glm::vec3& normal, float
 
 // Resolve the diffuse albedo.  Source chain — first hit wins:
 //   glTF baseColor texture (tex.baseColor, × baseColorFactor) >
+//   glTF factor-only baseColorFactor >
 //   flat material color m.color.
 // Vertex colors (COLOR_0) multiply the final albedo: albedo *= vertexColor.
 __host__ __device__ glm::vec3 resolveBaseColor(
