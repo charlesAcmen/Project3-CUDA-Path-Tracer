@@ -18,6 +18,8 @@ struct DeviceBuffers {
     unsigned char*          pathActivityFlags   = nullptr;  // shading output consumed by mask-based compaction
     Material*               materials           = nullptr;
     HitRecord*              intersections       = nullptr;
+    // Allocated together on first material-sort use.  They stay resident
+    // afterwards so an ImGui toggle does not reallocate every frame.
     int*                    sortKeys            = nullptr;
     int*                    sortIndices         = nullptr;
     HitRecord*              intersectionsSorted = nullptr;
