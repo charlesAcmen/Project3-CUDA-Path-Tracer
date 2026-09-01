@@ -332,20 +332,24 @@ static glm::mat4 nodeLocalMatrix(const cgltf_node* n)
     return m;   // m = T·R·S
 }
 
-// Locate the POSITION / NORMAL / TEXCOORD_0 / COLOR_0 / TANGENT accessors of a primitive.
-// TEXCOORD_0 and COLOR_0 are preferred (higher sets are ignored).
+// Locate the supported vertex accessors of a primitive. TEXCOORD_0, COLOR_0,
+// JOINTS_0, and WEIGHTS_0 are preferred (higher sets are ignored).
 static void findAttributeAccessors(const cgltf_primitive* prim,
                                    const cgltf_accessor*& posAcc,
                                    const cgltf_accessor*& nrmAcc,
                                    const cgltf_accessor*& uvAcc,
                                    const cgltf_accessor*& colAcc,
-                                   const cgltf_accessor*& tanAcc)
+                                   const cgltf_accessor*& tanAcc,
+                                   const cgltf_accessor*& jointsAcc,
+                                   const cgltf_accessor*& weightsAcc)
 {
     posAcc = nullptr;
     nrmAcc = nullptr;
     uvAcc  = nullptr;
     colAcc = nullptr;
     tanAcc = nullptr;
+    jointsAcc = nullptr;
+    weightsAcc = nullptr;
     for (cgltf_size ai = 0; ai < prim->attributes_count; ++ai)
     {
         const cgltf_attribute* attr = &prim->attributes[ai];
@@ -359,6 +363,10 @@ static void findAttributeAccessors(const cgltf_primitive* prim,
             colAcc = attr->data;   // COLOR_0 (we ignore higher sets)
         else if (attr->type == cgltf_attribute_type_tangent)
             tanAcc = attr->data;
+        else if (attr->type == cgltf_attribute_type_joints && attr->index == 0)
+            jointsAcc = attr->data;
+        else if (attr->type == cgltf_attribute_type_weights && attr->index == 0)
+            weightsAcc = attr->data;
     }
 }
 
@@ -373,6 +381,60 @@ static vector<float> unpackAccessor(const cgltf_accessor* acc, int comps)
     return out;
 }
 
+// A skin palette transforms vertices from the mesh node's local space back
+// into that same space. The node transform is still applied afterwards by
+// the ordinary glTF scene-graph path, so skinned and rigid mesh instances
+// share one triangle emission path.
+struct SkinPalette
+{
+    vector<glm::mat4> matrices;
+
+    bool active() const { return !matrices.empty(); }
+};
+
+static SkinPalette buildSkinPalette(const cgltf_skin* skin,
+                                    const glm::mat4& meshWorld)
+{
+    SkinPalette palette;
+    if (skin == nullptr || skin->joints_count == 0)
+        return palette;
+
+    if (skin->inverse_bind_matrices != nullptr &&
+        skin->inverse_bind_matrices->count < skin->joints_count)
+    {
+        Log::warn("Scene", "glTF skin has %zu joints but only %zu inverse-bind matrices; "
+                  "using rigid fallback",
+                  (size_t)skin->joints_count,
+                  (size_t)skin->inverse_bind_matrices->count);
+        return palette;
+    }
+
+    const glm::mat4 meshWorldInverse = glm::inverse(meshWorld);
+    palette.matrices.resize(skin->joints_count);
+    for (cgltf_size i = 0; i < skin->joints_count; ++i)
+    {
+        cgltf_float jointWorldRaw[16];
+        cgltf_node_transform_world(skin->joints[i], jointWorldRaw);
+        const glm::mat4 jointWorld = glm::make_mat4(jointWorldRaw);
+
+        glm::mat4 inverseBind(1.0f); // omitted inverseBindMatrices means identity
+        if (skin->inverse_bind_matrices != nullptr &&
+            !cgltf_accessor_read_float(skin->inverse_bind_matrices, i,
+                                       glm::value_ptr(inverseBind), 16))
+        {
+            Log::warn("Scene", "glTF skin inverse-bind matrix %zu could not be read; "
+                      "using rigid fallback", (size_t)i);
+            return SkinPalette{};
+        }
+
+        // glTF skinning: jointWorld · inverseBind maps a bind-pose vertex
+        // into world space. Convert it back to mesh-local space because the
+        // caller applies meshWorld after this interpolation.
+        palette.matrices[i] = meshWorldInverse * jointWorld * inverseBind;
+    }
+    return palette;
+}
+
 // Emit one primitive's triangles, transformed into the node's accumulated
 // frame.  Vertices via `world`; normals via the inverse-transpose — left
 // UNnormalized, so the world-space bake + hit-time normalize compose with
@@ -380,6 +442,7 @@ static vector<float> unpackAccessor(const cgltf_accessor* acc, int comps)
 static void appendPrimitiveTriangles(const cgltf_primitive* prim,
                                      const glm::mat4& world,
                                      const glm::mat4& worldIT,
+                                     const SkinPalette& skinPalette,
                                      vector<TrianglePos>& positions,
                                      vector<TriangleAttr>& attrs, int& count,
                                      GltfLoadCtx& ctx)
@@ -397,7 +460,10 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
     const cgltf_accessor* uvAcc  = nullptr;
     const cgltf_accessor* colAcc  = nullptr;
     const cgltf_accessor* tanAcc = nullptr;
-    findAttributeAccessors(prim, posAcc, nrmAcc, uvAcc, colAcc, tanAcc);
+    const cgltf_accessor* jointsAcc = nullptr;
+    const cgltf_accessor* weightsAcc = nullptr;
+    findAttributeAccessors(prim, posAcc, nrmAcc, uvAcc, colAcc, tanAcc,
+                           jointsAcc, weightsAcc);
     if (posAcc == nullptr)
     {
         Log::warn("Scene", "glTF primitive has no POSITION accessor; skipping");
@@ -440,9 +506,58 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
         tanAcc = nullptr;
     }
 
+    const bool needsSkinning = skinPalette.active();
+    if (needsSkinning &&
+        (jointsAcc == nullptr || weightsAcc == nullptr ||
+         jointsAcc->count != vertCount || weightsAcc->count != vertCount))
+    {
+        Log::warn("Scene", "glTF skinned primitive is missing matching JOINTS_0/WEIGHTS_0; "
+                  "using rigid fallback");
+    }
+    const bool skinningValid = needsSkinning && jointsAcc != nullptr &&
+                               weightsAcc != nullptr &&
+                               jointsAcc->count == vertCount &&
+                               weightsAcc->count == vertCount;
+
     // Unpack all vertex positions / normals / UVs (cgltf_accessor_read_float
     // handles integer and normalized component types).
     vector<float> pos = unpackAccessor(posAcc, 3);
+
+    // Static skinning is baked at load time. These arrays are transient and
+    // never reach Scene/BVH/GPU storage.
+    vector<glm::uvec4> joints;
+    vector<glm::vec4> weights;
+    if (skinningValid)
+    {
+        joints.resize(vertCount);
+        weights.resize(vertCount);
+        for (cgltf_size i = 0; i < vertCount; ++i)
+        {
+            cgltf_uint rawJoints[4]{};
+            if (!cgltf_accessor_read_uint(jointsAcc, i, rawJoints, 4))
+            {
+                Log::warn("Scene", "glTF JOINTS_0 accessor could not be read; "
+                          "using rigid fallback");
+                joints.clear();
+                weights.clear();
+                break;
+            }
+            cgltf_float rawWeights[4]{};
+            if (!cgltf_accessor_read_float(weightsAcc, i, rawWeights, 4))
+            {
+                Log::warn("Scene", "glTF WEIGHTS_0 accessor could not be read; "
+                          "using rigid fallback");
+                joints.clear();
+                weights.clear();
+                break;
+            }
+            joints[i] = glm::uvec4(rawJoints[0], rawJoints[1],
+                                   rawJoints[2], rawJoints[3]);
+            weights[i] = glm::vec4(rawWeights[0], rawWeights[1],
+                                   rawWeights[2], rawWeights[3]);
+        }
+    }
+    const bool useSkinning = skinningValid && !joints.empty();
 
     // Normals (optional; appendTriangle falls back to the face normal).
     vector<float> nrm;
@@ -527,13 +642,39 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
                          col[stride * (size_t)i + 2]);
     };
 
+    auto skinMatrixAt = [&](cgltf_size i) -> glm::mat4 {
+        if (!useSkinning)
+            return glm::mat4(1.0f);
+
+        const glm::uvec4 vertexJoints = joints[i];
+        const glm::vec4 vertexWeights = weights[i];
+        const unsigned jointIndices[4] = {
+            vertexJoints.x, vertexJoints.y, vertexJoints.z, vertexJoints.w
+        };
+        const float jointWeights[4] = {
+            vertexWeights.x, vertexWeights.y, vertexWeights.z, vertexWeights.w
+        };
+        glm::mat4 blended(0.0f);
+        float weightSum = 0.0f;
+        for (int j = 0; j < 4; ++j)
+        {
+            if (jointWeights[j] <= 0.0f ||
+                jointIndices[j] >= skinPalette.matrices.size())
+                continue;
+            blended += jointWeights[j] * skinPalette.matrices[jointIndices[j]];
+            weightSum += jointWeights[j];
+        }
+        return weightSum > 0.0f ? blended : glm::mat4(1.0f);
+    };
+
     // Node-transform the local vertex / normal into the scene frame.
     auto vTrans = [&](cgltf_size i) -> glm::vec3 {
-        return glm::vec3(world * glm::vec4(vert(i), 1.0f));
+        return glm::vec3(world * skinMatrixAt(i) * glm::vec4(vert(i), 1.0f));
     };
     auto nTrans = [&](cgltf_size i) -> glm::vec3 {
         return (nrmAcc != nullptr)
-            ? glm::vec3(worldIT * glm::vec4(norm(i), 0.0f))
+            ? glm::vec3(worldIT * glm::inverseTranspose(skinMatrixAt(i)) *
+                        glm::vec4(norm(i), 0.0f))
             : glm::vec3(0.0f);   // no vertex normal → appendTriangle's face-normal fallback
     };
     // Tangents are directions in the surface plane, so they follow the
@@ -542,7 +683,8 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
     // normal, which also handles non-uniform scale.
     auto tTrans = [&](cgltf_size i) -> glm::vec4 {
         const glm::vec4 tangent = tangentAt(i);
-        return glm::vec4(glm::vec3(world * glm::vec4(glm::vec3(tangent), 0.0f)),
+        return glm::vec4(glm::vec3(world * skinMatrixAt(i) *
+                                   glm::vec4(glm::vec3(tangent), 0.0f)),
                          tangent.w);
     };
 
@@ -609,15 +751,19 @@ static void appendPrimitiveTriangles(const cgltf_primitive* prim,
     }
 }
 
-// Emit all of a mesh's primitives under one accumulated transform.
-static void appendMeshTriangles(const cgltf_mesh* mesh, const glm::mat4& world,
+// Emit all of a mesh's primitives under one accumulated transform. `skin` is
+// supplied by its owning node; the no-scene fallback has no owning node and
+// therefore uses the rigid path.
+static void appendMeshTriangles(const cgltf_mesh* mesh, const cgltf_skin* skin,
+                                const glm::mat4& world,
                                 vector<TrianglePos>& positions,
                                 vector<TriangleAttr>& attrs, int& count,
                                 GltfLoadCtx& ctx)
 {
     const glm::mat4 worldIT = glm::inverseTranspose(world);
+    const SkinPalette skinPalette = buildSkinPalette(skin, world);
     for (cgltf_size pi = 0; pi < mesh->primitives_count; ++pi)
-        appendPrimitiveTriangles(&mesh->primitives[pi], world, worldIT,
+        appendPrimitiveTriangles(&mesh->primitives[pi], world, worldIT, skinPalette,
                                  positions, attrs, count, ctx);
 }
 
@@ -630,7 +776,7 @@ static void walkNode(const cgltf_node* node, const glm::mat4& parentWorld,
 {
     const glm::mat4 world = parentWorld * nodeLocalMatrix(node);
     if (node->mesh != nullptr)
-        appendMeshTriangles(node->mesh, world, positions, attrs, count, ctx);
+        appendMeshTriangles(node->mesh, node->skin, world, positions, attrs, count, ctx);
     for (cgltf_size c = 0; c < node->children_count; ++c)
         walkNode(node->children[c], world, positions, attrs, count, ctx);
 }
@@ -735,7 +881,8 @@ pair<int, int> loadGLTF(Scene& scene, const string& gltfPath)
     {
         // No scene graph (some minimal files): emit every mesh untransformed.
         for (cgltf_size mi = 0; mi < data->meshes_count; ++mi)
-            appendMeshTriangles(&data->meshes[mi], glm::mat4(1.0f), positions, attrs, count, ctx);
+            appendMeshTriangles(&data->meshes[mi], nullptr, glm::mat4(1.0f),
+                                positions, attrs, count, ctx);
     }
 
     cgltf_free(data);
