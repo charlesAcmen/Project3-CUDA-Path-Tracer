@@ -359,6 +359,17 @@ struct ShadeableIntersection
   // → shading computes B = cross(N, T)·w.  (0,0,0,0) sentinel = degenerate
   // UVs → tangent-space normal mapping is skipped.
   glm::vec4 tangent;
+  // Unit geometric normal from the winning triangle's world-space positions.
+  // It is used only to move secondary-ray origins; smooth/normal-mapped
+  // normals remain responsible for BSDF evaluation.
+  glm::vec3 geometricNormal{ 0.0f };
+  // Whether geometricNormal was successfully normalized from the triangle.
+  // Consumers must not use the output vector when this is false.
+  bool hasGeometricNormal = false;
+  // Conservative world-space scale used by the ray-origin error offset.  It
+  // includes the triangle extent so a large triangle centred near the origin
+  // does not receive an under-sized fixed offset.
+  float rayOriginScale = 0.0f;
   uint32_t surfaceFeatures;
   glm::vec2 uv;   // interpolated texture coordinate at the hit point
   glm::vec3 vertexColor; // interpolated vertex color (COLOR_0), default white = no effect
