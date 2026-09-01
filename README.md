@@ -210,3 +210,18 @@ The built-in profiler writes CSV files under
 - [PBRT v3](https://www.pbr-book.org/3ed-2018/contents)
 - [GPU Gems 3, Chapter 39: Parallel Prefix Sum](https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda)
 - [Antialiasing and Raytracing — Paul Bourke](https://paulbourke.net/miscellaneous/raytracing/)
+
+## License and attribution
+
+This project is licensed under the [CUDA Path Tracer Attribution License](LICENSE).
+Any public distribution, publication, demonstration, product, service, or
+derivative work must clearly credit **charlesAcmen** and link to this
+repository:
+
+```text
+Based on CUDA Path Tracer by charlesAcmen:
+https://github.com/charlesAcmen/Project3-CUDA-Path-Tracer
+```
+
+Third-party components under `external/` remain governed by their own
+licenses.

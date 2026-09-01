@@ -1,0 +1,45 @@
+CUDA Path Tracer Attribution License
+
+Copyright (c) 2026 charlesAcmen
+
+Repository: https://github.com/charlesAcmen/Project3-CUDA-Path-Tracer
+
+Permission is granted to use, copy, modify, merge, publish, distribute,
+sublicense, and sell copies of this project and derivative works, in source or
+binary form and for commercial or non-commercial purposes, subject to the
+following conditions:
+
+1. Every public distribution, publication, demonstration, product, service,
+   research output, or derivative work that includes or is based on any
+   material from this repository must give clear attribution to
+   "charlesAcmen" and include a working link to
+   https://github.com/charlesAcmen/Project3-CUDA-Path-Tracer.
+
+2. The attribution must be reasonably visible in the context in which the work
+   is publicly used. Where the work has user-facing credits, documentation, a README,
+   a publication, or a product page, the attribution must appear there. For
+   source-only or internal use, it must appear in the accompanying README,
+   documentation, or source notices.
+
+3. The attribution may not imply that charlesAcmen endorses the derivative
+   work, product, or use.
+
+4. This license, copyright notice, repository link, and the attribution
+   requirement must be included with all substantial portions of this project
+   and all derivative works.
+
+Suggested attribution:
+"Based on CUDA Path Tracer by charlesAcmen:
+https://github.com/charlesAcmen/Project3-CUDA-Path-Tracer"
+
+Third-party components included in this repository remain subject to their own
+licenses. This license applies only to material for which charlesAcmen holds
+the applicable rights.
+
+THE PROJECT IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE PROJECT OR THE USE OR OTHER DEALINGS IN THE
+PROJECT.
