@@ -495,6 +495,163 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
     return worldN * glm::inversesqrt(wlen2);
 }
 
+static __host__ __device__ glm::vec3 resolveOpaqueShadingNormal(
+    const ShadeableIntersection& hit,
+    const Material& material,
+    const TextureTable& textures,
+    const glm::vec3& incidentRayDirection)
+{
+    const glm::vec3 normal = hit.surfaceNormal;
+    if (material.type != MaterialType::Refractive &&
+        (hit.surfaceFeatures & SurfaceFeatureNormalMap))
+    {
+        const glm::vec3 perturbed = resolveShadingNormal(
+            normal, hit.tangent, *hit.surface, textures, hit.uv);
+        return (glm::dot(normal, incidentRayDirection) > 0.0f)
+            ? -perturbed : perturbed;
+    }
+    return (glm::dot(normal, incidentRayDirection) > 0.0f) ? -normal : normal;
+}
+
+static __host__ __device__ bool finiteVec3(const glm::vec3& value)
+{
+    return isfinite(value.x) && isfinite(value.y) && isfinite(value.z);
+}
+
+static __host__ __device__ void rejectInvalidBsdf(BsdfEvaluation& evaluation)
+{
+    if (!finiteVec3(evaluation.value) ||
+        !finiteVec3(evaluation.shadingNormal) ||
+        !isfinite(evaluation.pdfOmega))
+    {
+        evaluation = BsdfEvaluation{};
+    }
+}
+
+__host__ __device__ ResolvedBsdf resolveBsdf(
+    const ShadeableIntersection& hit,
+    const Material& material,
+    const TextureTable& textures,
+    const glm::vec3& incidentRayDirection)
+{
+    ResolvedBsdf result;
+    // Opaque materials shade on the hit side regardless of winding; refraction
+    // keeps the true normal for entry/exit classification in scatterRefractive.
+    // For normal-mapped opaque hits, the orientation is keyed off the geometric
+    // front-face test so a perturbed normal crossing the hemisphere cannot make
+    // a shading seam.  This work is intentionally done once for both NEE and
+    // the continuation ray.
+    result.shadingNormal = resolveOpaqueShadingNormal(
+        hit, material, textures, incidentRayDirection);
+    if (!finiteVec3(result.shadingNormal)) return ResolvedBsdf{};
+
+    if (material.type == MaterialType::Refractive)
+    {
+        return result;
+    }
+
+    const SurfaceBinding& tex = *hit.surface;
+    if (material.type != MaterialType::Reflective && material.type != MaterialType::Pbr)
+    {
+        result.baseColor = resolveBaseColor(tex, textures, hit.uv, material,
+                                             hit.vertexColor);
+        return result;
+    }
+
+    resolvePbrInputs(result.baseColor, result.roughness, result.metallic,
+                     tex, textures, hit.uv, material, hit.vertexColor);
+    return result;
+}
+
+__host__ __device__ BsdfEvaluation evaluateBsdf(
+    const ResolvedBsdf& resolved,
+    const Material& material,
+    const glm::vec3& incidentRayDirection,
+    const glm::vec3& outgoingDirection)
+{
+    BsdfEvaluation result;
+    result.shadingNormal = resolved.shadingNormal;
+    if (!finiteVec3(result.shadingNormal)) return BsdfEvaluation{};
+
+    if (material.type == MaterialType::Refractive)
+    {
+        result.isDelta = true;
+        return result;
+    }
+
+    const glm::vec3 wo = -incidentRayDirection;
+    const float NdotV = glm::clamp(glm::dot(result.shadingNormal, wo), 0.0f, 1.0f);
+    const float NdotL = glm::clamp(glm::dot(result.shadingNormal, outgoingDirection), 0.0f, 1.0f);
+    if (!(NdotV > 0.0f) || !(NdotL > 0.0f)) return result;
+
+    if (material.type != MaterialType::Reflective && material.type != MaterialType::Pbr)
+    {
+        result.value = resolved.baseColor * (1.0f / PI);
+        result.pdfOmega = NdotL * (1.0f / PI);
+        rejectInvalidBsdf(result);
+        return result;
+    }
+
+    const float alpha = resolved.roughness * resolved.roughness;
+    const glm::vec3 F0 = glm::mix(glm::vec3(0.04f), resolved.baseColor,
+                                  resolved.metallic);
+    const glm::vec3 Fview = fresnelSchlickF0(glm::max(NdotV, 1e-4f), F0);
+    const float clampedProb = glm::clamp(luminance(Fview), 0.05f, 0.95f);
+    const float specProb = glm::mix(clampedProb, 1.0f,
+                                    glm::clamp(resolved.metallic, 0.0f, 1.0f));
+    const glm::vec3 diffuse = resolved.baseColor * (1.0f - resolved.metallic) *
+                               (glm::vec3(1.0f) - Fview) *
+                               (1.0f / PI);
+
+    if (resolved.roughness < ROUGHNESS_THRESHOLD)
+    {
+        if (resolved.metallic > PBR_MIRROR_METALLIC_THRESHOLD)
+        {
+            result.isDelta = true;
+            return result;
+        }
+        // The mirror component is a delta; only the diffuse lobe has a
+        // continuous density and can compete with area-light sampling.
+        result.value = diffuse;
+        result.pdfOmega = (1.0f - specProb) * NdotL * (1.0f / PI);
+        rejectInvalidBsdf(result);
+        return result;
+    }
+
+    const glm::vec3 halfVectorSum = wo + outgoingDirection;
+    const float halfVectorLength2 = glm::dot(halfVectorSum, halfVectorSum);
+    if (!(halfVectorLength2 > 0.0f)) return result;
+    const glm::vec3 halfVector = halfVectorSum * glm::inversesqrt(halfVectorLength2);
+    const float NdotH = glm::max(glm::dot(result.shadingNormal, halfVector), 0.0f);
+    const float VdotH = glm::max(glm::dot(wo, halfVector), 0.0f);
+    if (!(NdotH > 0.0f) || !(VdotH > 0.0f)) return result;
+
+    const float D = ggxD(alpha, NdotH);
+    const float G = smithG1Ggx(alpha, NdotV) * smithG1Ggx(alpha, NdotL);
+    const glm::vec3 F = fresnelSchlickF0(VdotH, F0);
+    const glm::vec3 specular = F * (D * G / (4.0f * NdotV * NdotL));
+    const float specularPdf = D * NdotH / (4.0f * VdotH);
+    const float diffusePdf = NdotL * (1.0f / PI);
+
+    result.value = diffuse + specular;
+    result.pdfOmega = specProb * specularPdf + (1.0f - specProb) * diffusePdf;
+    rejectInvalidBsdf(result);
+    return result;
+}
+
+__host__ __device__ BsdfEvaluation evaluateBsdf(
+    const ShadeableIntersection& hit,
+    const Material& material,
+    const TextureTable& textures,
+    const glm::vec3& incidentRayDirection,
+    const glm::vec3& outgoingDirection)
+{
+    const ResolvedBsdf resolved = resolveBsdf(
+        hit, material, textures, incidentRayDirection);
+    return evaluateBsdf(resolved, material, incidentRayDirection,
+                        outgoingDirection);
+}
+
 // ---- GGX per-lobe helpers (level-2 split of the Reflective/Pbr branch) ----
 // Each helper fills (scatterDir, throughput) for one lobe of the unified
 // metallic-roughness surface.  They are file-local; scatterGgxSurface owns the
