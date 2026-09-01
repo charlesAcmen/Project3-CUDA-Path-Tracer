@@ -135,11 +135,7 @@ struct EmissionHitContext
 };
 
 static __device__ void accumulateDirectLighting(
-    PathSegment& pathSegment,
-    const ShadeableIntersection& receiver,
-    const Material& receiverMaterial,
-    const ResolvedBsdf& receiverBsdf,
-    const ShadingSceneView& scene,
+    const DirectLightingContext& context,
     RngState& rng);
 
 static __device__ float emissionHitMisWeight(
@@ -148,6 +144,18 @@ static __device__ float emissionHitMisWeight(
     const glm::vec3& lightNormal,
     const Material& lightMaterial,
     const LightSamplingView& lights);
+
+static __device__ bool resolveShadeableIntersection(
+    const HitRecord& hit,
+    const ShadingSceneView& scene,
+    ShadeableIntersection& intersection,
+    const Material*& material);
+
+static __device__ void accumulateHitEmission(
+    const EmissionHitContext& context);
+
+static __device__ void shadeSurfaceHit(
+    const SurfaceShadingContext& context);
 
 __global__ void shadeMaterial(
     int iter,
@@ -333,29 +341,24 @@ static __device__ float lightPdfOmega(
     return light.selectPmf * distanceSquared / (light.area * lightCosine);
 }
 
-static __device__ void accumulateDirectLighting(
-    PathSegment& pathSegment,
-    const ShadeableIntersection& receiver,
-    const Material& receiverMaterial,
-    const ResolvedBsdf& receiverBsdf,
-    const ShadingSceneView& scene,
-    RngState& rng)
+// Performs alias-table selection followed by the original square-root
+// barycentric mapping.  Keep the self-light early return before U/V draws:
+// the RNG stream is part of the renderer's deterministic sampling contract.
+static __device__ __forceinline__ bool sampleDirectLight(
+    const DirectLightingContext& context,
+    int lightIndex,
+    RngState& rng,
+    DirectLightSample& sample)
 {
-    const int lightIndex = sampleLightTriangle(scene.lights,
-        rng.next(HaltonDim::LightSelection));
-    if (lightIndex < 0) return;
-
+    const ShadingSceneView& scene = context.scene;
     const LightTriangle light = scene.lights.triangles[lightIndex];
     // A zero-thickness triangle has zero solid angle to itself.  Sampling the
     // same primitive would therefore create a near-zero-distance, numerically
     // unstable shadow segment rather than a physical lighting path.
-    if (light.triangleIndex == receiver.triangleIndex) return;
+    if (light.triangleIndex == context.receiver.triangleIndex) return false;
     const TrianglePos& lightTriangle = scene.trianglePositions[light.triangleIndex];
     const TriangleAttr& lightAttr = scene.triangleAttrs[light.triangleIndex];
     const Surface& lightSurface = scene.surfaces[lightAttr.surfaceId];
-    const Material& lightMaterial = scene.materials[lightSurface.materialId];
-    const SurfaceBinding& lightBinding =
-        scene.surfaceBindings[lightSurface.surfaceBindingId + 1];
 
     const float s = sqrtf(rng.next(HaltonDim::LightSampleU));
     const float b0 = 1.0f - s;
@@ -363,48 +366,110 @@ static __device__ void accumulateDirectLighting(
     const float b2 = 1.0f - b0 - b1;
     const glm::vec3 lightPoint = b0 * lightTriangle.v0 + b1 * lightTriangle.v1 + b2 * lightTriangle.v2;
     const glm::vec2 lightUv = b0 * lightAttr.uv0 + b1 * lightAttr.uv1 + b2 * lightAttr.uv2;
-    const glm::vec3 delta = lightPoint - getExactPointOnRay(pathSegment.ray, receiver.t);
+    const glm::vec3 delta = lightPoint - getExactPointOnRay(
+        context.pathSegment.ray, context.receiver.t);
     const float distanceSquared = glm::dot(delta, delta);
-    if (!(distanceSquared > 0.0f) || !isfinite(distanceSquared)) return;
-    const glm::vec3 wi = delta * glm::inversesqrt(distanceSquared);
-    const BsdfEvaluation bsdf = evaluateBsdf(receiverBsdf, receiverMaterial,
-        pathSegment.ray.direction, wi);
-    const float receiverCosine = glm::max(glm::dot(bsdf.shadingNormal, wi), 0.0f);
-    if (bsdf.isDelta || !(receiverCosine > 0.0f) || !(bsdf.pdfOmega > 0.0f)) return;
+    if (!(distanceSquared > 0.0f) || !isfinite(distanceSquared)) return false;
 
-    const glm::vec3& geometricNormal = receiver.geometricNormal;
+    sample.light = light;
+    sample.triangle = &lightTriangle;
+    sample.binding = &scene.surfaceBindings[lightSurface.surfaceBindingId + 1];
+    sample.material = &scene.materials[lightSurface.materialId];
+    sample.point = lightPoint;
+    sample.uv = lightUv;
+    sample.wi = delta * glm::inversesqrt(distanceSquared);
+    sample.distanceSquared = distanceSquared;
+    return true;
+}
+
+// Evaluates only the continuous NEE terms.  Delta BSDFs retain the existing
+// no-finite-area-light-sample rule, and the exact PDFs stay in solid angle.
+static __device__ __forceinline__ bool evaluateDirectLight(
+    const DirectLightingContext& context,
+    const DirectLightSample& sample,
+    DirectLightEvaluation& evaluation)
+{
+    const BsdfEvaluation bsdf = evaluateBsdf(context.receiverBsdf,
+        context.receiverMaterial, context.pathSegment.ray.direction, sample.wi);
+    const float receiverCosine = glm::max(glm::dot(bsdf.shadingNormal, sample.wi), 0.0f);
+    if (bsdf.isDelta || !(receiverCosine > 0.0f) || !(bsdf.pdfOmega > 0.0f)) return false;
+
     glm::vec3 lightNormal;
-    if (!normalizedTriangleNormal(lightTriangle, lightNormal)) return;
-    const float lightCosine = emissionCosine(lightMaterial, lightNormal, -wi);
-    if (!(lightCosine > 0.0f)) return;
-    const glm::vec3 receiverPoint = getExactPointOnRay(pathSegment.ray, receiver.t);
-    Ray shadowRay = spawnRayFromSurface(receiverPoint, geometricNormal, wi,
-                                        receiver.rayOriginScale);
-    const float maxT = nextafterf(glm::dot(lightPoint - shadowRay.origin, wi), 0.0f);
-    // Any-hit returns true when an occluder is found before the sampled
-    // emitter.  A visible light sample is therefore the false case; the
-    // previous negation accidentally accumulated blocked samples instead.
-    if (!(maxT > RAY_EPSILON) || traverseBvhAnyHit(
-        shadowRay, scene.bvhNodes, scene.trianglePositions, maxT,
-        receiver.triangleIndex)) return;
+    if (!normalizedTriangleNormal(*sample.triangle, lightNormal)) return false;
+    const float lightCosine = emissionCosine(*sample.material, lightNormal, -sample.wi);
+    if (!(lightCosine > 0.0f)) return false;
 
-    const float pLight = lightPdfOmega(scene.lights, light.triangleIndex,
-                                       distanceSquared, lightCosine);
+    evaluation.bsdf = bsdf;
+    evaluation.lightNormal = lightNormal;
+    evaluation.receiverCosine = receiverCosine;
+    evaluation.lightCosine = lightCosine;
+    return true;
+}
+
+// Visibility owns the finite shadow segment policy.  The ray starts from the
+// receiver's geometric plane using the same scale-aware offset as continuation
+// rays, then ends one ULP before the sampled emitter point.
+static __device__ __forceinline__ bool directLightIsVisible(
+    const DirectLightingContext& context,
+    const DirectLightSample& sample)
+{
+    const glm::vec3 receiverPoint = getExactPointOnRay(
+        context.pathSegment.ray, context.receiver.t);
+    const SurfaceRaySpawnContext raySpawn = makeSurfaceRaySpawnContext(
+        receiverPoint, context.receiver.geometricNormal,
+        context.receiver.rayOriginScale);
+    const Ray shadowRay = spawnShadowRay(raySpawn, sample.wi);
+    const float maxT = nextafterf(glm::dot(sample.point - shadowRay.origin, sample.wi), 0.0f);
+    // Any-hit returns true when an occluder is found before the sampled
+    // emitter.  A visible light sample is therefore the false case.
+    return maxT > RAY_EPSILON && !traverseBvhAnyHit(
+        shadowRay, context.scene.bvhNodes, context.scene.trianglePositions, maxT,
+        context.receiver.triangleIndex);
+}
+
+// This is the sole area-to-solid-angle conversion and MIS accumulation site
+// for NEE.  The arithmetic expression intentionally matches the former
+// monolithic implementation, including operation order and finite boundary.
+static __device__ __forceinline__ void accumulateDirectLightContribution(
+    const DirectLightingContext& context,
+    const DirectLightSample& sample,
+    const DirectLightEvaluation& evaluation)
+{
+    const float pLight = lightPdfOmega(context.scene.lights, sample.light.triangleIndex,
+                                       sample.distanceSquared, evaluation.lightCosine);
     if (!(pLight > 0.0f) || !isfinite(pLight)) return;
-    const glm::vec3 Le = evaluateEmittedRadiance(lightBinding, scene.textures,
-                                                   lightUv, lightMaterial,
-                                                   lightNormal, -wi);
-    const float areaPdf = light.selectPmf / light.area;
-    const glm::vec3 contribution = pathSegment.throughput * Le * bsdf.value *
-        (receiverCosine * lightCosine / (distanceSquared * areaPdf)) *
-        powerHeuristic(pLight, bsdf.pdfOmega);
+    const glm::vec3 Le = evaluateEmittedRadiance(*sample.binding, context.scene.textures,
+                                                   sample.uv, *sample.material,
+                                                   evaluation.lightNormal, -sample.wi);
+    const float areaPdf = sample.light.selectPmf / sample.light.area;
+    const glm::vec3 contribution = context.pathSegment.throughput * Le * evaluation.bsdf.value *
+        (evaluation.receiverCosine * evaluation.lightCosine /
+         (sample.distanceSquared * areaPdf)) *
+        powerHeuristic(pLight, evaluation.bsdf.pdfOmega);
     // The BSDF owns validation of its value/PDF.  This boundary owns the
     // product of path throughput, emission, geometry and MIS, where a finite
     // factor combination can still overflow or form Inf*0.
     if (finiteVec3(contribution))
     {
-        pathSegment.accumulatedRadiance += contribution;
+        context.pathSegment.accumulatedRadiance += contribution;
     }
+}
+
+static __device__ void accumulateDirectLighting(
+    const DirectLightingContext& context,
+    RngState& rng)
+{
+    const int lightIndex = sampleLightTriangle(context.scene.lights,
+        rng.next(HaltonDim::LightSelection));
+    if (lightIndex < 0) return;
+
+    DirectLightSample sample{};
+    if (!sampleDirectLight(context, lightIndex, rng, sample)) return;
+
+    DirectLightEvaluation evaluation{};
+    if (!evaluateDirectLight(context, sample, evaluation)) return;
+    if (!directLightIsVisible(context, sample)) return;
+    accumulateDirectLightContribution(context, sample, evaluation);
 }
 
 static __device__ float emissionHitMisWeight(
