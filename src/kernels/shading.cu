@@ -74,6 +74,66 @@ static __device__ __forceinline__ bool finiteVec3(const glm::vec3& value)
     return isfinite(value.x) && isfinite(value.y) && isfinite(value.z);
 }
 
+// Read-only inputs shared across NEE's sampling, visibility, and accumulation
+// stages.  References keep this a stack-only view; no scene data is copied.
+struct DirectLightingContext
+{
+    PathSegment& pathSegment;
+    const ShadeableIntersection& receiver;
+    const Material& receiverMaterial;
+    const ResolvedBsdf& receiverBsdf;
+    const ShadingSceneView& scene;
+};
+
+// A sampled emitter point in the exact area-measure representation produced by
+// the alias-table selection and barycentric sampler.  It deliberately carries
+// no derived PDF or MIS weight, so measure conversion remains centralized.
+struct DirectLightSample
+{
+    LightTriangle light;
+    const TrianglePos* triangle;
+    const SurfaceBinding* binding;
+    const Material* material;
+    glm::vec3 point;
+    glm::vec2 uv;
+    glm::vec3 wi;
+    float distanceSquared;
+};
+
+// Continuous-BSDF and geometric terms evaluated for one DirectLightSample.
+// Keeping them separate from the sample makes it impossible to accidentally
+// use the shading normal for either emitter cosine or ray-origin offsetting.
+struct DirectLightEvaluation
+{
+    BsdfEvaluation bsdf;
+    glm::vec3 lightNormal;
+    float receiverCosine;
+    float lightCosine;
+};
+
+// Per-hit orchestration state for the non-emissive and emissive paths.  This
+// groups only values that are already live in shadeMaterial; it is not a GPU
+// buffer and leaves all production data layouts untouched.
+struct SurfaceShadingContext
+{
+    PathSegment& pathSegment;
+    const HitRecord& hit;
+    const ShadingConfig& config;
+    const ShadingSceneView& scene;
+    RngState& rng;
+};
+
+// Shared input for a BSDF-hit emitter contribution.  Both terminating JSON
+// emitters and additive glTF/OBJ auto-glow use this exact recovery/MIS path.
+struct EmissionHitContext
+{
+    PathSegment& pathSegment;
+    const HitRecord& hit;
+    const ShadeableIntersection& intersection;
+    const Material& material;
+    const ShadingSceneView& scene;
+};
+
 static __device__ void accumulateDirectLighting(
     PathSegment& pathSegment,
     const ShadeableIntersection& receiver,
