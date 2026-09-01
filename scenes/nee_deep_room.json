@@ -1,0 +1,20 @@
+{
+  "Materials": {
+    "wall_white": { "TYPE": "Diffuse", "RGB": [0.62, 0.62, 0.62] },
+    "wall_red": { "TYPE": "Diffuse", "RGB": [0.40, 0.04, 0.03] },
+    "wall_green": { "TYPE": "Diffuse", "RGB": [0.05, 0.18, 0.06] },
+    "small_area_light": { "TYPE": "Emitting", "RGB": [1.0, 0.96, 0.88], "EMITTANCE": 220.0, "EMISSION_SIDEDNESS": "OneSided" }
+  },
+  "Objects": [
+    { "FILE": "box/floor.obj",       "MATERIAL": "wall_white", "TRANS": [-4, 0, -8], "ROTAT": [0, 0, 0], "SCALE": [8, 1, 16] },
+    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-4, 6, -8], "ROTAT": [0, 0, 0], "SCALE": [8, 1, 16] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-4, 0, 8],  "ROTAT": [0, 0, 0], "SCALE": [8, 6, 1] },
+    { "FILE": "box/left_red.obj",    "MATERIAL": "wall_red",   "TRANS": [4, 0, -8],  "ROTAT": [0, 0, 0], "SCALE": [1, 6, 16] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "wall_green", "TRANS": [-4, 0, -8], "ROTAT": [0, 0, 0], "SCALE": [1, 6, 16] },
+    { "FILE": "box/light.obj", "MATERIAL": "small_area_light", "TRANS": [-0.25, 5.98, 2.75], "ROTAT": [0, 0, 0], "SCALE": [0.5, 1, 0.5] }
+  ],
+  "Camera": {
+    "RES": [800, 600], "FOVY": 55, "ITERATIONS": 2000, "DEPTH": 6, "RR_DEPTH": 3,
+    "FILE": "nee_deep_room.png", "EYE": [0, 2.0, -9.5], "LOOKAT": [0, 1.4, 2.5], "UP": [0, 1, 0]
+  }
+}

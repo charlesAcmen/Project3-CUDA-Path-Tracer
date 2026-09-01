@@ -1,0 +1,22 @@
+{
+  "Materials": {
+    "wall_white": { "TYPE": "Diffuse", "RGB": [0.73, 0.73, 0.73] },
+    "wall_red": { "TYPE": "Diffuse", "RGB": [0.63, 0.065, 0.05] },
+    "wall_green": { "TYPE": "Diffuse", "RGB": [0.14, 0.45, 0.091] },
+    "area_light": { "TYPE": "Emitting", "RGB": [1,1,1], "EMITTANCE": 20.0 },
+    "dragon_glass": { "TYPE": "Refractive", "RGB": [0.82, 0.94, 1.0], "IOR": 1.52 }
+  },
+  "Objects": [
+    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-2, 4, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-2, 0, 2],  "ROTAT": [0, 0, 0], "SCALE": [4, 4, 1] },
+    { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-0.9, 3.98, -0.9], "ROTAT": [0, 0, 0], "SCALE": [1.8, 1, 1.8] },
+    { "FILE": "Models/stanford_dragon_vrip/scene.gltf", "MATERIAL": "dragon_glass", "TRANS": [0, 0.7, 0], "ROTAT": [0, 0, 0], "SCALE": [10, 10, 10] }
+  ],
+  "Camera": {
+    "RES": [1200, 1200], "FOVY": 60, "ITERATIONS": 5000, "DEPTH": 12, "RR_DEPTH": 6,
+    "FILE": "stanford_dragon_refractive.png", 
+    "EYE": [0.0937, 2.3236, -2.8484],
+    "LOOKAT": [0.1207, 1.8607, 1.3453],
+    "UP": [0.0007, 0.9940, 0.1097]
+  }
+}

@@ -27,7 +27,7 @@
     { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-0.75, 3.98, -0.75], "ROTAT": [0, 0, 0], "SCALE": [1.5, 1, 1.5] }
   ],
   "Camera": {
-    "RES": [1500,1500],
+    "RES": [1500,720],
     "FOVY": 50,
     "ITERATIONS": 5000,
     "DEPTH": 8,

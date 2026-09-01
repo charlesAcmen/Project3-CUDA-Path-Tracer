@@ -15,7 +15,7 @@
     "area_light": {
       "TYPE": "Emitting",
       "RGB": [1.0, 1.0, 1.0],
-      "EMITTANCE": 20.0
+      "EMITTANCE": 50.0
     },
     "DamagedHelmet": {
       "TYPE": "PBR",
@@ -29,7 +29,7 @@
     { "FILE": "box/left_red.obj",    "MATERIAL": "wall_red",   "TRANS": [2, 0, -2],  "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
     { "FILE": "box/right_green.obj", "MATERIAL": "wall_green", "TRANS": [-2, 0, -2], "ROTAT": [0, 0, 0], "SCALE": [1, 4, 4] },
     { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-0.75, 3.98, -0.75], "ROTAT": [0, 0, 0], "SCALE": [1.5, 1, 1.5] },
-    { "FILE": "Models/DamagedHelmet/glTF/DamagedHelmet.gltf", "MATERIAL": "DamagedHelmet", "TRANS": [0, 0.9, 0], "ROTAT": [0, 180, 0], "SCALE": [0.35, 0.35, 0.35] }
+    { "FILE": "Models/DamagedHelmet/glTF/DamagedHelmet.gltf", "MATERIAL": "DamagedHelmet", "TRANS": [0, 1.5, 0], "ROTAT": [0, 135, 0], "SCALE": [1, 1, 1] }
   ],
   "Camera": {
     "RES": [1920, 1080],
@@ -38,8 +38,8 @@
     "DEPTH": 8,
     "RR_DEPTH": 3,
     "FILE": "damaged_helmet.png",
-    "EYE": [0.9468, 1.6054, -1.9412],
-    "LOOKAT": [0.1926, 0.9359, -0.0857],
-    "UP": [-0.1194, 0.9484, 0.2937]
+    "EYE": [-0.1519, 2.8071, -5.4399],
+    "LOOKAT": [-0.1351, 2.3047, -3.3888],
+    "UP": [0.0020, 0.9713, 0.2379]
   }
 }

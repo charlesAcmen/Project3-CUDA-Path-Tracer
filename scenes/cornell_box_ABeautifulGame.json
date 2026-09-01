@@ -15,7 +15,7 @@
     "area_light": {
       "TYPE": "Emitting",
       "RGB": [1.0, 1.0, 1.0],
-      "EMITTANCE": 15.0
+      "EMITTANCE": 20.0
     },
     "ABeautifulGame": {
       "TYPE": "PBR",
@@ -33,13 +33,13 @@
   ],
   "Camera": {
     "RES": [1500,1500],
-    "FOVY": 50,
+    "FOVY": 60,
     "ITERATIONS": 5000,
     "DEPTH": 8,
     "RR_DEPTH": 3,
     "FILE": "cornell_box_ABeautifulGame.png",
-    "EYE": [0, 2, -4.5],
-    "LOOKAT": [0, 2, 0],
-    "UP": [0, 1, 0]
+    "EYE": [296.6197, 294.3821, -652.1829],
+    "LOOKAT": [290.7936, -200.6258, 625.6352],
+    "UP": [-0.0016, 0.9325, 0.3612]
   }
 }

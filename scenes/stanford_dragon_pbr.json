@@ -1,0 +1,21 @@
+{
+  "Materials": {
+    "wall_white": { "TYPE": "Diffuse", "RGB": [0.73, 0.73, 0.73] },
+    "wall_red": { "TYPE": "Diffuse", "RGB": [0.63, 0.065, 0.05] },
+    "wall_green": { "TYPE": "Diffuse", "RGB": [0.14, 0.45, 0.091] },
+    "area_light": { "TYPE": "Emitting", "RGB": [0.1,0.1,0.8], "EMITTANCE": 40.0 },
+    "dragon_pbr": { "TYPE": "PBR", "RGB": [1.0,1.0,1.0] }
+  },
+  "Objects": [
+    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-2, 4, -2], "ROTAT": [0, 0, 0], "SCALE": [4, 1, 4] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-2, 0, 2],  "ROTAT": [0, 0, 0], "SCALE": [4, 4, 1] },
+    { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-0.9, 3.98, -0.9], "ROTAT": [0, 0, 0], "SCALE": [1.8, 1, 1.8] },
+    { "FILE": "Models/stanford_dragon_vrip/scene.gltf", "MATERIAL": "dragon_pbr", "TRANS": [0, 0.7, 0], "ROTAT": [0, 180, 0], "SCALE": [10, 10, 10] }
+  ],
+  "Camera": {
+    "RES": [1200, 1200], "FOVY": 60, "ITERATIONS": 5000, "DEPTH": 8, "RR_DEPTH": 3,
+    "FILE": "stanford_dragon_pbr.png","EYE": [0.0493, 2.8998, -4.3789],
+"LOOKAT": [0.1171, 2.0446, -0.2478],
+"UP": [0.0033, 0.9792, 0.2027]
+  }
+}
