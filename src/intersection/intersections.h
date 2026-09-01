@@ -75,6 +75,26 @@ __host__ __device__ inline glm::vec3 offsetRayOrigin(
 }
 
 /**
+ * Spawn a ray that leaves a surface without numerically re-entering its
+ * triangle.  The geometric normal determines the side of the surface; the
+ * outgoing direction is otherwise preserved exactly.  Shadow rays can use
+ * this helper too, then apply their own finite tMax policy.
+ */
+__host__ __device__ inline Ray spawnRayFromSurface(
+    const glm::vec3& point,
+    const glm::vec3& geometricNormal,
+    const glm::vec3& direction,
+    float geometryScale = 0.0f)
+{
+    const float side = glm::dot(direction, geometricNormal) >= 0.0f
+        ? 1.0f : -1.0f;
+    return Ray{
+        offsetRayOrigin(point, geometricNormal, side, geometryScale),
+        direction
+    };
+}
+
+/**
  * Maps two uniform random numbers in [0,1) to a point on the unit disk
  * using concentric mapping (Shirley's method), which preserves fractional
  * area for unbiased Monte Carlo integration over a circular aperture.
