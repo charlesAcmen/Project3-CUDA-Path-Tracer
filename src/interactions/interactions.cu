@@ -994,57 +994,38 @@ __host__ __device__ void scatterRay(
     // would be redundant.
     const glm::vec3        intersect = pathSegment.ray.origin + hit.t * pathSegment.ray.direction;
     const glm::vec3        normal    = hit.surfaceNormal;
-    const glm::vec2&       uv        = hit.uv;
-    const SurfaceBinding&  tex       = *hit.surface;
-
-    // Opaque (double-sided) materials shade on the hit side regardless of the
-    // model's winding: orient the shading normal toward the incoming ray so
-    // the diffuse hemisphere / reflection lobe is on the correct side.
-    // Refraction keeps the TRUE normal — its sign (dot with the ray) is what
-    // classifyRefraction uses to distinguish entry from exit.
-    //
-    // Normal mapping (opaque only): when the hit's glTF normal slot is bound,
-    // perturb the shading normal from the tangent-space normal map.  The flip
-    // toward the ray is keyed off the GEOMETRIC front-face test(以几何法线的正反面判定)
-    // — the map's own sign must not independently flip the hemisphere, or a perturbation
-    // crossing the hemisphere boundary would create a shading seam(撕裂黑缝).
+    const glm::vec3 geometricNormal = hit.geometricNormal;
+    const float rayOriginScale = hit.rayOriginScale;
+    // Opaque normal-map orientation and texture material parameters were
+    // resolved by shadeMaterial before direct lighting, and are reused below.
     const glm::vec3 rayDir = pathSegment.ray.direction;
-    glm::vec3 shadingNormal;
-    if (m.type == MaterialType::Refractive)
-    {
-        shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -normal : normal;
-    }
-    else if (hit.surfaceFeatures & SurfaceFeatureNormalMap)
-    {
-        const glm::vec3 perturbed =
-            resolveShadingNormal(normal, hit.tangent, tex, textures, uv);
-        shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -perturbed : perturbed;
-    }
-    else
-    {
-        shadingNormal = (glm::dot(normal, rayDir) > 0.0f) ? -normal : normal;
-    }
 
-    // Offset the new ray origin off the surface by EPSILON so it cannot
-    // immediately re-hit the same triangle.  The offset direction is chosen
-    // per material helper below: refractive keys off the entering/exiting state
-    // (numerically stable near grazing angles), reflective keys off the
-    // shading-normal orientation, diffuse always pushes outward.
-    const glm::vec3& vertexColor = hit.vertexColor; // interpolated vertex color (COLOR_0)
+    // Offset the new ray origin along the geometric normal.  Shading normals
+    // (including normal maps) control the BSDF direction, but must not move a
+    // ray into or through the actual triangle plane.
     switch (m.type)
     {
         case MaterialType::Refractive:
-            scatterRefractive(pathSegment, intersect, normal, m, rng);
+            scatterRefractive(pathSegment, intersect, normal, geometricNormal,
+                              rayOriginScale, m, rng);
             break;
         case MaterialType::Reflective:
         case MaterialType::Pbr:
-            scatterGgxSurface(pathSegment, intersect, rayDir, shadingNormal, uv, tex, m, rng, textures, vertexColor);
+            scatterGgxSurface(pathSegment, intersect, rayDir, resolved,
+                              geometricNormal, rayOriginScale, m, rng);
             break;
         case MaterialType::Diffuse:
         default:
-            scatterDiffuse(pathSegment, intersect, shadingNormal, uv, tex, m, rng, textures, vertexColor);
+            scatterDiffuse(pathSegment, intersect, resolved.shadingNormal,
+                           geometricNormal, rayOriginScale, rng,
+                           resolved.baseColor);
             break;
     }
+
+    // The next BVH query skips exactly this primitive.  This is independent
+    // of the material and remains safe for a planar triangle: one straight
+    // ray cannot legitimately hit the same triangle twice after leaving it.
+    pathSegment.previousTriangleIndex = hit.triangleIndex;
 
     // Decrement remaining bounces
     pathSegment.remainingBounces--;
