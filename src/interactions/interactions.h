@@ -147,14 +147,13 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
  * This method applies its changes to the Ray parameter `ray` in place.
  * It also modifies the color `color` of the ray in place.
  *
- * Texture input: the hit carries a resolved shared SurfaceBinding and a UV.
- * The Diffuse branch resolves the albedo from the mesh's baseColor slot and
- * samples the scene's texture table (`textures`).
- * The unified GGX surface (Reflective / Pbr) additionally samples the
- * metallicRoughness slot (G = roughness, B = metallic) per-texel.  Refractive
- * materials keep their material color and ignore textures.
+ * Texture input is resolved from the hit's shared SurfaceBinding and UV before
+ * this overload is called: diffuse receives baseColor albedo, while GGX
+ * receives baseColor/metallicRoughness-derived parameters. Refractive
+ * materials keep their material color and ignore textures. The compatibility
+ * overload below performs that one-time resolution for callers without NEE.
  *
- * The hit geometry (point, normal, UV, texture slots) is passed as the
+ * The hit geometry (point, smooth/geometric normals, UV, texture slots) is passed as the
  * ShadeableIntersection record rather than as loose scalars: it is exactly
  * the surface state the traversal produced, so the caller hands over the
  * whole hit.  The exact hit point is derived inside from
@@ -162,6 +161,16 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
  *
  * You may need to change the parameter list for your purposes!
  */
+__host__ __device__ void scatterRay(
+    PathSegment& pathSegment,
+    const ShadeableIntersection& hit,
+    const Material& m,
+    const ResolvedBsdf& resolved,
+    RngState& rng);
+
+// Compatibility entry point for focused tests and callers that do not also
+// perform direct-light evaluation.  The main shading kernel resolves once and
+// calls the overload above, avoiding repeated texture work.
 __host__ __device__ void scatterRay(
     PathSegment& pathSegment,
     const ShadeableIntersection& hit,
