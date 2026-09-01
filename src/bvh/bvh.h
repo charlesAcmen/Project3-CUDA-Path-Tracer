@@ -94,13 +94,16 @@ struct BvhHit
  * @param nodes         Node array (device or host); nullptr → miss
  * @param tris          Position array (leaf chunks reference into it)
  * @param maxT          Far plane: only hits with t < maxT are reported.
+ * @param ignoredTriangleIndex Optional previous primitive to skip as a
+ *                             numerical self-intersection guard.
  * @return              BvhHit — hit = true only if a triangle with t < maxT
  */
 __host__ __device__ inline BvhHit traverseBvhClosest(
     const Ray& objRay,
     const BvhNode* nodes,
     const TrianglePos* tris,
-    float maxT)
+    float maxT,
+    int ignoredTriangleIndex = -1)
 {
     BvhHit result;
     result.t = maxT;   // tighten this as closer hits are found
@@ -144,13 +147,15 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
             const int triCount = node.leafTriCount();
             for (int j = 0; j < triCount; j++)
             {
+                const int triangleIndex = triBase + j;
+                if (triangleIndex == ignoredTriangleIndex) continue;
                 float t;
                 float u;
                 float v;
                 // The hot traversal loop needs only positions plus t/u/v.
                 // Interpolating normals, UVs, colors and tangents here would
                 // repeat that work for any hit later replaced by a closer one.
-                if (intersectTrianglePositions(objRay, tris[triBase + j], t, u, v))
+                if (intersectTrianglePositions(objRay, tris[triangleIndex], t, u, v))
                 {
                     if (t < result.t)
                     {
@@ -158,7 +163,7 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
                         result.u        = u;
                         result.v        = v;
                         result.hit      = true;
-                        result.triIndex = triBase + j;
+                        result.triIndex = triangleIndex;
                     }
                 }
             }
