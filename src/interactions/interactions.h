@@ -85,6 +85,24 @@ __host__ __device__ glm::vec3 resolveEmissive(
     const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m);
 
+// Cosine between the geometric emission side and a direction leaving the
+// surface.  TwoSided preserves the legacy absolute-cosine convention;
+// OneSided returns zero on the back side.
+__host__ __device__ float emissionCosine(
+    const Material& m,
+    const glm::vec3& geometricNormal,
+    const glm::vec3& emittedDirection);
+
+// Resolve radiance emitted toward `emittedDirection`. JSON Emitting surfaces
+// multiply the shared texture/factor result by emittance; model auto-glow
+// uses the same value without that multiplier. OneSided emitters return zero
+// from their geometric-normal back side.
+__host__ __device__ glm::vec3 evaluateEmittedRadiance(
+    const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const Material& m,
+    const glm::vec3& geometricNormal,
+    const glm::vec3& emittedDirection);
+
 // Resolve the per-hit GGX surface parameters for a Reflective / Pbr material.
 //
 // Roughness source chain — first hit wins:

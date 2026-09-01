@@ -357,11 +357,33 @@ __host__ __device__ glm::vec3 resolveEmissive(
     return Le * tex.emissiveFactor * tex.emissiveStrength;
 }
 
-// Resolve the per-hit GGX surface parameters for a Reflective / Pbr material
-// (chains documented in interactions.h).  `roughness` (r) drives the mirror
-// threshold and α; `alpha`, `F0`, `diffuseColor` feed the BRDF directly.
-__host__ __device__ void resolvePbrSurfaceParams(
-    float& roughness, float& metallic, float& alpha, glm::vec3& F0, glm::vec3& diffuseColor,
+__host__ __device__ float emissionCosine(
+    const Material& m,
+    const glm::vec3& geometricNormal,
+    const glm::vec3& emittedDirection)
+{
+    const float cosine = glm::dot(geometricNormal, emittedDirection);
+    return m.emissionSidedness == EmissionSidedness::OneSided
+        ? glm::max(cosine, 0.0f) : fabsf(cosine);
+}
+
+__host__ __device__ glm::vec3 evaluateEmittedRadiance(
+    const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
+    const Material& m,
+    const glm::vec3& geometricNormal,
+    const glm::vec3& emittedDirection)
+{
+    if (!(emissionCosine(m, geometricNormal, emittedDirection) > 0.0f))
+        return glm::vec3(0.0f);
+    const glm::vec3 emitted = resolveEmissive(tex, textures, uv, m);
+    return (m.emittance > 0.0f) ? emitted * m.emittance : emitted;
+}
+
+// Resolve texture-dependent PBR inputs once. Derived BRDF terms remain cheap
+// local arithmetic at their consumers, so the long-lived ResolvedBsdf keeps
+// only this compact source state.
+static __host__ __device__ void resolvePbrInputs(
+    glm::vec3& baseColor, float& roughness, float& metallic,
     const SurfaceBinding& tex, const TextureTable& textures, glm::vec2 uv,
     const Material& m, const glm::vec3& vertexColor)
 {
