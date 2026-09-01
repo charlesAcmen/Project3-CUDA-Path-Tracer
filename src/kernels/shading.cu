@@ -159,12 +159,6 @@ __global__ void shadeMaterial(
     const HitRecord* __restrict__ hitRecords = buffers.hitRecords;
     PathSegment* __restrict__ pathSegments = buffers.pathSegments;
     unsigned char* __restrict__ pathActivityFlags = buffers.pathActivityFlags;
-    const Material* __restrict__ materials = scene.materials;
-    const TrianglePos* __restrict__ trianglePositions = scene.trianglePositions;
-    const TriangleAttr* __restrict__ triangleAttrs = scene.triangleAttrs;
-    const Surface* __restrict__ surfaces = scene.surfaces;
-    const SurfaceBinding* __restrict__ surfaceBindings = scene.surfaceBindings;
-
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_paths)
     {
@@ -197,101 +191,10 @@ __global__ void shadeMaterial(
                 return;
             }
 
-            // Expand the complete shading state only for this final closest
-            // triangle.  During BVH traversal, all other candidate hits carry
-            // only t/u/v and are therefore unable to trigger these attribute
-            // loads and interpolations.  The split layout keeps positions out
-            // of the normal/UV/color fetch and resolves the shared surface
-            // binding only for this selected triangle.  The Surface table
-            // combines this geom's material id with the source binding id,
-            // removing the former per-triangle device array.
-            const TrianglePos& trianglePos = trianglePositions[hit.triangleIndex];
-            const TriangleAttr& triangleAttr = triangleAttrs[hit.triangleIndex];
-            const Surface& surfaceRef = surfaces[triangleAttr.surfaceId];
-            const Material& material = materials[surfaceRef.materialId];
-            // Device binding slot 0 is the default empty binding.  Source
-            // binding ids are therefore shifted by one, mapping -1 to 0.
-            const SurfaceBinding* surface =
-                &surfaceBindings[surfaceRef.surfaceBindingId + 1];
-            ShadeableIntersection intersection{};
-            intersection.t          = hit.t;
-            intersection.triangleIndex = hit.triangleIndex;
-            intersection.surfaceFeatures = surfaceRef.features;
-            intersection.hasGeometricNormal = normalizedTriangleNormal(
-                trianglePos, intersection.geometricNormal);
-            if (!intersection.hasGeometricNormal)
-            {
-                pathSegment.remainingBounces = 0;
-                writePathActivity(pathActivityFlags, idx, pathSegment);
-                return;
-            }
-            intersection.rayOriginScale = triangleRayOriginScale(trianglePos);
-            interpolateTriangleAttributes(trianglePos, triangleAttr, hit.u, hit.v,
-                                          (surfaceRef.features & SurfaceFeatureNormalMap) != 0,
-                                          intersection.surfaceNormal,
-                                          intersection.uv,
-                                          intersection.tangent,
-                                          intersection.vertexColor);
-            intersection.surface = surface;
-
-            if (material.emittance > 0.0f)
-            {
-                // Light source hit (JSON Emitting): Le = texture·factor·strength
-                // (flat color when no emissive slot), scaled by the JSON emittance
-                // knob.  Accumulate and terminate the path.
-                const glm::vec3 emittedDirection = -pathSegment.ray.direction;
-                const glm::vec3 Le = evaluateEmittedRadiance(
-                    *intersection.surface, scene.textures, intersection.uv, material,
-                    intersection.geometricNormal, emittedDirection);
-                pathSegment.accumulatedRadiance += pathSegment.throughput * Le *
-                    emissionHitMisWeight(pathSegment, hit,
-                                         intersection.geometricNormal,
-                                         material, scene.lights);
-                pathSegment.remainingBounces = 0;
-            }
-            else
-            {
-                // ---- Auto-glow: additive emission ----
-                // A non-zero emissive factor with no JSON emittance means the
-                // model glows at its own glTF/OBJ-defined radiance.  Emission is ADDITIVE
-                // (Lo = Le + ∫BRDF·Li), so accumulate to pathSegment.accumulatedRadiance
-                // instead of directly writing to image.  The surface is still shaded
-                // by its BSDF.  (Terminating here would turn a mostly-black
-                // emissive map on a shaded surface black.)
-                if (intersection.surface->emissiveFactor != glm::vec3(0.0f))
-                {
-                    const glm::vec3 emittedDirection = -pathSegment.ray.direction;
-                    const glm::vec3 Le = evaluateEmittedRadiance(
-                        *intersection.surface, scene.textures, intersection.uv, material,
-                        intersection.geometricNormal, emittedDirection);
-                    pathSegment.accumulatedRadiance += pathSegment.throughput * Le *
-                        emissionHitMisWeight(pathSegment, hit,
-                                             intersection.geometricNormal,
-                                             material, scene.lights);
-                }
-
-                const ResolvedBsdf resolvedBsdf = resolveBsdf(
-                    intersection, material, scene.textures,
-                    pathSegment.ray.direction);
-                accumulateDirectLighting(pathSegment, intersection, material,
-                                         resolvedBsdf, scene, rngScatter);
-
-                // The resolved state carries this hit's normal-map and texture
-                // inputs through the continuation, while scatterRay derives the
-                // exact hit point from hit.t.
-                scatterRay(pathSegment, intersection, material,
-                    resolvedBsdf, rngScatter);
-
-                // ---- Russian roulette ----
-                // Probabilistically terminate low-throughput paths after
-                // the guaranteed minimum bounce count.
-                if (russianRouletteTerminate(pathSegment.throughput,
-                    pathSegment.remainingBounces, config.traceDepth,
-                    config.rrMinBounces, rngScatter))
-                {
-                    pathSegment.remainingBounces = 0;
-                }
-            }
+            const SurfaceShadingContext surfaceShading{
+                pathSegment, hit, config, scene, rngScatter
+            };
+            shadeSurfaceHit(surfaceShading);
         }
         else
         {
