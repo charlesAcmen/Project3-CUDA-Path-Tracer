@@ -351,6 +351,7 @@ struct ShadeableIntersection
   float t;// parametric distance along the ray
   //t > 0.0f: intersection with an object
   //t < 0.0f: no intersection with an object(initial value)
+  int triangleIndex = -1; // flattened world-space primitive that was hit
   glm::vec3 surfaceNormal;
   // Per-triangle tangent aligned with the texture's +U axis (world space,
   // orthogonalized against the interpolated normal).  .xyz = unit tangent,
