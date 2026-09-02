@@ -25,6 +25,9 @@ struct SurfaceBinding
 {
     int baseColor        = -1;
     int normal           = -1;
+    // glTF normalTexture.scale.  It scales the tangent-space X/Y perturbation
+    // before normalization; the glTF default 1.0 preserves the full map.
+    float normalScale    = 1.0f;
     int metallicRoughness = -1;   // ORM: metallic (B) + roughness (G) packed
     int occlusion        = -1;
     int emissive         = -1;

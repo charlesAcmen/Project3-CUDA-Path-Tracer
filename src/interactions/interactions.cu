@@ -474,6 +474,11 @@ __host__ __device__ glm::vec3 resolveShadingNormal(
                                           textures.infos[tex.normal],
                                           uv);
     glm::vec3 n = 2.0f * texel - glm::vec3(1.0f);   // [0,1] → [-1,1]
+    // glTF normalTexture.scale controls the strength of the tangent-plane
+    // perturbation.  Applying it before normalization is the spec's intended
+    // behavior and leaves the map's Z component surface-facing.
+    n.x *= tex.normalScale;
+    n.y *= tex.normalScale;
     const float nlen2 = glm::dot(n, n);
     if (nlen2 < NORMAL_MAP_TEXEL_EPSILON) return geometricNormal;  // bilinear blend can shorten it
     n *= glm::inversesqrt(nlen2);//normalize

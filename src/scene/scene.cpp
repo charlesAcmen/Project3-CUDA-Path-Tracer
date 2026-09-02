@@ -11,6 +11,7 @@ int internSurfaceBinding(Scene& scene, const SurfaceBinding& binding)
         const SurfaceBinding& candidate = scene.surfaceBindings[i];
         if (candidate.baseColor == binding.baseColor &&
             candidate.normal == binding.normal &&
+            candidate.normalScale == binding.normalScale &&
             candidate.metallicRoughness == binding.metallicRoughness &&
             candidate.occlusion == binding.occlusion &&
             candidate.emissive == binding.emissive &&

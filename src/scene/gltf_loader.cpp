@@ -263,6 +263,10 @@ static SurfaceBinding bindGltfMaterial(GltfLoadCtx& ctx,
     b.baseColor         = resolveGltfTextureSlot(ctx,
         mat->pbr_metallic_roughness.base_color_texture);
     b.normal            = resolveGltfTextureSlot(ctx, mat->normal_texture);
+    // glTF normalTexture.scale defaults to 1.0.  The value dampens only the
+    // tangent-space X/Y perturbation, not the blue (surface-facing) component.
+    if (b.normal >= 0)
+        b.normalScale = mat->normal_texture.scale;
     b.metallicRoughness = resolveGltfTextureSlot(ctx,
         mat->pbr_metallic_roughness.metallic_roughness_texture);
     b.occlusion         = resolveGltfTextureSlot(ctx, mat->occlusion_texture);
