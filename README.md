@@ -45,7 +45,7 @@ not a per-object intersection loop.
 | Motion blur | Not implemented. Primary-ray code explicitly reserves it as future time jitter. |
 | Subsurface scattering, denoising, CUDA–Vulkan interop | Not implemented. |
 | Restartable path tracing | Not implemented as persistent save/resume. `--save-at` saves images only; it does not serialize accumulation or BVH state. |
-| glTF alpha, skinning, morph targets, Draco, extra UV/color sets | Not implemented. |
+| glTF alpha, morph targets, Draco, extra UV/color sets | Not implemented. Static `JOINTS_0` / `WEIGHTS_0` skinning is baked while loading; animated or runtime skinning is not implemented. |
 | Occlusion texture | Loaded and carried in the surface binding, but not sampled by shading. |
 
 ## Rendering pipeline
@@ -92,8 +92,9 @@ accepts `OneSided`; the default `TwoSided` preserves the renderer's original
 double-sided emission behavior.
 
 Texture ownership is asset-driven: JSON scene materials do not provide a
-separate `TEXTURE` or UV-scale override. glTF contributes base-color, normal,
-metallic-roughness, occlusion, and emissive slots; OBJ MTL contributes
+separate `TEXTURE` or UV-scale override. glTF contributes base-color, normal
+(including `normalTexture.scale` strength), metallic-roughness, occlusion, and
+emissive slots; OBJ MTL contributes
 `map_Kd`, `map_Bump` / `map_bump`, and `map_Ke`. Color maps decode from sRGB to
 linear values; normal, ORM, and occlusion maps retain raw linear byte values.
 
