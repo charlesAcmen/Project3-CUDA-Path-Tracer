@@ -1,0 +1,3 @@
+# The OBJ loader resolves this map_Kd relative to this MTL file.
+newmtl poster
+map_Kd textures/rockstar_gallery_poster.png
