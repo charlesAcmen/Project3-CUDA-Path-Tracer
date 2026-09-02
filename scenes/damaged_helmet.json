@@ -32,7 +32,7 @@
     { "FILE": "Models/DamagedHelmet/glTF/DamagedHelmet.gltf", "MATERIAL": "DamagedHelmet", "TRANS": [0, 1.5, 0], "ROTAT": [0, 135, 0], "SCALE": [1, 1, 1] }
   ],
   "Camera": {
-    "RES": [1920, 1080],
+    "RES": [2560, 1440],
     "FOVY": 45,
     "ITERATIONS": 5000,
     "DEPTH": 8,

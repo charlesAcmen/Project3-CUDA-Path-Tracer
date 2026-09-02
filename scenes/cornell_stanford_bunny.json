@@ -16,7 +16,7 @@
     { "FILE": "Models/stanford_bunny/scene.gltf", "MATERIAL": "asset_pbr", "TRANS": [0, 0, 0], "ROTAT": [0, 225, 0], "SCALE": [10, 10, 10] }
   ],
   "Camera": {
-    "RES": [1920,1080], "FOVY": 60, "ITERATIONS": 5000, "DEPTH": 8, "RR_DEPTH": 3,
+    "RES": [2560, 1440], "FOVY": 60, "ITERATIONS": 5000, "DEPTH": 8, "RR_DEPTH": 3,
     "FILE": "cornell_stanford_bunny.png", "EYE": [-0.0015, 2.0101, -4.2972],
 "LOOKAT": [0.0085, 1.1891, 0.4912],
 "UP": [0.0004, 0.9856, 0.1690]

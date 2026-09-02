@@ -16,7 +16,7 @@
     { "FILE": "Models/stanford_dragon_vrip/scene.gltf", "MATERIAL": "dragon_pbr", "TRANS": [0, 0.7, 0], "ROTAT": [0, 180, 0], "SCALE": [0.02, 0.02, 0.02] }
   ],
   "Camera": {
-    "RES": [1920, 1080], "FOVY": 60, "ITERATIONS": 5000, "DEPTH": 8, "RR_DEPTH": 3,
+    "RES": [2560, 1440], "FOVY": 60, "ITERATIONS": 5000, "DEPTH": 8, "RR_DEPTH": 3,
     "FILE": "stanford_dragon_pbr.png","EYE": [0.0493, 2.8998, -4.3789],
 "LOOKAT": [0.1171, 2.0446, -0.2478],
 "UP": [0.0033, 0.9792, 0.2027]
