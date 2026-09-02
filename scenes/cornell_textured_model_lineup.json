@@ -1,0 +1,34 @@
+{
+  "Materials": {
+    "wall_white": { "TYPE": "Diffuse", "RGB": [1.0, 1.0, 1.0] },
+    "wall_red": { "TYPE": "Diffuse", "RGB": [1.0, 1.0, 1.0] },
+    "wall_green": { "TYPE": "Diffuse", "RGB": [1.0, 1.0, 1.0] },
+    "area_light": { "TYPE": "Emitting", "RGB": [1.0, 1.0, 1.0], "EMITTANCE": 35.0 },
+    "asset_pbr": { "TYPE": "PBR" }
+  },
+  "Objects": [
+    { "FILE": "box/floor.obj",       "MATERIAL": "wall_white", "TRANS": [-18, 0, -12], "ROTAT": [0, 0, 0], "SCALE": [36, 1, 24] },
+    { "FILE": "box/ceiling.obj",     "MATERIAL": "wall_white", "TRANS": [-18, 14, -12], "ROTAT": [0, 0, 0], "SCALE": [36, 1, 24] },
+    { "FILE": "box/back.obj",        "MATERIAL": "wall_white", "TRANS": [-18, 0, 12],  "ROTAT": [0, 0, 0], "SCALE": [36, 14, 1] },
+    { "FILE": "box/left_red.obj",    "MATERIAL": "wall_red",   "TRANS": [18, 0, -12],  "ROTAT": [0, 0, 0], "SCALE": [1, 14, 24] },
+    { "FILE": "box/right_green.obj", "MATERIAL": "wall_green", "TRANS": [-18, 0, -12], "ROTAT": [0, 0, 0], "SCALE": [1, 14, 24] },
+    { "FILE": "box/light.obj",       "MATERIAL": "area_light", "TRANS": [-16, 13.98, -10], "ROTAT": [0, 0, 0], "SCALE": [32, 1, 20] },
+
+    { "FILE": "models/mercedes/scene.gltf",   "MATERIAL": "asset_pbr", "TRANS": [-12,2, 1], "ROTAT": [90, 0, 180], "SCALE": [2, 2, 2] },
+    { "FILE": "models/rhino/scene.gltf",      "MATERIAL": "asset_pbr", "TRANS": [-4, 1.20, 1],  "ROTAT": [0, 45, 0],   "SCALE": [0.4, 0.4, 0.4] },
+    { "FILE": "models/boss/scene.gltf",       "MATERIAL": "asset_pbr", "TRANS": [5, 1.5, 1],   "ROTAT": [0, 180, 0], "SCALE": [150, 150, 150] },
+    { "FILE": "models/lancevance/scene.gltf", "MATERIAL": "asset_pbr", "TRANS": [12, 0, 1],      "ROTAT": [0, 180, 0],   "SCALE": [130, 130, 130] },
+    { "FILE": "models/TOMMY/scene.gltf",      "MATERIAL": "asset_pbr", "TRANS": [16, 2, 6],    "ROTAT": [0, 180, 0],   "SCALE": [2, 2, 2] }
+  ],
+  "Camera": {
+    "RES": [2560, 1440],
+    "FOVY": 60,
+    "ITERATIONS": 5000,
+    "DEPTH": 8,
+    "RR_DEPTH": 3,
+    "FILE": "cornell_textured_model_lineup.png",
+    "EYE": [0, 6, -30],
+    "LOOKAT": [0, 3, 1],
+    "UP": [0, 1, 0]
+  }
+}

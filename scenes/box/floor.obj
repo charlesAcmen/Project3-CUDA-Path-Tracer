@@ -1,9 +1,15 @@
 # Cornell box floor -- unit quad in the XZ plane (y=0), winding gives +Y normal.
-# Sized and positioned by the scene JSON (SCALE/TRANS).
+# UVs tile the ground texture 8 times in both directions.
+mtllib textured_walls.mtl
 v 0 0 0
 v 1 0 0
 v 1 0 1
 v 0 0 1
+vt 0 0
+vt 8 0
+vt 8 8
+vt 0 8
 vn 0 1 0
-f 1//1 3//1 2//1
-f 1//1 4//1 3//1
+usemtl ground
+f 1/1/1 3/3/1 2/2/1
+f 1/1/1 4/4/1 3/3/1

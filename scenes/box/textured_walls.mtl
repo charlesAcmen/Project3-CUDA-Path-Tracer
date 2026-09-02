@@ -1,0 +1,9 @@
+# Shared repeat-wrapped textures for the Cornell-box planes.
+newmtl ground
+map_Kd ../walls/ground.jpg
+
+newmtl front
+map_Kd ../walls/front.jpg
+
+newmtl sidewall
+map_Kd ../walls/sidewall.jpg
