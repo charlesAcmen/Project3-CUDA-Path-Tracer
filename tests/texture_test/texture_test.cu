@@ -39,6 +39,35 @@ static bool closeTo(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f)
 }
 
 // -----------------------------------------------------------------------
+// glTF normalTexture.scale — dampens tangent-plane normal perturbation
+// -----------------------------------------------------------------------
+static void testNormalTextureScale()
+{
+    std::printf("=== normalTexture.scale ===\n");
+
+    // A unit tangent-space normal tilted 30 degrees toward +T.
+    const glm::vec3 pixels[] = { glm::vec3(0.75f, 0.5f, 0.9330127f) };
+    const TextureInfo infos[] = { TextureInfo{ 0, 1, 1 } };
+    const TextureTable table{ pixels, infos, 1 };
+    SurfaceBinding binding{};
+    binding.normal = 0;
+
+    const glm::vec3 geometricNormal(0.0f, 0.0f, 1.0f);
+    const glm::vec4 tangent(1.0f, 0.0f, 0.0f, 1.0f);
+    const glm::vec3 full = resolveShadingNormal(
+        geometricNormal, tangent, binding, table, glm::vec2(0.0f));
+
+    binding.normalScale = 0.25f;
+    const glm::vec3 scaled = resolveShadingNormal(
+        geometricNormal, tangent, binding, table, glm::vec2(0.0f));
+    check(std::fabs(full.x - 0.5f) < 1e-4f,
+          "normal scale 1.0 retains the original tangent perturbation");
+    check(std::fabs(scaled.x - 0.142857f) < 1e-4f && scaled.z > full.z,
+          "normal scale 0.25 damps X/Y before normalization");
+    std::printf("\n");
+}
+
+// -----------------------------------------------------------------------
 // sampleTexture — 2×2 image with four distinct texels
 // -----------------------------------------------------------------------
 static void testSampleTexture()
@@ -437,6 +466,7 @@ static void testEvaluateBsdfFiniteContract()
 
 int main()
 {
+    testNormalTextureScale();
     testSampleTexture();
     testResolvePbrSurfaceParams();
     testPbrBrdf();

@@ -22,7 +22,7 @@
   "materials": [
     {
       "pbrMetallicRoughness": { "baseColorTexture": { "index": 0 } },
-      "normalTexture": { "index": 0 },
+      "normalTexture": { "index": 0, "scale": 0.25 },
       "occlusionTexture": { "index": 0 }
     }
   ],

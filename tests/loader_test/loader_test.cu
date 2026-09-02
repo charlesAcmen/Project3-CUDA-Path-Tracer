@@ -493,6 +493,8 @@ static void testLoadGLTF(const std::string& exeDir)
             const SurfaceBinding& b = scene.surfaceBindings[scene.hostTriangleAttrs[0].surfaceId];
             check(b.baseColor == 0 && b.normal == 0 && b.occlusion == 0,
                   "tex_cube.gltf -> bound slots stamped with texture id 0");
+            check(std::fabs(b.normalScale - 0.25f) < 1e-6f,
+                  "tex_cube.gltf -> normalTexture.scale is retained");
             check(b.metallicRoughness == -1 && b.emissive == -1,
                   "tex_cube.gltf -> unbound slots stay -1");
         }
