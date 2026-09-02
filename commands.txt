@@ -130,3 +130,10 @@ https://192.168.1.1/
 .\build\bin\Release\cis565_path_tracer.exe scenes\cornell_vice_city_showroom.json
 .\build\bin\Release\cis565_path_tracer.exe scenes\cornell_vice_city_hermes_car.json
 .\build\bin\Release\cis565_path_tracer.exe scenes\cornell_textured_model_lineup.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_chronograph_watch.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_antique_camera.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_helmet_duo.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_car_concept.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_water_bottle_glass.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_mosquito_amber.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_metal_rough_spheres.json

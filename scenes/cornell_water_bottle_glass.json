@@ -1,0 +1,88 @@
+{
+  "Materials": {
+    "white": {
+      "TYPE": "Diffuse",
+      "RGB": [0.73, 0.73, 0.73]
+    },
+    "red": {
+      "TYPE": "Diffuse",
+      "RGB": [0.63, 0.065, 0.05]
+    },
+    "green": {
+      "TYPE": "Diffuse",
+      "RGB": [0.14, 0.45, 0.091]
+    },
+    "light": {
+      "TYPE": "Emitting",
+      "RGB": [1, 1, 1],
+      "EMITTANCE": 35
+    },
+    "glass": {
+      "TYPE": "Refractive",
+      "RGB": [0.72, 0.88, 1],
+      "IOR": 1.5
+    }
+  },
+  "Objects": [
+    {
+      "FILE": "plain_box/floor.obj",
+      "MATERIAL": "white",
+      "TRANS": [-3, 0, -3],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [6, 1, 6]
+    },
+    {
+      "FILE": "plain_box/ceiling.obj",
+      "MATERIAL": "white",
+      "TRANS": [-3, 5, -3],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [6, 1, 6]
+    },
+    {
+      "FILE": "plain_box/back.obj",
+      "MATERIAL": "white",
+      "TRANS": [-3, 0, 3],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [6, 5, 1]
+    },
+    {
+      "FILE": "plain_box/left_red.obj",
+      "MATERIAL": "red",
+      "TRANS": [3, 0, -3],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [1, 5, 6]
+    },
+    {
+      "FILE": "plain_box/right_green.obj",
+      "MATERIAL": "green",
+      "TRANS": [-3, 0, -3],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [1, 5, 6]
+    },
+    {
+      "FILE": "box/light.obj",
+      "MATERIAL": "light",
+      "TRANS": [-2, 4.98, -2],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [4, 1, 4]
+    },
+    {
+      "FILE": "models/WaterBottle/glTF/WaterBottle.gltf",
+      "MATERIAL": "glass",
+      "TRANS": [0, 1.35, 0],
+      "ROTAT": [0, 25, 0],
+      "SCALE": [10, 10, 10]
+    }
+  ],
+  "Camera": {
+    "RES": [2560, 1440],
+    "FOVY": 50,
+    "ITERATIONS": 20000,
+    "DEPTH": 10,
+    "RR_DEPTH": 4,
+    "FILE": "cornell_water_bottle_glass.png",
+    "EYE": [0, 2.5, -7],
+    "LOOKAT": [0, 1.3, 0],
+    "UP": [0, 1, 0]
+  }
+}

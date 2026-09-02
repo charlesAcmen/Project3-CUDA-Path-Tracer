@@ -1,0 +1,86 @@
+{
+  "Materials": {
+    "white": {
+      "TYPE": "Diffuse",
+      "RGB": [0.73, 0.73, 0.73]
+    },
+    "red": {
+      "TYPE": "Diffuse",
+      "RGB": [0.63, 0.065, 0.05]
+    },
+    "green": {
+      "TYPE": "Diffuse",
+      "RGB": [0.14, 0.45, 0.091]
+    },
+    "light": {
+      "TYPE": "Emitting",
+      "RGB": [1, 1, 1],
+      "EMITTANCE": 15
+    },
+    "asset_pbr": {
+      "TYPE": "PBR"
+    }
+  },
+  "Objects": [
+    {
+      "FILE": "plain_box/floor.obj",
+      "MATERIAL": "white",
+      "TRANS": [-5, 0, -5],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [10, 1, 10]
+    },
+    {
+      "FILE": "plain_box/ceiling.obj",
+      "MATERIAL": "white",
+      "TRANS": [-5, 6, -5],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [10, 1, 10]
+    },
+    {
+      "FILE": "plain_box/back.obj",
+      "MATERIAL": "white",
+      "TRANS": [-5, 0, 5],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [10, 6, 1]
+    },
+    {
+      "FILE": "plain_box/left_red.obj",
+      "MATERIAL": "red",
+      "TRANS": [5, 0, -5],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [1, 6, 10]
+    },
+    {
+      "FILE": "plain_box/right_green.obj",
+      "MATERIAL": "green",
+      "TRANS": [-5, 0, -5],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [1, 6, 10]
+    },
+    {
+      "FILE": "box/light.obj",
+      "MATERIAL": "light",
+      "TRANS": [-3, 5.98, -3],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [6, 1, 6]
+    },
+    {
+      "FILE": "models/ChronographWatch/glTF/ChronographWatch.gltf",
+      "MATERIAL": "asset_pbr",
+      "TRANS": [0, 2, 1],
+      "ROTAT": [0, 30, 0],
+      "SCALE": [0.5, 0.5, 0.5]
+    }
+  ],
+  "Camera": {
+    "RES": [2560, 1440],
+    "FOVY": 50,
+    "ITERATIONS": 20000,
+    "DEPTH": 8,
+    "RR_DEPTH": 3,
+    "FILE": "cornell_chronograph_watch.png",
+    "EYE": [0.2553, 4.4322, -17.6518],
+    "LOOKAT": [0.0151, 3.0497, -6.8647],
+    "UP": [-0.0028, 0.9919, 0.1271]
+  }
+}
