@@ -1,0 +1,88 @@
+{
+  "Materials": {
+    "white": {
+      "TYPE": "Diffuse",
+      "RGB": [0.73, 0.73, 0.73]
+    },
+    "red": {
+      "TYPE": "Diffuse",
+      "RGB": [0.63, 0.065, 0.05]
+    },
+    "green": {
+      "TYPE": "Diffuse",
+      "RGB": [0.14, 0.45, 0.091]
+    },
+    "light": {
+      "TYPE": "Emitting",
+      "RGB": [1, 1, 1],
+      "EMITTANCE": 20
+    },
+    "perfume_pbr": {
+      "TYPE": "Refractive",
+      "RGB": [0.75,0.55,0.59],
+      "IOR": 1.5
+    }
+  },
+  "Objects": [
+    {
+      "FILE": "plain_box/floor.obj",
+      "MATERIAL": "white",
+      "TRANS": [-6, 0, -6],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [12, 1, 12]
+    },
+    {
+      "FILE": "plain_box/ceiling.obj",
+      "MATERIAL": "white",
+      "TRANS": [-6, 8, -6],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [12, 1, 12]
+    },
+    {
+      "FILE": "plain_box/back.obj",
+      "MATERIAL": "white",
+      "TRANS": [-6, 0, 6],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [12, 8, 1]
+    },
+    {
+      "FILE": "plain_box/left_red.obj",
+      "MATERIAL": "red",
+      "TRANS": [6, 0, -6],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [1, 8, 12]
+    },
+    {
+      "FILE": "plain_box/right_green.obj",
+      "MATERIAL": "green",
+      "TRANS": [-6, 0, -6],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [1, 8, 12]
+    },
+    {
+      "FILE": "box/light.obj",
+      "MATERIAL": "light",
+      "TRANS": [-3, 7.98, -3],
+      "ROTAT": [0, 0, 0],
+      "SCALE": [6, 1, 6]
+    },
+    {
+      "FILE": "models/perfume_bottle/scene.gltf",
+      "MATERIAL": "perfume_pbr",
+      "TRANS": [0, 1.7, 0],
+      "ROTAT": [0, 90, 0],
+      "SCALE": [25, 25, 25]
+    }
+  ],
+  "Camera": {
+    "RES": [2560, 1440],
+    "FOVY": 60,
+    "ITERATIONS": 20000,
+    "DEPTH": 8,
+    "RR_DEPTH": 3,
+    "FILE": "cornell_perfume_bottle.png",
+    "EYE": [0, 3.2, -14],
+    "LOOKAT": [0, 2.5, 0],
+    "UP": [0, 1, 0]
+  }
+}
