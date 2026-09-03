@@ -12,6 +12,7 @@
 #include "scene/loader_internal.h"
 
 #include "constants.h"        // DEG_TO_RAD / RAD_TO_DEG
+#include "utils/json_utils.h"
 #include "utils/logger.h"
 #include "utils/utilities.h"  // buildTransformationMatrix
 
@@ -40,35 +41,35 @@ namespace SceneLoader {
 // are untouched).  TYPE is matched case-insensitively ("pbr" == "PBR").
 static void applyMaterialType(const json& p, const string& name, Material& m)
 {
-    const std::string rawType = p["TYPE"].get<std::string>();
+    const std::string rawType = JsonUtil::requireKey(p, "TYPE").get<std::string>();
     std::string typeStr = rawType;
     std::transform(typeStr.begin(), typeStr.end(), typeStr.begin(),
                    [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
 
     if (typeStr == "DIFFUSE")
     {
-        const auto& col = p["RGB"];
+        const auto& col = JsonUtil::requireKey(p, "RGB");
         m.color = glm::vec3(col[0], col[1], col[2]);
         m.type = MaterialType::Diffuse;
     }
     else if (typeStr == "EMITTING")
     {
-        const auto& col = p["RGB"];
+        const auto& col = JsonUtil::requireKey(p, "RGB");
         m.color = glm::vec3(col[0], col[1], col[2]);
         m.type = MaterialType::Emissive;
-        m.emittance = p["EMITTANCE"];
+        m.emittance = JsonUtil::requireKey(p, "EMITTANCE");
     }
     else if (typeStr == "SPECULAR")
     {
-        const auto& col = p["RGB"];
+        const auto& col = JsonUtil::requireKey(p, "RGB");
         m.color = glm::vec3(col[0], col[1], col[2]);
         // Specular tint: read SPECULAR_COLOR if present, fall back to RGB.
         // RGB alone serves both diffuse albedo and specular tint, but the
         // two can diverge for physically accurate metals (RGB ≈ black,
         // SPECULAR_COLOR = reflectivity tint per wavelength).
-        if (p.contains("SPECULAR_COLOR"))
+        if (JsonUtil::findKey(p, "SPECULAR_COLOR"))
         {
-            const auto& sc = p["SPECULAR_COLOR"];
+            const auto& sc = JsonUtil::requireKey(p, "SPECULAR_COLOR");
             m.specular.color = glm::vec3(sc[0], sc[1], sc[2]);
         }
         else
@@ -86,9 +87,9 @@ static void applyMaterialType(const json& p, const string& name, Material& m)
         //
         // Special case: if RGB is missing but the material references a glTF mesh,
         // set a sentinel value so the glTF material's own colors are used.
-        if (p.contains("RGB"))
+        if (JsonUtil::findKey(p, "RGB"))
         {
-            const auto& col = p["RGB"];
+            const auto& col = JsonUtil::requireKey(p, "RGB");
             m.color = glm::vec3(col[0], col[1], col[2]);
         }
         else
@@ -101,10 +102,10 @@ static void applyMaterialType(const json& p, const string& name, Material& m)
     }
     else if (typeStr == "REFRACTIVE")
     {
-        const auto& col = p["RGB"];
+        const auto& col = JsonUtil::requireKey(p, "RGB");
         m.color = glm::vec3(col[0], col[1], col[2]);
         m.type = MaterialType::Refractive;
-        m.indexOfRefraction = p.value("IOR", 1.5f);
+        m.indexOfRefraction = JsonUtil::valueOr(p, "IOR", 1.5f);
         m.invIndexOfRefraction =
             1.0f / m.indexOfRefraction;
     }
@@ -124,9 +125,9 @@ static void applyMaterialType(const json& p, const string& name, Material& m)
 // scene explicitly requests a physically one-sided emitting wall/panel.
 static void applyEmissionSidedness(const json& p, const string& name, Material& m)
 {
-    if (!p.contains("EMISSION_SIDEDNESS")) return;
+    if (!JsonUtil::findKey(p, "EMISSION_SIDEDNESS")) return;
 
-    std::string value = p["EMISSION_SIDEDNESS"].get<std::string>();
+    std::string value = JsonUtil::requireKey(p, "EMISSION_SIDEDNESS").get<std::string>();
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
     if (value == "ONE_SIDED" || value == "ONESIDED")
@@ -159,7 +160,7 @@ static void parseMaterials(
     unordered_map<string, uint32_t>& MatNameToID)
 {
     // ---- Materials ----------------------------------------------------
-    const auto& materialsData = data["Materials"];
+    const auto& materialsData = JsonUtil::requireKey(data, "Materials");
     for (const auto& item : materialsData.items())
     {
         const auto& name = item.key();
@@ -193,15 +194,15 @@ static void parseObjects(
     unordered_map<string, uint32_t>& MatNameToID)
 {
     // ---- Objects (geometries) -----------------------------------------
-    const auto& objectsData = data["Objects"];
+    const auto& objectsData = JsonUtil::requireKey(data, "Objects");
     for (const auto& p : objectsData)
     {
         Geom newGeom{};
 
-        newGeom.materialid = MatNameToID[p["MATERIAL"]];
-        const auto& trans = p["TRANS"];
-        const auto& rotat = p["ROTAT"];
-        const auto& scale = p["SCALE"];
+        newGeom.materialid = MatNameToID[JsonUtil::requireKey(p, "MATERIAL").get<string>()];
+        const auto& trans = JsonUtil::requireKey(p, "TRANS");
+        const auto& rotat = JsonUtil::requireKey(p, "ROTAT");
+        const auto& scale = JsonUtil::requireKey(p, "SCALE");
         newGeom.translation = glm::vec3(trans[0], trans[1], trans[2]);
         newGeom.rotation    = glm::vec3(rotat[0], rotat[1], rotat[2]);
         newGeom.scale       = glm::vec3(scale[0], scale[1], scale[2]);
@@ -209,7 +210,7 @@ static void parseObjects(
         newGeom.meshTriangleOffset = -1;
         newGeom.meshTriangleCount  = 0;
 
-        filesystem::path objRel = p.value("FILE", string(""));
+        filesystem::path objRel = JsonUtil::valueOr(p, "FILE", string(""));
         if (objRel.empty())
         {
             Log::warn("Scene", "Mesh object with no FILE field; skipping");
@@ -259,25 +260,26 @@ static void parseObjects(
 static void parseCamera(const json& data, Scene& scene)
 {
     // ---- Camera -------------------------------------------------------
-    const auto& cameraData  = data["Camera"];
+    const auto& cameraData  = JsonUtil::requireKey(data, "Camera");
     Camera&      camera     = scene.state.camera;
     RenderState& state      = scene.state;
-    camera.resolution.x     = cameraData["RES"][0];
-    camera.resolution.y     = cameraData["RES"][1];
-    float fovy              = cameraData["FOVY"];
-    state.iterations        = cameraData["ITERATIONS"];
-    state.traceDepth        = cameraData["DEPTH"];
-    state.rrMinBounces      = cameraData.value("RR_DEPTH", 3);
-    state.imageName         = cameraData["FILE"];
+    const auto& resolution  = JsonUtil::requireKey(cameraData, "RES");
+    camera.resolution.x     = resolution[0];
+    camera.resolution.y     = resolution[1];
+    float fovy              = JsonUtil::requireKey(cameraData, "FOVY");
+    state.iterations        = JsonUtil::requireKey(cameraData, "ITERATIONS");
+    state.traceDepth        = JsonUtil::requireKey(cameraData, "DEPTH");
+    state.rrMinBounces      = JsonUtil::valueOr(cameraData, "RR_DEPTH", 3);
+    state.imageName         = JsonUtil::requireKey(cameraData, "FILE");
 
-    const auto& pos    = cameraData["EYE"];
-    const auto& lookat = cameraData["LOOKAT"];
-    const auto& up     = cameraData["UP"];
+    const auto& pos    = JsonUtil::requireKey(cameraData, "EYE");
+    const auto& lookat = JsonUtil::requireKey(cameraData, "LOOKAT");
+    const auto& up     = JsonUtil::requireKey(cameraData, "UP");
     camera.position    = glm::vec3(pos[0], pos[1], pos[2]);
     camera.lookAt      = glm::vec3(lookat[0], lookat[1], lookat[2]);
     camera.up          = glm::vec3(up[0], up[1], up[2]);
-    camera.lensRadius      = cameraData.value("LENS_RADIUS", 0.0f);
-    camera.focalDistance   = cameraData.value("FOCAL_DISTANCE", 0.0f);
+    camera.lensRadius      = JsonUtil::valueOr(cameraData, "LENS_RADIUS", 0.0f);
+    camera.focalDistance   = JsonUtil::valueOr(cameraData, "FOCAL_DISTANCE", 0.0f);
 
     float yscaled = tan(0.5f * fovy * DEG_TO_RAD);
     float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
@@ -316,6 +318,8 @@ Scene loadFromJSON(const std::string& jsonName)
     Log::info("Scene", "Reading: %s", jsonName.c_str());
 
     auto ext = jsonName.substr(jsonName.find_last_of('.'));
+    transform(ext.begin(), ext.end(), ext.begin(),
+              [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (ext != ".json")
     {
         Log::error("Scene", "Unsupported scene format: %s", ext.c_str());

@@ -1,5 +1,6 @@
 #include "config/config.h"
 
+#include "utils/json_utils.h"
 #include "utils/logger.h"
 
 #include <algorithm>
@@ -116,51 +117,47 @@ void mergeConfigJson(AppConfig& cfg, const json& data)
 {
     if (data.is_null() || data.empty()) return;
 
-    if (data.contains("compactMethod"))
-        cfg.compactMethod = parseCompactMethod(data["compactMethod"], cfg.compactMethod);
+    if (const auto* value = JsonUtil::findKey(data, "compactMethod"))
+        cfg.compactMethod = parseCompactMethod(*value, cfg.compactMethod);
 
-    if (data.contains("sortByMaterial"))
-        cfg.sortByMaterial = data["sortByMaterial"].get<bool>();
+    if (const auto* value = JsonUtil::findKey(data, "sortByMaterial"))
+        cfg.sortByMaterial = value->get<bool>();
 
-    if (data.contains("rngMode"))
-        cfg.rngMode = parseRngMode(data["rngMode"], cfg.rngMode);
+    if (const auto* value = JsonUtil::findKey(data, "rngMode"))
+        cfg.rngMode = parseRngMode(*value, cfg.rngMode);
 
     // Bloom
-    if (data.contains("bloom"))
+    if (const auto* b = JsonUtil::findKey(data, "bloom"))
     {
-        const auto& b = data["bloom"];
-        if (b.contains("enabled"))   cfg.bloom.enabled   = b["enabled"].get<bool>();
-        if (b.contains("threshold")) cfg.bloom.threshold = b["threshold"].get<float>();
-        if (b.contains("intensity")) cfg.bloom.intensity = b["intensity"].get<float>();
-        if (b.contains("radius"))    cfg.bloom.radius    = b["radius"].get<int>();
-        if (b.contains("sigma"))     cfg.bloom.sigma     = b["sigma"].get<float>();
+        if (const auto* value = JsonUtil::findKey(*b, "enabled"))   cfg.bloom.enabled   = value->get<bool>();
+        if (const auto* value = JsonUtil::findKey(*b, "threshold")) cfg.bloom.threshold = value->get<float>();
+        if (const auto* value = JsonUtil::findKey(*b, "intensity")) cfg.bloom.intensity = value->get<float>();
+        if (const auto* value = JsonUtil::findKey(*b, "radius"))    cfg.bloom.radius    = value->get<int>();
+        if (const auto* value = JsonUtil::findKey(*b, "sigma"))     cfg.bloom.sigma     = value->get<float>();
     }
 
     // Chromatic aberration
-    if (data.contains("chromaticAberration"))
+    if (const auto* ca = JsonUtil::findKey(data, "chromaticAberration"))
     {
-        const auto& ca = data["chromaticAberration"];
-        if (ca.contains("enabled"))   cfg.chromaticAberration.enabled   = ca["enabled"].get<bool>();
-        if (ca.contains("intensity")) cfg.chromaticAberration.intensity = ca["intensity"].get<float>();
+        if (const auto* value = JsonUtil::findKey(*ca, "enabled"))   cfg.chromaticAberration.enabled   = value->get<bool>();
+        if (const auto* value = JsonUtil::findKey(*ca, "intensity")) cfg.chromaticAberration.intensity = value->get<float>();
     }
 
     // Vignette
-    if (data.contains("vignette"))
+    if (const auto* v = JsonUtil::findKey(data, "vignette"))
     {
-        const auto& v = data["vignette"];
-        if (v.contains("enabled"))   cfg.vignette.enabled   = v["enabled"].get<bool>();
-        if (v.contains("intensity")) cfg.vignette.intensity = v["intensity"].get<float>();
-        if (v.contains("exponent"))  cfg.vignette.exponent  = v["exponent"].get<float>();
+        if (const auto* value = JsonUtil::findKey(*v, "enabled"))   cfg.vignette.enabled   = value->get<bool>();
+        if (const auto* value = JsonUtil::findKey(*v, "intensity")) cfg.vignette.intensity = value->get<float>();
+        if (const auto* value = JsonUtil::findKey(*v, "exponent"))  cfg.vignette.exponent  = value->get<float>();
     }
 
 
 
     // Profiler
-    if (data.contains("profiler"))
+    if (const auto* p = JsonUtil::findKey(data, "profiler"))
     {
-        const auto& p = data["profiler"];
-        if (p.contains("enabled"))  cfg.profCfg.enabled     = p["enabled"].get<bool>();
-        if (p.contains("warmup"))   cfg.profCfg.warmupIters = p["warmup"].get<int>();
+        if (const auto* value = JsonUtil::findKey(*p, "enabled")) cfg.profCfg.enabled     = value->get<bool>();
+        if (const auto* value = JsonUtil::findKey(*p, "warmup"))  cfg.profCfg.warmupIters = value->get<int>();
     }
 
     // Clamp merged values to their legal ranges (the constexpr bounds on each

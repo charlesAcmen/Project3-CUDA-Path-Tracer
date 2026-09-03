@@ -250,6 +250,34 @@ static int testEnumStringParsing()
     return 0;
 }
 
+// ---- Test: JSON object keys are case-insensitive at every config level --
+
+static int testCaseInsensitiveJsonKeys()
+{
+    TEST("JSON object keys are case-insensitive, including nested blocks");
+    AppConfig cfg;
+    mergeConfigJson(cfg, json::parse(R"({
+        "COMPACTMETHOD": "Thrust",
+        "SORTBYMATERIAL": true,
+        "RNGMODE": "Halton",
+        "BLOOM": { "ENABLED": true, "THRESHOLD": 0.7, "RADIUS": 4 },
+        "CHROMATICABERRATION": { "ENABLED": true, "INTENSITY": 0.006 },
+        "VIGNETTE": { "ENABLED": true, "EXPONENT": 3.0 },
+        "PROFILER": { "ENABLED": true, "WARMUP": 6 }
+    })"));
+
+    if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Thrust)) return 1;
+    if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
+    if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
+    if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
+    if (checkBool("chromaticAberration.enabled", cfg.chromaticAberration.enabled, true)) return 1;
+    if (checkBool("vignette.enabled", cfg.vignette.enabled, true)) return 1;
+    if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
+    if (checkEq("profCfg.warmupIters", cfg.profCfg.warmupIters, 6)) return 1;
+    PASS();
+    return 0;
+}
+
 // ---- Test: sceneFile empty check ---------------------------------------
 
 static int testMissingSceneFile()
@@ -316,6 +344,7 @@ int main()
     failures += testEmptyJson();
     failures += testConfigFileLoad();
     failures += testEnumStringParsing();
+    failures += testCaseInsensitiveJsonKeys();
     failures += testMissingSceneFile();
     failures += testJsonOnly();
 
