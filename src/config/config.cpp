@@ -160,7 +160,6 @@ void mergeConfigJson(AppConfig& cfg, const json& data)
     {
         const auto& p = data["profiler"];
         if (p.contains("enabled"))  cfg.profCfg.enabled     = p["enabled"].get<bool>();
-        if (p.contains("verbose"))  cfg.profCfg.verbose     = p["verbose"].get<bool>();
         if (p.contains("warmup"))   cfg.profCfg.warmupIters = p["warmup"].get<int>();
     }
 
@@ -203,10 +202,6 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
         else if (arg == "--benchmark")
         {
             cfg.profCfg.enabled = true;
-        }
-        else if (arg == "--verbose")
-        {
-            cfg.profCfg.verbose = true;
         }
         else if (arg == "--save")
         {
@@ -295,7 +290,6 @@ void printStartupHelp(const char* exeName)
     Log::raw("\n");
     Log::raw("  Options:\n");
     Log::raw("    --benchmark    Enable profiler CSV output.\n");
-    Log::raw("    --verbose      Print per-bounce path counts to the console.\n");
     Log::raw("    --compact=N    Compaction mode: 0=off, 1=global scan, 2=Thrust copy_if,\n");
     Log::raw("                   3=shared-memory scan (default).\n");
     Log::raw("    --sort=N       Material sorting: 0=off, nonzero=on (default on).\n");

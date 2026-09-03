@@ -55,7 +55,6 @@ const char* profilerOpName(ProfilerOp op);
 // ---------------------------------------------------------------------------
 struct ProfilerConfig {
     bool        enabled        = false;
-    bool        verbose        = false;    // Control debug printf output
     int         warmupIters    = 3;
     std::string sceneName      = "unknown";
     
@@ -136,7 +135,6 @@ public:
     // ---- Accessors ----
     const ProfilerConfig& config() const { return m_cfg; }
     bool enabled() const { return m_cfg.enabled; }
-    bool verbose() const { return m_cfg.verbose; }
 
     // ---- GUI data ----
     void updateGuiData();                            // sync internal timing → m_guiData

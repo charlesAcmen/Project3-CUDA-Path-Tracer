@@ -91,7 +91,7 @@ static int testJsonMerge()
         "bloom": { "enabled": true, "threshold": 0.5, "intensity": 0.3, "radius": 5 },
         "chromaticAberration": { "enabled": true },
         "vignette": { "enabled": true, "intensity": 0.8, "exponent": 4.0 },
-        "profiler": { "enabled": true, "verbose": true, "warmup": 10 }
+        "profiler": { "enabled": true, "warmup": 10 }
     })");
     mergeConfigJson(cfg, j);
 
@@ -100,7 +100,6 @@ static int testJsonMerge()
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
-    if (checkBool("profCfg.verbose", cfg.profCfg.verbose, true)) return 1;
     if (checkEq("profCfg.warmupIters", cfg.profCfg.warmupIters, 10)) return 1;
     PASS();
     return 0;

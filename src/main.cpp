@@ -44,7 +44,6 @@ void printStartupSummary(const AppState& app, const AppConfig& cfg)
     Log::raw("  Profiler: %s\n", profCfg.enabled ? "ENABLED" : "disabled");
     if (profCfg.enabled) {
         Log::raw("    Warmup iters: %d\n", profCfg.warmupIters);
-        Log::raw("    Verbose logging: %s\n", profCfg.verbose ? "yes" : "no");
     }
     const char* compactName = "Unknown";
     switch (profCfg.compactMethod) {
