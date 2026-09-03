@@ -127,6 +127,11 @@ tests\bvh_test\build\Release\bvh_test.exe
 
 ## Runtime configuration
 
+Scene JSON and `config.local.json` object keys are ASCII case-insensitive at
+every nesting level (`"camera"`, `"CAMERA"`, and `"Camera"` are equivalent).
+Values remain unchanged: mesh paths and material names are still
+case-sensitive, as required by the filesystem and scene references.
+
 Configuration priority is:
 
 ```text
