@@ -46,8 +46,8 @@ static void testNormalTextureScale()
     std::printf("=== normalTexture.scale ===\n");
 
     // A unit tangent-space normal tilted 30 degrees toward +T.
-    const glm::vec3 pixels[] = { glm::vec3(0.75f, 0.5f, 0.9330127f) };
-    const TextureInfo infos[] = { TextureInfo{ 0, 1, 1 } };
+    glm::vec3 pixels[] = { glm::vec3(0.75f, 0.5f, 0.9330127f) };
+    TextureInfo infos[] = { TextureInfo{ 0, 1, 1 } };
     const TextureTable table{ pixels, infos, 1 };
     SurfaceBinding binding{};
     binding.normal = 0;
@@ -195,7 +195,7 @@ static void testResolvePbrSurfaceParams()
         resolvePbrSurfaceParams(r, metallic, alpha, F0, diff, tex, table,
                                 glm::vec2(0.5f, 0.5f), m, glm::vec3(1.0f));
         check(r < ROUGHNESS_THRESHOLD,
-              "ORM G=0.0001 < ROUGHNESS_THRESHOLD → mirror path");
+              "ORM G=0.0001 < ROUGHNESS_THRESHOLD → smooth delta treatment");
         check(closeTo(F0, glm::mix(D3, baseBuf[3], 0.5f)) &&
               closeTo(diff, baseBuf[3] * 0.5f),
               "ORM B=0.5 → F0=mix(0.04,base,0.5), diffuse=base·0.5");
@@ -445,6 +445,28 @@ static void testEvaluateBsdfFiniteContract()
     check(fabsf(texturedReused.pdfOmega - texturedCompatibility.pdfOmega) < 1e-6f &&
           glm::length(texturedReused.value - texturedCompatibility.value) < 1e-6f,
           "textured resolved BSDF matches compatibility path");
+
+    // Smooth near-metals retain their small continuous diffuse lobe.  Only an
+    // exact metallic=1 surface is a pure delta event; this guards against
+    // reintroducing an arbitrary near-metal cutoff.
+    ResolvedBsdf smooth{};
+    smooth.shadingNormal = glm::vec3(0.0f, 0.0f, 1.0f);
+    smooth.baseColor = glm::vec3(0.8f);
+    smooth.roughness = 0.0001f;
+    smooth.metallic = 0.96f;
+    const BsdfEvaluation nearMetal = evaluateBsdf(
+        smooth, material, glm::vec3(0.0f, 0.0f, -1.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f));
+    check(!nearMetal.isDelta && nearMetal.pdfOmega > 0.0f &&
+          glm::length(nearMetal.value) > 0.0f,
+          "smooth metallic=0.96 retains a continuous diffuse lobe");
+
+    smooth.metallic = 1.0f;
+    const BsdfEvaluation pureMetal = evaluateBsdf(
+        smooth, material, glm::vec3(0.0f, 0.0f, -1.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f));
+    check(pureMetal.isDelta && pureMetal.pdfOmega == 0.0f,
+          "smooth metallic=1 is a pure delta mirror");
 
     // This models a corrupt PBR texture sample.  The public evaluator must
     // preserve its no-continuous-contribution contract for its NEE/MIS users

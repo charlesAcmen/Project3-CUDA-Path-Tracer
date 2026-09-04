@@ -71,6 +71,7 @@ static int testDefaults()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::SharedMem)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, false)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::LCG)) return 1;
+    if (checkBool("directLighting", cfg.directLighting, true)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, false)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, false)) return 1;
     if (checkBool("autoSave", cfg.autoSave, true)) return 1;
@@ -88,6 +89,7 @@ static int testJsonMerge()
         "compactMethod": "Off",
         "sortByMaterial": true,
         "rngMode": "Halton",
+        "directLighting": false,
         "bloom": { "enabled": true, "threshold": 0.5, "intensity": 0.3, "radius": 5 },
         "chromaticAberration": { "enabled": true },
         "vignette": { "enabled": true, "intensity": 0.8, "exponent": 4.0 },
@@ -98,6 +100,7 @@ static int testJsonMerge()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Off)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
+    if (checkBool("directLighting", cfg.directLighting, false)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
     if (checkEq("profCfg.warmupIters", cfg.profCfg.warmupIters, 10)) return 1;
@@ -112,7 +115,7 @@ static int testCliOverride()
     TEST("CLI flags override defaults");
     AppConfig cfg;
     const char* argv[] = {
-        "prog", "--compact=1", "--sort=1", "--rng=1",
+        "prog", "--direct-lighting=0", "--compact=1", "--sort=1", "--rng=1",
         "--save", "--warmup=5", "--benchmark", "test.json"
     };
     int argc = sizeof(argv) / sizeof(argv[0]);
@@ -121,6 +124,7 @@ static int testCliOverride()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::GlobalScan)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
+    if (checkBool("directLighting", cfg.directLighting, false)) return 1;
     if (checkBool("autoSave", cfg.autoSave, true)) return 1;
     if (checkEq("profCfg.warmupIters", cfg.profCfg.warmupIters, 5)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
@@ -135,16 +139,17 @@ static int testPriority()
 {
     TEST("CLI overrides JSON (compactMethod=Off vs --compact=2)");
     AppConfig base;
-    json j = json::parse(R"({ "compactMethod": 0, "sortByMaterial": false })");
+    json j = json::parse(R"({ "compactMethod": 0, "sortByMaterial": false, "directLighting": false })");
     mergeConfigJson(base, j);                    // JSON sets compact=Off, sort=no
     if (checkEq("after JSON compactMethod", (int)base.compactMethod, (int)CompactMethod::Off)) return 1;
 
-    const char* argv[] = { "prog", "--compact=2", "--sort=1" };
-    int argc = 3;
+    const char* argv[] = { "prog", "--compact=2", "--sort=1", "--direct-lighting=1" };
+    int argc = 4;
     parseCliFlags(base, argc, (char**)argv);
 
     if (checkEq("final compactMethod", (int)base.compactMethod, (int)CompactMethod::Thrust)) return 1;
     if (checkBool("final sortByMaterial", base.sortByMaterial, true)) return 1;
+    if (checkBool("final directLighting", base.directLighting, true)) return 1;
     PASS();
     return 0;
 }
@@ -161,6 +166,7 @@ static int testPartialJson()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Thrust)) return 1;
     if (checkBool("sortByMaterial (default)", cfg.sortByMaterial, false)) return 1;
     if (checkEq("rngMode (default)", (int)cfg.rngMode, (int)RngMode::LCG)) return 1;
+    if (checkBool("directLighting (default)", cfg.directLighting, true)) return 1;
     if (checkBool("bloom.enabled (default)", cfg.bloom.enabled, false)) return 1;
     PASS();
     return 0;
@@ -192,7 +198,7 @@ static int testConfigFileLoad()
     const char* path = "_test_config.json";
     {
         std::ofstream f(path);
-        f << R"({ "compactMethod": "Thrust", "sortByMaterial": true, "rngMode": "Halton",
+        f << R"({ "compactMethod": "Thrust", "sortByMaterial": true, "rngMode": "Halton", "directLighting": false,
                   "bloom": { "enabled": true, "threshold": 0.7 },
                   "profiler": { "enabled": true, "warmup": 7 } })";
     }
@@ -206,6 +212,7 @@ static int testConfigFileLoad()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Thrust)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
+    if (checkBool("directLighting", cfg.directLighting, false)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
     if (checkBool("bloom.threshold", cfg.bloom.threshold == 0.7f, true)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
@@ -260,6 +267,7 @@ static int testCaseInsensitiveJsonKeys()
         "COMPACTMETHOD": "Thrust",
         "SORTBYMATERIAL": true,
         "RNGMODE": "Halton",
+        "DIRECTLIGHTING": false,
         "BLOOM": { "ENABLED": true, "THRESHOLD": 0.7, "RADIUS": 4 },
         "CHROMATICABERRATION": { "ENABLED": true, "INTENSITY": 0.006 },
         "VIGNETTE": { "ENABLED": true, "EXPONENT": 3.0 },
@@ -269,6 +277,7 @@ static int testCaseInsensitiveJsonKeys()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Thrust)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
+    if (checkBool("directLighting", cfg.directLighting, false)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
     if (checkBool("chromaticAberration.enabled", cfg.chromaticAberration.enabled, true)) return 1;
     if (checkBool("vignette.enabled", cfg.vignette.enabled, true)) return 1;
@@ -304,6 +313,7 @@ static int testJsonOnly()
         "compactMethod": 0,
         "sortByMaterial": true,
         "rngMode": 1,
+        "directLighting": false,
         "bloom": { "enabled": true, "threshold": 0.8 }
     })");
     mergeConfigJson(cfg, j);
@@ -316,6 +326,7 @@ static int testJsonOnly()
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Off)) return 1;
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
+    if (checkBool("directLighting", cfg.directLighting, false)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
     if (checkStr("sceneFile", cfg.sceneFile, "scene.json")) return 1;
     PASS();
