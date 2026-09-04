@@ -73,6 +73,8 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 set(headers
     src/app/app_loop.h
     src/app/app_state.h
+    src/app/save_output.h
+    src/app/save_schedule.h
     src/bvh/aabb.h
     src/bvh/bvh.h
     src/app/camera_controller.h
@@ -97,6 +99,7 @@ set(headers
 
 set(sources
     src/app/app_loop.cpp
+    src/app/save_output.cpp
     src/bvh/bvh.cu
     src/app/camera_controller.cpp
     src/main.cpp
