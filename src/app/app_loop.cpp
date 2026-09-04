@@ -86,9 +86,6 @@ void runCuda(AppState& app)
     }
     else
     {
-        if (app.autoSave) {
-            saveImage(app);
-        }
         // Write CSVs and destroy CUDA events BEFORE tearing down the context.
         // The atexit handler will fire again during exit() but is a no-op
         // (vectors already cleared, events already null).
@@ -106,6 +103,11 @@ void runCuda(AppState& app)
 
 void saveImage(AppState& app)
 {
+    saveImage(app, true);
+}
+
+bool saveImage(AppState& app, bool manual)
+{
     // Fetch the latest tonemapped display buffer on demand.
     pathtraceCopyDisplayToHost();
     // No /samples (already averaged in prepareDisplayKernel)
@@ -122,13 +124,9 @@ void saveImage(AppState& app)
         }
     }
 
-    std::string filename = app.renderState->imageName;
-    std::ostringstream ss;
-    ss << filename << "." << app.startTimeString << "." << app.iteration << "samp";
-    filename = ss.str();
-
-    img.savePNG(filename);
-    //img.saveHDR(filename);  // Save a Radiance HDR file
+    const std::filesystem::path filename = SaveOutput::imagePath(
+        app.saveOutputDirectory, app.saveSchedule.pass(), app.iteration, manual);
+    return img.savePNG(filename.string());
 }
 
 void mainLoop(AppState& app)
