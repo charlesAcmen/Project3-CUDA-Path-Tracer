@@ -126,6 +126,9 @@ void mergeConfigJson(AppConfig& cfg, const json& data)
     if (const auto* value = JsonUtil::findKey(data, "rngMode"))
         cfg.rngMode = parseRngMode(*value, cfg.rngMode);
 
+    if (const auto* value = JsonUtil::findKey(data, "directLighting"))
+        cfg.directLighting = value->get<bool>();
+
     // Bloom
     if (const auto* b = JsonUtil::findKey(data, "bloom"))
     {
@@ -236,6 +239,10 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
             int v = std::stoi(arg.substr(6));
             cfg.rngMode = static_cast<RngMode>(v);
         }
+        else if (arg.rfind("--direct-lighting=", 0) == 0)
+        {
+            cfg.directLighting = (std::stoi(arg.substr(18)) != 0);
+        }
         else if (arg.rfind("--warmup=", 0) == 0)
         {
             cfg.profCfg.warmupIters = std::stoi(arg.substr(9));
@@ -261,10 +268,11 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
         cfg.profCfg.sceneName = s;
     }
 
-    Log::info("Config", "compactMethod=%s  sortByMaterial=%s  rngMode=%s",
+    Log::info("Config", "compactMethod=%s  sortByMaterial=%s  rngMode=%s  directLighting=%s",
            toString(cfg.compactMethod),
            cfg.sortByMaterial ? "yes" : "no",
-           toString(cfg.rngMode));
+           toString(cfg.rngMode),
+           cfg.directLighting ? "yes" : "no");
 }
 
 // ====================================================================
@@ -291,6 +299,7 @@ void printStartupHelp(const char* exeName)
     Log::raw("                   3=shared-memory scan (default).\n");
     Log::raw("    --sort=N       Material sorting: 0=off, nonzero=on (default on).\n");
     Log::raw("    --rng=N        RNG mode: 0=LCG (default), 1=scrambled Halton.\n");
+    Log::raw("    --direct-lighting=N  Next-event estimation: 0=off, nonzero=on (default).\n");
     Log::raw("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
     Log::raw("    --save         Save the final rendered image on exit.\n");
     Log::raw("                   (default: yes)\n");

@@ -93,6 +93,7 @@ struct AppConfig {
     CompactMethod    compactMethod    = CompactMethod::SharedMem;
     bool             sortByMaterial   = false;
     RngMode          rngMode          = RngMode::LCG;
+    bool             directLighting   = true;
 
     // Post-processing
     BloomConfig              bloom;
