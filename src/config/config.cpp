@@ -109,6 +109,131 @@ static RngMode parseRngMode(const json& v, RngMode fallback)
     return fallback;
 }
 
+static std::string_view trim(std::string_view value)
+{
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
+        value.remove_prefix(1);
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
+        value.remove_suffix(1);
+    return value;
+}
+
+static bool normalizeSaveAtIterations(std::vector<int>& iterations,
+                                      std::string& error)
+{
+    for (const int iteration : iterations)
+    {
+        if (iteration <= 0)
+        {
+            error = "saveAt values must be positive integers";
+            return false;
+        }
+    }
+
+    std::sort(iterations.begin(), iterations.end());
+    const auto duplicate = std::adjacent_find(iterations.begin(), iterations.end());
+    if (duplicate != iterations.end())
+    {
+        error = "saveAt must not contain duplicate iteration "
+            + std::to_string(*duplicate);
+        return false;
+    }
+    return true;
+}
+
+static bool parseSaveAtJson(const json& value,
+                            std::vector<int>& iterations,
+                            std::string& error)
+{
+    if (!value.is_array())
+    {
+        error = "saveAt must be an array of positive integers";
+        return false;
+    }
+
+    std::vector<int> parsed;
+    parsed.reserve(value.size());
+    for (std::size_t index = 0; index < value.size(); ++index)
+    {
+        const json& item = value[index];
+        if (!item.is_number_integer() && !item.is_number_unsigned())
+        {
+            error = "saveAt[" + std::to_string(index)
+                + "] must be a positive integer";
+            return false;
+        }
+
+        std::uint64_t parsedValue = 0;
+        try
+        {
+            parsedValue = item.get<std::uint64_t>();
+        }
+        catch (const json::exception&)
+        {
+            error = "saveAt[" + std::to_string(index)
+                + "] is outside the supported iteration range";
+            return false;
+        }
+
+        if (parsedValue == 0 || parsedValue > static_cast<std::uint64_t>(INT_MAX))
+        {
+            error = "saveAt[" + std::to_string(index)
+                + "] is outside the supported positive integer range";
+            return false;
+        }
+        parsed.push_back(static_cast<int>(parsedValue));
+    }
+
+    if (!normalizeSaveAtIterations(parsed, error)) return false;
+    iterations = std::move(parsed);
+    return true;
+}
+
+static bool parseSaveAtCli(std::string_view value,
+                           std::vector<int>& iterations,
+                           std::string& error)
+{
+    if (value.empty())
+    {
+        error = "--save-at requires a comma-separated list of positive integers";
+        return false;
+    }
+
+    std::vector<int> parsed;
+    std::size_t tokenStart = 0;
+    while (tokenStart <= value.size())
+    {
+        const std::size_t comma = value.find(',', tokenStart);
+        const std::size_t tokenEnd = comma == std::string_view::npos
+            ? value.size() : comma;
+        const std::string_view token = trim(value.substr(tokenStart, tokenEnd - tokenStart));
+        if (token.empty())
+        {
+            error = "--save-at contains an empty item";
+            return false;
+        }
+
+        int parsedValue = 0;
+        const auto result = std::from_chars(token.data(), token.data() + token.size(),
+                                            parsedValue);
+        if (result.ec != std::errc() || result.ptr != token.data() + token.size()
+            || parsedValue <= 0)
+        {
+            error = "--save-at item '" + std::string(token)
+                + "' must be a positive integer";
+            return false;
+        }
+        parsed.push_back(parsedValue);
+
+        if (comma == std::string_view::npos) break;
+        tokenStart = comma + 1;
+    }
+
+    if (!normalizeSaveAtIterations(parsed, error)) return false;
+    iterations = std::move(parsed);
+    return true;
+}
+
 // ====================================================================
 // JSON → AppConfig merge (lowest priority)
 // ====================================================================
