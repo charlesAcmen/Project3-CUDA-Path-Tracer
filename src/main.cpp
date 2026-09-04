@@ -98,10 +98,27 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    if (!cfg.valid())
+    {
+        for (const std::string& error : cfg.errors)
+            Log::error("Config", "%s", error.c_str());
+        return 1;
+    }
+
     const char* sceneFile  = cfg.sceneFile.c_str();
 
     // Load scene file
     app.scene = new Scene(SceneLoader::loadFromJSON(sceneFile));
+
+    std::string saveAtError;
+    if (!validateSaveAtIterations(cfg.saveAtIterations,
+                                  app.scene->state.iterations, saveAtError))
+    {
+        Log::error("Config", "%s", saveAtError.c_str());
+        delete app.scene;
+        app.scene = nullptr;
+        return 1;
+    }
 
     // Set up camera stuff from loaded path tracer settings
     app.iteration = 0;
@@ -109,6 +126,7 @@ int main(int argc, char** argv)
     Camera& cam = app.renderState->camera;
     app.width = cam.resolution.x;
     app.height = cam.resolution.y;
+    app.saveSchedule = SaveSchedule(cfg.saveAtIterations);
 
     // Make the window slightly larger than the render resolution so the
     // ImGui panel (anchored to the left or right) doesn't cover the image.
@@ -131,6 +149,17 @@ int main(int argc, char** argv)
     // Graceful CSV write on any exit path (Esc key, completion, etc.)
     if (cfg.profCfg.enabled) {
         atexit([]() { g_profiler().shutdown(); });
+    }
+
+    // Directory creation belongs after a working graphics/CUDA context is
+    // established.  This keeps its success log from looking like renderer
+    // initialization succeeded, and it avoids creating an empty run folder
+    // when startup fails before the first frame.
+    if (!initializeSaveOutput(app))
+    {
+        delete app.scene;
+        app.scene = nullptr;
+        return EXIT_FAILURE;
     }
 
     // Print concise runtime summary before rendering

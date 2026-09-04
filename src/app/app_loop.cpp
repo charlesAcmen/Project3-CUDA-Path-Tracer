@@ -101,6 +101,21 @@ void runCuda(AppState& app)
 
 } // namespace
 
+bool initializeSaveOutput(AppState& app)
+{
+    std::string error;
+    app.saveOutputDirectory = SaveOutput::createUniqueRunDirectory(
+        "outputs", app.renderState->imageName, app.startTimeString, error);
+    if (!app.saveOutputDirectory.empty())
+    {
+        Log::info("Image", "Save output: %s", app.saveOutputDirectory.string().c_str());
+        return true;
+    }
+
+    Log::error("Image", "%s", error.c_str());
+    return false;
+}
+
 void saveImage(AppState& app)
 {
     saveImage(app, true);
