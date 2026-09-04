@@ -285,6 +285,7 @@ struct ShadingConfig
     int           traceDepth;
     int           rrMinBounces;    // guaranteed bounces before Russian roulette
     RngMode       rngMode;         // LCG / Halton
+    bool          directLighting;  // next-event estimation / MIS direct-light samples
     Camera cam;
     DebugConfig debug;
 };

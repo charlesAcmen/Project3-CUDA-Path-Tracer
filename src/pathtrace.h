@@ -75,6 +75,8 @@ void setCompactMethod(CompactMethod method);
 CompactMethod getCompactMethod();
 void setSortByMaterial(bool enable);
 bool getSortByMaterial();
+void setDirectLightingEnabled(bool enable);
+bool getDirectLightingEnabled();
 
 // Bloom runtime configuration
 void setBloomEnabled(bool enable);
