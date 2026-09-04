@@ -21,7 +21,7 @@ void Image::setPixel(int x, int y, const glm::vec3 &pixel)
     pixels[(y * xSize) + x] = pixel;
 }
 
-void Image::savePNG(const std::string &baseFilename)
+bool Image::savePNG(const std::string &filename)
 {
     unsigned char *bytes = new unsigned char[3 * xSize * ySize];
     for (int y = 0; y < ySize; y++)
@@ -36,11 +36,15 @@ void Image::savePNG(const std::string &baseFilename)
         }
     }
 
-    std::string filename = baseFilename + ".png";
-    stbi_write_png(filename.c_str(), xSize, ySize, 3, bytes, xSize * 3);
-    Log::info("Image", "Saved %s", filename.c_str());
+    const bool written = stbi_write_png(filename.c_str(), xSize, ySize, 3,
+                                        bytes, xSize * 3) != 0;
+    if (written)
+        Log::info("Image", "Saved %s", filename.c_str());
+    else
+        Log::error("Image", "Could not save %s", filename.c_str());
 
     delete[] bytes;
+    return written;
 }
 
 void Image::saveHDR(const std::string &baseFilename)
