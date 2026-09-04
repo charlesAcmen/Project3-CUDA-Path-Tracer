@@ -55,6 +55,8 @@ void setCompactMethod(CompactMethod method) { g_opts.compactMethod = method; }
 void setSortByMaterial(bool enable) { g_opts.sortByMaterial = enable; }
 CompactMethod getCompactMethod()    { return g_opts.compactMethod; }
 bool getSortByMaterial()            { return g_opts.sortByMaterial; }
+void setDirectLightingEnabled(bool enable) { g_opts.directLighting = enable; }
+bool getDirectLightingEnabled()            { return g_opts.directLighting; }
 void  setBloomEnabled(bool v)       { g_opts.bloom.enabled = v; }
 bool  getBloomEnabled()             { return g_opts.bloom.enabled; }
 void  setBloomThreshold(float v)    { g_opts.bloom.threshold = v; }
@@ -437,7 +439,7 @@ void pathtrace(uchar4* pbo, int iter)
 
         ShadingConfig shadingCfg = {
             traceDepth, hst_scene->state.rrMinBounces,
-            g_opts.rngMode, cam, hst_scene->state.debug
+            g_opts.rngMode, g_opts.directLighting, cam, hst_scene->state.debug
         };
         ShadingSceneView shadingScene = {
             g_dev.materials,
