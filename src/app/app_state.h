@@ -9,6 +9,7 @@
 // ====================================================================
 
 #include "scene/scene.h"
+#include "app/save_schedule.h"
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -16,22 +17,17 @@
 
 #include <cuda_gl_interop.h>
 
-#include <cstddef>
+#include <filesystem>
 #include <string>
-#include <vector>
 
 struct AppState
 {
     std::string startTimeString;
 
-    // Auto-save final image on completion (moved from pathtrace.cu — application-level concern)
-    bool autoSave = true;
-
-    // Checkpoint iteration counts for auto-save (set via --save-at=N1,N2,...).
-    // Sorted ascending.  saveImage() is triggered when iteration reaches each value.
-    // saveAtIterIdx tracks how many checkpoints have been consumed.
-    std::vector<int> saveAtIterations;
-    std::size_t saveAtIterIdx = 0;
+    // Checkpoint state is distinct from the renderer. Each accumulation reset
+    // starts a new pass and replays the configured checkpoint list.
+    SaveSchedule          saveSchedule;
+    std::filesystem::path saveOutputDirectory;
 
     // For camera controls
     bool leftMousePressed = false;
