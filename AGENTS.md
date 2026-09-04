@@ -30,10 +30,17 @@ The defaults are shared-memory compaction, material sorting off, LCG RNG, and au
 | `--rng=N` | `0` LCG, `1` scrambled Halton |
 | `--direct-lighting=N` | `0` disables NEE/MIS direct-light sampling; nonzero enables it (default) |
 | `--benchmark`, `--warmup=N` | CSV profiler and warm-up count |
-| `--save`, `--save-at=N1,N2,...` | Final save and checkpoint saves |
+| `--save-at=N1,N2,...` | Temporarily replace JSON `saveAt` checkpoints |
 | `--config=PATH`, `-h`, `--help` | Config path and help |
 
-`config.local.json` also controls bloom, chromatic aberration, vignette and profiler settings. The ImGui panel changes the same live renderer settings; camera changes reset accumulation.
+`config.local.json` also controls bloom, chromatic aberration, vignette,
+profiler, and optional `saveAt` integer-array checkpoints. Every accumulation
+pass always saves its final PNG. Checkpoint values are normalized, must be
+unique positive integers within the scene's `ITERATIONS`, and CLI
+`--save-at=N1,N2,...` replaces the JSON array. Images go under
+`outputs/<scene-name>/<UTC-run-id>/`; each accumulation reset starts a new
+numbered pass. The ImGui panel changes the same live renderer settings; camera
+changes reset accumulation.
 
 ## Source ownership and entry flow
 

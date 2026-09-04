@@ -44,7 +44,7 @@ not a per-object intersection loop.
 | Procedural shapes and textures | `scenes/models/gen_shapes.py` provides multiple generated mesh shapes. There is no procedural texture shader, so this is not presented as the complete combined feature. |
 | Motion blur | Not implemented. Primary-ray code explicitly reserves it as future time jitter. |
 | Subsurface scattering, denoising, CUDA–Vulkan interop | Not implemented. |
-| Restartable path tracing | Not implemented as persistent save/resume. `--save-at` saves images only; it does not serialize accumulation or BVH state. |
+| Restartable path tracing | Not implemented as persistent save/resume. `saveAt` / `--save-at` save images only; they do not serialize accumulation or BVH state. |
 | glTF alpha, morph targets, Draco, extra UV/color sets | Not implemented. Static `JOINTS_0` / `WEIGHTS_0` skinning is baked while loading; animated or runtime skinning is not implemented. |
 | Occlusion texture | Loaded and carried in the surface binding, but not sampled by shading. |
 
@@ -145,12 +145,32 @@ CLI flags > explicitly selected --config file > config.local.json > code default
 | `--rng=N` | `0` LCG (default), `1` scrambled Halton |
 | `--direct-lighting=N` | Next-event estimation: `0` off, nonzero on (default). `0` is a BSDF-only comparison mode. |
 | `--benchmark`, `--warmup=N` | Enable profiler CSV output and choose warm-up iterations |
-| `--save`, `--save-at=N1,N2,...` | Save the final image or checkpoint images |
+| `--save-at=N1,N2,...` | Temporarily replace configured checkpoint iterations |
 | `--config=PATH`, `-h`, `--help` | Select configuration, show help |
 
 Bloom, chromatic aberration, vignette, compaction, sorting, and RNG are also
 available through ImGui. Camera and the relevant live renderer setting changes
 restart accumulation.
+
+### Checkpoint images
+
+Every uninterrupted accumulation pass saves its final image. For repeatable
+checkpoint images, set `saveAt` in `config.local.json` with a JSON integer
+array; the order is normalized before rendering:
+
+```json
+{
+  "saveAt": [1, 10, 50, 100, 150, 500]
+}
+```
+
+For a one-off run, `--save-at=1,10,50,100,150,500` replaces that whole array.
+Values must be unique positive integers no larger than the scene's
+`ITERATIONS`; invalid input stops before CUDA/GL initialization. Each camera
+or accumulation-setting reset starts a new pass and repeats the schedule.
+
+Images go to `outputs/<scene-name>/<UTC-run-id>/`. Automatic images use names
+such as `pass-01.000050spp.png`; manual `P` or `Esc` saves add `.manual`.
 
 ## Controls
 
