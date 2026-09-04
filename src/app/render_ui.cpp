@@ -102,6 +102,12 @@ void renderImGui(AppState& app)
             markCameraChanged(app);
         }
 
+        bool directLightingEnabled = getDirectLightingEnabled();
+        if (ImGui::Checkbox("Direct lighting (NEE)", &directLightingEnabled)) {
+            setDirectLightingEnabled(directLightingEnabled);
+            markCameraChanged(app);
+        }
+
         ImGui::Separator();
         ImGui::Text("Bloom:");
         bool bloomEnabled = getBloomEnabled();
