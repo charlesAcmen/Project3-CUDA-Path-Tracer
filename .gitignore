@@ -21,6 +21,7 @@ build
 # User-local runtime config (not checked in)
 config.local.json
 /profiler_output
+/outputs/
 
 # Khronos glTF-Sample-Assets dump (flat copy of the official repo, 159 models)
 # -- only the model library is ignored; scene JSONs under scenes/ stay tracked
