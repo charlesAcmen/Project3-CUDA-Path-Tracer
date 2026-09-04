@@ -101,10 +101,13 @@ struct AppConfig {
     VignetteConfig           vignette;
 
 
-    // Other
-    bool             autoSave         = true;
-    bool             showHelp         = false;
+    // Image checkpoints. JSON `saveAt` is an integer array; a command-line
+    // `--save-at=N1,N2,...` list replaces this complete group.
     std::vector<int> saveAtIterations;
+    std::vector<std::string> errors;
+    bool             showHelp         = false;
+
+    bool valid() const { return errors.empty(); }
 };
 
 // ---- Singleton + init ---------------------------------------------------

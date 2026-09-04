@@ -203,9 +203,9 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
         {
             cfg.profCfg.enabled = true;
         }
-        else if (arg == "--save")
+        else if (arg == "--save-at")
         {
-            cfg.autoSave = true;
+            cfg.errors.push_back("--save-at requires '=N1,N2,...'");
         }
         else if (arg.rfind("--save-at=", 0) == 0)
         {
@@ -301,10 +301,8 @@ void printStartupHelp(const char* exeName)
     Log::raw("    --rng=N        RNG mode: 0=LCG (default), 1=scrambled Halton.\n");
     Log::raw("    --direct-lighting=N  Next-event estimation: 0=off, nonzero=on (default).\n");
     Log::raw("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
-    Log::raw("    --save         Save the final rendered image on exit.\n");
-    Log::raw("                   (default: yes)\n");
-    Log::raw("    --save-at=N1,N2,...  Auto-save at specific iteration counts\n");
-    Log::raw("                   (e.g., --save-at=50,200,1000).  Implies --save.\n");
+    Log::raw("    --save-at=N1,N2,...  Override config saveAt with checkpoints\n");
+    Log::raw("                   (e.g., --save-at=50,200,1000).\n");
     Log::raw("    --config=PATH  Load runtime config from a JSON file.\n");
     Log::raw("                   Default: config.local.json in CWD.\n");
     Log::raw("    -h, --help     Show this help text.\n");

@@ -58,7 +58,6 @@ void printStartupSummary(const AppState& app, const AppConfig& cfg)
     Log::raw("  RNG mode: %s\n", rngName);
     Log::raw("  BVH traversal: enabled  (max depth %d, leaf size %d)\n",
            kBvhMaxDepth, kBvhLeafSize);
-    Log::raw("  Auto-save final image: %s\n", app.autoSave ? "yes" : "no");
     Log::raw("======================================================================\n");
     Log::raw("\n");
 }
@@ -85,9 +84,6 @@ int main(int argc, char** argv)
     // ---- Init singleton config (JSON → CLI → ready) ----
     initAppConfig(argc, argv);
     const auto& cfg = appConfig();
-
-    app.autoSave = cfg.autoSave;
-    app.saveAtIterations = cfg.saveAtIterations;  // copy (small vector)
 
     if (cfg.showHelp)
     {
