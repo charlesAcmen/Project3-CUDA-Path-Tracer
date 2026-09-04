@@ -143,6 +143,7 @@ CLI flags > explicitly selected --config file > config.local.json > code default
 | `--compact=N` | `0` off, `1` global-memory scan, `2` Thrust `copy_if`, `3` shared-memory scan (default) |
 | `--sort=N` | Material sorting; nonzero enables it (default off) |
 | `--rng=N` | `0` LCG (default), `1` scrambled Halton |
+| `--direct-lighting=N` | Next-event estimation: `0` off, nonzero on (default). `0` is a BSDF-only comparison mode. |
 | `--benchmark`, `--warmup=N` | Enable profiler CSV output and choose warm-up iterations |
 | `--save`, `--save-at=N1,N2,...` | Save the final image or checkpoint images |
 | `--config=PATH`, `-h`, `--help` | Select configuration, show help |

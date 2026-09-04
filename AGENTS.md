@@ -28,6 +28,7 @@ The defaults are shared-memory compaction, material sorting off, LCG RNG, and au
 | `--compact=N` | `0` off, `1` global scan, `2` Thrust, `3` shared-memory scan |
 | `--sort=N` | Material sorting; nonzero enables it |
 | `--rng=N` | `0` LCG, `1` scrambled Halton |
+| `--direct-lighting=N` | `0` disables NEE/MIS direct-light sampling; nonzero enables it (default) |
 | `--benchmark`, `--warmup=N` | CSV profiler and warm-up count |
 | `--save`, `--save-at=N1,N2,...` | Final save and checkpoint saves |
 | `--config=PATH`, `-h`, `--help` | Config path and help |
