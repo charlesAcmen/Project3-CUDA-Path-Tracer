@@ -1,10 +1,12 @@
 #include "app/app_loop.h"
 
 #include "app/camera_controller.h"
+#include "app/save_output.h"
 #include "image.h"
 #include "pathtrace.h"
 #include "profiler/profiler.h"
 #include "app/render_ui.h"
+#include "utils/logger.h"
 
 #include "ImGui/imgui_impl_glfw.h"
 #include "ImGui/imgui_impl_opengl3.h"
@@ -14,7 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <sstream>
+#include <filesystem>
 #include <string>
 
 namespace {
@@ -47,6 +49,7 @@ void runCuda(AppState& app)
         // rebuilt the BVH and re-uploaded the whole scene every interactive
         // frame (the cause of the FPS drop while dragging the camera).
         pathtraceResetAccumulation();
+        app.saveSchedule.beginNextPass();
     }
 
     if (app.iteration < app.renderState->iterations)
@@ -74,14 +77,13 @@ void runCuda(AppState& app)
         // unmap buffer object
         cudaGraphicsUnmapResources(1, &app.cudaPboResource, 0);
 
-        // Checkpoint auto-save: save image at specific iteration counts.
-        // --save-at=50,200,1000 triggers saves at iteration 50, 200, 1000.
-        // app.saveAtIterIdx tracks which checkpoints remain (list is sorted).
-        while (app.saveAtIterIdx < app.saveAtIterations.size()
-               && app.iteration >= app.saveAtIterations[app.saveAtIterIdx])
+        // A checkpoint can only be consumed at its exact iteration. Completion
+        // is also an automatic save; SaveSchedule coalesces a final checkpoint
+        // into that single request.
+        if (app.saveSchedule.shouldSaveAt(app.iteration,
+                                          app.renderState->iterations))
         {
-            saveImage(app);
-            app.saveAtIterIdx++;
+            saveImage(app, false);
         }
     }
     else
