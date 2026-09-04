@@ -249,9 +249,11 @@ static __device__ bool resolveShadeableIntersection(
     return true;
 }
 
-// Reconstructs emitted radiance and the competing light PDF/MIS weight for a
-// path that reached an emitter through BSDF sampling.  The caller alone
-// decides whether the hit terminates (JSON emitter) or continues (auto-glow).
+// Reconstructs emitted radiance for a path that reached an emitter through
+// BSDF sampling.  With NEE enabled, the competing light PDF supplies the MIS
+// weight; without it, BSDF sampling is the sole estimator and has weight one.
+// The caller alone decides whether the hit terminates (JSON emitter) or
+// continues (auto-glow).
 static __device__ void accumulateHitEmission(
     const EmissionHitContext& context)
 {
@@ -260,10 +262,13 @@ static __device__ void accumulateHitEmission(
         *context.intersection.surface, context.scene.textures,
         context.intersection.uv, context.material,
         context.intersection.geometricNormal, emittedDirection);
-    context.pathSegment.accumulatedRadiance += context.pathSegment.throughput * Le *
-        emissionHitMisWeight(context.pathSegment, context.hit,
-                             context.intersection.geometricNormal,
-                             context.material, context.scene.lights);
+    const float misWeight = context.directLightingEnabled
+        ? emissionHitMisWeight(context.pathSegment, context.hit,
+                                context.intersection.geometricNormal,
+                                context.material, context.scene.lights)
+        : 1.0f;
+    context.pathSegment.accumulatedRadiance +=
+        context.pathSegment.throughput * Le * misWeight;
 }
 
 static __device__ void shadeSurfaceHit(
