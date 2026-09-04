@@ -400,6 +400,22 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
            cfg.directLighting ? "yes" : "no");
 }
 
+bool validateSaveAtIterations(const std::vector<int>& iterations,
+                              unsigned int maximum,
+                              std::string& error)
+{
+    for (const int iteration : iterations)
+    {
+        if (static_cast<std::uint64_t>(iteration) > maximum)
+        {
+            error = "saveAt iteration " + std::to_string(iteration)
+                + " exceeds this scene's ITERATIONS=" + std::to_string(maximum);
+            return false;
+        }
+    }
+    return true;
+}
+
 // ====================================================================
 // Display: startup help text
 // ====================================================================
@@ -416,7 +432,7 @@ void printStartupHelp(const char* exeName)
     Log::raw("  Examples:\n");
     Log::raw("    %s ../scenes/cornell.json\n", exeName);
     Log::raw("    %s ../scenes/cornell.json --benchmark --compact=2 --warmup=1\n", exeName);
-    Log::raw("    %s ../scenes/cornell.json --benchmark --sort=0 --save\n", exeName);
+    Log::raw("    %s ../scenes/cornell.json --save-at=50,200,1000\n", exeName);
     Log::raw("\n");
     Log::raw("  Options:\n");
     Log::raw("    --benchmark    Enable profiler CSV output.\n");
