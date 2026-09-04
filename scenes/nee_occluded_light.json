@@ -16,7 +16,9 @@
     { "FILE": "box/floor.obj", "MATERIAL": "blocker", "TRANS": [-0.2, 0.4, 0.45], "ROTAT": [90, 0, 0], "SCALE": [0.4, 1, 2.4] }
   ],
   "Camera": {
-    "RES": [800, 800], "FOVY": 50, "ITERATIONS": 2000, "DEPTH": 6, "RR_DEPTH": 3,
-    "FILE": "nee_occluded_light.png", "EYE": [0, 1.7, -4.5], "LOOKAT": [0, 0.7, 0.3], "UP": [0, 1, 0]
+    "RES": [1200,1200], "FOVY": 60, "ITERATIONS": 2000, "DEPTH": 6, "RR_DEPTH": 3,
+    "FILE": "nee_occluded_light.png", "EYE": [0.0000, 1.7000, -4.5000],
+"LOOKAT": [-0.0123, 1.6449, 0.4027],
+"UP": [-0.0000, 0.9999, 0.0112]
   }
 }

@@ -16,7 +16,9 @@
     { "FILE": "Models/DamagedHelmet/glTF/DamagedHelmet.gltf", "MATERIAL": "damaged_helmet", "TRANS": [0, 0.9, 0], "ROTAT": [0, 180, 0], "SCALE": [0.35, 0.35, 0.35] }
   ],
   "Camera": {
-    "RES": [800, 600], "FOVY": 45, "ITERATIONS": 2000, "DEPTH": 6, "RR_DEPTH": 3,
-    "FILE": "nee_rough_pbr.png", "EYE": [0.9468, 1.6054, -1.9412], "LOOKAT": [0.1926, 0.9359, -0.0857], "UP": [-0.1194, 0.9484, 0.2937]
+    "RES": [1920, 1080], "FOVY": 60, "ITERATIONS": 2000, "DEPTH": 6, "RR_DEPTH": 3,
+    "FILE": "nee_rough_pbr.png", "EYE": [-0.0588, 1.9940, -4.3717],
+"LOOKAT": [-0.0280, 1.9099, -2.2618],
+"UP": [0.0006, 0.9992, 0.0398]
   }
 }

@@ -14,7 +14,7 @@
     { "FILE": "box/light.obj", "MATERIAL": "small_area_light", "TRANS": [-0.25, 5.98, 2.75], "ROTAT": [0, 0, 0], "SCALE": [0.5, 1, 0.5] }
   ],
   "Camera": {
-    "RES": [800, 600], "FOVY": 55, "ITERATIONS": 2000, "DEPTH": 6, "RR_DEPTH": 3,
+    "RES": [800, 600], "FOVY": 55, "ITERATIONS": 20000, "DEPTH": 6, "RR_DEPTH": 3,
     "FILE": "nee_deep_room.png", "EYE": [0, 2.0, -9.5], "LOOKAT": [0, 1.4, 2.5], "UP": [0, 1, 0]
   }
 }

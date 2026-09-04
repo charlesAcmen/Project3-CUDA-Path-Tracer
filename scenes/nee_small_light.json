@@ -14,7 +14,7 @@
     { "FILE": "box/light.obj", "MATERIAL": "small_area_light", "TRANS": [-0.09, 3.98, -0.09], "ROTAT": [0, 0, 0], "SCALE": [0.1, 1, 0.1] }
   ],
   "Camera": {
-    "RES": [1000,1000], "FOVY": 50, "ITERATIONS": 200000, "DEPTH": 8, "RR_DEPTH": 3,
+    "RES": [720, 720], "FOVY": 60, "ITERATIONS": 200000, "DEPTH": 8, "RR_DEPTH": 3,
     "FILE": "nee_small_light.png", "EYE": [0, 2, -4.5], "LOOKAT": [0, 1.55, 0], "UP": [0, 1, 0]
   }
 }

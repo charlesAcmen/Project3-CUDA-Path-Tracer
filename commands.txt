@@ -139,3 +139,4 @@ https://192.168.1.1/
 .\build\bin\Release\cis565_path_tracer.exe scenes\cornell_metal_rough_spheres.json
 .\build\bin\Release\cis565_path_tracer.exe scenes\cornell_city.json
 .\build\bin\Release\cis565_path_tracer.exe scenes\cornell_perfume_bottle.json
+.\build\bin\Release\cis565_path_tracer.exe scenes\cornell_ideal_mirror.json

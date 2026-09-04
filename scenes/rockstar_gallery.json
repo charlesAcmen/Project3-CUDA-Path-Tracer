@@ -46,12 +46,12 @@
     { "FILE": "Models/ROCKSTAR/carl_johnson_cj/scene.gltf",                                      "MATERIAL": "rockstar_pbr", "TRANS": [120, 4, -200], "ROTAT": [0, 180, 0], "SCALE": [100,100,100] },
     { "FILE": "Models/ROCKSTAR/franklin_gta_5/scene.gltf",                                       "MATERIAL": "rockstar_pbr", "TRANS": [200, 150, 20], "ROTAT": [0, 0, 0], "SCALE": [80, 80, 80] },
     { "FILE": "Models/ROCKSTAR/grand_theft_auto_vice_city_-_tommy_vercetti/scene.gltf",          "MATERIAL": "rockstar_pbr", "TRANS": [30, 140, 20], "ROTAT": [0, 180, 0], "SCALE": [100,100,100] },
-    { "FILE": "Models/ROCKSTAR/john_marston/scene.gltf",                                         "MATERIAL": "rockstar_pbr", "TRANS": [280, 20, -300], "ROTAT": [90, 0, 180], "SCALE": [240, 240, 240] },
+    { "FILE": "Models/ROCKSTAR/john_marston/scene.gltf",                                         "MATERIAL": "rockstar_pbr", "TRANS": [280, 20, -300], "ROTAT": [180, 0, 180], "SCALE": [240, 240, 240] },
     { "FILE": "Models/ROCKSTAR/michael_de_santa_-_gta_v/scene.gltf",                             "MATERIAL": "rockstar_pbr", "TRANS": [380, 160, 20], "ROTAT": [0, 180, 0], "SCALE": [100, 100, 100] },
     { "FILE": "Models/ROCKSTAR/trevor_gta_5/scene.gltf",                                         "MATERIAL": "rockstar_pbr", "TRANS": [500, 160, 20], "ROTAT": [0, 180, 0], "SCALE": [100, 100, 100] }
   ],
   "Camera": {
-    "RES": [1920, 1080],
+    "RES": [2560, 1440],
     "FOVY": 60,
     "ITERATIONS": 5000,
     "DEPTH": 8,
