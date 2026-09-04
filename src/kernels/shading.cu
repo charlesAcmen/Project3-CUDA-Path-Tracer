@@ -132,6 +132,7 @@ struct EmissionHitContext
     const ShadeableIntersection& intersection;
     const Material& material;
     const ShadingSceneView& scene;
+    bool directLightingEnabled;
 };
 
 static __device__ void accumulateDirectLighting(
@@ -283,7 +284,8 @@ static __device__ void shadeSurfaceHit(
     }
 
     const EmissionHitContext emission{
-        context.pathSegment, context.hit, intersection, *material, context.scene
+        context.pathSegment, context.hit, intersection, *material, context.scene,
+        context.config.directLighting
     };
     if (material->emittance > 0.0f)
     {
@@ -303,10 +305,13 @@ static __device__ void shadeSurfaceHit(
     const ResolvedBsdf resolvedBsdf = resolveBsdf(
         intersection, *material, context.scene.textures,
         context.pathSegment.ray.direction);
-    const DirectLightingContext directLighting{
-        context.pathSegment, intersection, *material, resolvedBsdf, context.scene
-    };
-    accumulateDirectLighting(directLighting, context.rng);
+    if (context.config.directLighting)
+    {
+        const DirectLightingContext directLighting{
+            context.pathSegment, intersection, *material, resolvedBsdf, context.scene
+        };
+        accumulateDirectLighting(directLighting, context.rng);
+    }
 
     // The resolved state carries this hit's normal-map and texture inputs
     // through continuation, while scatterRay derives the exact point from hit.t.
