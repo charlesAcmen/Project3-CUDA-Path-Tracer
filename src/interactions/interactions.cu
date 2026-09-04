@@ -611,7 +611,11 @@ __host__ __device__ BsdfEvaluation evaluateBsdf(
 
     if (resolved.roughness < ROUGHNESS_THRESHOLD)
     {
-        if (resolved.metallic > PBR_MIRROR_METALLIC_THRESHOLD)
+        // Only an exactly pure metal has no continuous diffuse lobe.  It is
+        // therefore a delta event for NEE/MIS.  Near-metal values retain their
+        // small but valid diffuse contribution instead of crossing an
+        // arbitrary material-class boundary.
+        if (resolved.metallic >= 1.0f)
         {
             result.isDelta = true;
             return result;
@@ -663,31 +667,14 @@ __host__ __device__ BsdfEvaluation evaluateBsdf(
 // metallic-roughness surface.  They are file-local; scatterGgxSurface owns the
 // split probability and applies the chosen (scatterDir, throughput) to the path.
 
-static __host__ __device__ void ggxScatterMirror(
-    glm::vec3& scatterDir, glm::vec3& throughput,
-    const glm::vec3& rayDir, const glm::vec3& shadingNormal,
-    float NdotV, const glm::vec3& F0)
-{
-    // Type: Reflective chrome (metallic = 1) / Pbr metallic > 0.95, smooth.
-    // Near-pure metal: a single mirror lobe — F0 ≈ baseColor
-    // and diffuseColor = baseColor·(1−metallic) is < 5% of the albedo,
-    // so virtually all energy is in the specular reflection.  Below
-    // the threshold the diffuse term is NOT negligible (e.g. metallic
-    // 0.6 → 40% diffuse albedo); collapsing those to a mirror would
-    // silently drop the diffuse lobe, so they fall through to the
-    // specular/diffuse split in scatterGgxSurface.
-    scatterDir = glm::reflect(rayDir, shadingNormal);
-    throughput = fresnelSchlickF0(NdotV, F0);
-}
-
 static __host__ __device__ void ggxScatterSmoothSpecular(
     glm::vec3& scatterDir, glm::vec3& throughput,
     const glm::vec3& rayDir, const glm::vec3& shadingNormal,
     float NdotV, const glm::vec3& F0, float specProb)
 {
-    // Specular half of the smooth-dielectric split: mirror reflect weighted by
-    // Fresnel / specProb (probability compensation).  The diffuse half of the
-    // same split reuses ggxScatterDiffuse.
+    // Specular half of the smooth metallic-roughness split: mirror reflect
+    // weighted by Fresnel / specProb (probability compensation).  For an
+    // exact metal specProb is 1, so this naturally becomes a pure mirror.
     scatterDir = glm::reflect(rayDir, shadingNormal);
     throughput = fresnelSchlickF0(NdotV, F0) / specProb;
 }
@@ -786,21 +773,12 @@ static __host__ __device__ void scatterGgxSurface(
     glm::vec3 throughput;
     bool sampledDelta = false;
 
-    if (resolved.roughness < ROUGHNESS_THRESHOLD &&
-        resolved.metallic > PBR_MIRROR_METALLIC_THRESHOLD)
+    if (resolved.roughness < ROUGHNESS_THRESHOLD)
     {
-        ggxScatterMirror(scatterDir, throughput, rayDir, shadingNormal, NdotV, F0);
-        sampledDelta = true;
-    }
-    else if (resolved.roughness < ROUGHNESS_THRESHOLD)
-    {
-        // Type: Pbr, metallic ≤ 0.95 (smooth dielectric / mid metal).
-        // F0 ≈ 0.04, so most energy is diffuse.  Same probabilistic
-        // split as rough surfaces — specular = mirror reflect with
-        // probability specProb, diffuse with 1−specProb.  This avoids
-        // the old shortcut that dropped ~96% of the energy for smooth
-        // dielectrics (and the mirror shortcut above dropping mid-metal
-        // diffuse energy).
+        // Smooth metallic-roughness surfaces are a delta mirror lobe plus a
+        // diffuse lobe. The same split handles the full continuous metallic
+        // range: at metallic=1 specProb is 1 and diffuseColor is zero, so it
+        // naturally degenerates to the pure mirror without a cutoff.
         if (rng.next(HaltonDim::PbrSplit) < specProb)
         {
             ggxScatterSmoothSpecular(scatterDir, throughput, rayDir, shadingNormal,
