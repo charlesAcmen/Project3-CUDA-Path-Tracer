@@ -4,13 +4,17 @@
 #include "utils/logger.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>     // std::tolower — case-insensitive enum-name parsing
+#include <climits>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 using json = nlohmann::json;
@@ -254,6 +258,16 @@ void mergeConfigJson(AppConfig& cfg, const json& data)
     if (const auto* value = JsonUtil::findKey(data, "directLighting"))
         cfg.directLighting = value->get<bool>();
 
+    if (const auto* value = JsonUtil::findKey(data, "saveAt"))
+    {
+        std::vector<int> parsed;
+        std::string error;
+        if (parseSaveAtJson(*value, parsed, error))
+            cfg.saveAtIterations = std::move(parsed);
+        else
+            cfg.errors.push_back("config saveAt: " + error);
+    }
+
     // Bloom
     if (const auto* b = JsonUtil::findKey(data, "bloom"))
     {
@@ -316,6 +330,7 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
     }
 
     // ---- Parse flags ----
+    bool sawSaveAt = false;
     for (int i = 1; i < argc; ++i)
     {
         std::string arg = argv[i];
@@ -334,17 +349,19 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
         }
         else if (arg.rfind("--save-at=", 0) == 0)
         {
-            cfg.autoSave = true;
-            std::string list = arg.substr(10);
-            std::stringstream ss(list);
-            std::string token;
-            while (std::getline(ss, token, ','))
+            if (sawSaveAt)
             {
-                if (!token.empty())
-                    cfg.saveAtIterations.push_back(std::stoi(token));
+                cfg.errors.push_back("--save-at may be specified only once");
+                continue;
             }
-            std::sort(cfg.saveAtIterations.begin(),
-                      cfg.saveAtIterations.end());
+            sawSaveAt = true;
+
+            std::vector<int> parsed;
+            std::string error;
+            if (parseSaveAtCli(arg.substr(10), parsed, error))
+                cfg.saveAtIterations = std::move(parsed);
+            else
+                cfg.errors.push_back(error);
         }
         else if (arg.rfind("--config=", 0) == 0)
         {

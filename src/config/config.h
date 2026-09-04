@@ -120,6 +120,9 @@ void       initAppConfig(int argc, char** argv); // load + merge + parse
 nlohmann::json loadConfigFile(const std::string& path);
 void           mergeConfigJson(AppConfig& cfg, const nlohmann::json& data);
 void           parseCliFlags(AppConfig& cfg, int argc, char** argv);
+bool           validateSaveAtIterations(const std::vector<int>& iterations,
+                                        unsigned int maximum,
+                                        std::string& error);
 
 // ---- Display helpers ----------------------------------------------------
 
