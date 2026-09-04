@@ -42,6 +42,7 @@ python ../scripts/benchmark_runner.py bin/Release/cis565_path_tracer.exe ../scen
 | `--compact=N` | `0`, `1`, `2`, `3` | `3` | **Stream compaction method.** `0`=disabled, `1`=global-mem scan, `2`=Thrust `copy_if`, `3`=shared-mem scan. Other integers are accepted by the parser, but only these values have defined behavior. |
 | `--sort=N` | `0`, `1` | `0` | **Material sorting.** `0`=disabled, `1`=enabled. Nonzero values are treated as enabled. |
 | `--rng=N` | `0`, `1` | `0` | `0`=LCG, `1`=scrambled Halton. |
+| `--direct-lighting=N` | `0`, `1` | `1` | `0` disables NEE and its MIS direct-light estimate, leaving BSDF continuation sampling intact. Use only for controlled comparisons. |
 | `--warmup=N` | any int | `3` | Warmup iterations excluded from summary statistics. |
 | `--save` | (none) | off | Saves the rendered image when the app exits. Can be used with or without `--benchmark`. |
 | `--save-at=N1,N2,...` | list of ints | off | Saves checkpoint images at the given iteration counts. |
