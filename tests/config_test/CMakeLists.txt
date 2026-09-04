@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 add_executable(config_test
     config_test.cu
     ${CMAKE_SOURCE_DIR}/../../src/config/config.cpp
+    ${CMAKE_SOURCE_DIR}/../../src/app/save_output.cpp
 )
 
 target_include_directories(config_test PRIVATE
