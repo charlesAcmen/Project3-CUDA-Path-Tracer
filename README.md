@@ -144,7 +144,11 @@ CLI flags > explicitly selected --config file > config.local.json > code default
 | `--sort=N` | Material sorting; nonzero enables it (default off) |
 | `--rng=N` | `0` LCG (default), `1` scrambled Halton |
 | `--direct-lighting=N` | Next-event estimation: `0` off, nonzero on (default). `0` is a BSDF-only comparison mode. |
-| `--benchmark`, `--warmup=N` | Enable profiler CSV output and choose warm-up iterations |
+| `--rr-min-bounces=N` | Override guaranteed bounces; a value at least equal to trace depth disables Russian roulette |
+| `--benchmark`, `--warmup=N` | Enable schema-v2 profiler output and choose globally excluded warm-up iterations |
+| `--profile-mode=throughput\|detail` | Minimal whole-frame timing or granular stage timing |
+| `--profile-counters=N` | Exact path/BVH/NEE counters; diagnostic runs only |
+| `--profiler-output=PATH`, `--profile-tag=NAME` | Set result root and stable run tag |
 | `--save-at=N1,N2,...` | Temporarily replace configured checkpoint iterations |
 | `--config=PATH`, `-h`, `--help` | Select configuration, show help |
 
@@ -225,9 +229,24 @@ claimed optional feature. Add only user-validated evidence here:
 - file-texture versus procedural-texture comparison only after a procedural
   texture implementation exists.
 
-The built-in profiler writes CSV files under
-`profiler_output/<scene>_<timestamp>/` when `--benchmark` is enabled. See
-`docs/benchmarking-guide.md` for experiment recipes and CSV fields.
+The schema-v2 profiler writes self-describing run directories under
+`profiler_output/`. Its batch runner separates repeated throughput runs from
+detailed timing and counter diagnostics, then creates a manifest, report, and
+canonical plot suite. Use
+`python scripts/benchmark_runner.py build/bin/Release/cis565_path_tracer.exe --spec scripts/experiments/project3.toml`;
+see [the benchmarking guide](docs/benchmarking-guide.md) and
+[output schema](docs/OUTPUT_STRUCTURE.md).
+
+For a single completed run, the public analysis entrypoint automatically reads
+its role and generates only valid figures plus a short Markdown interpretation:
+
+```powershell
+python scripts/analyze_run.py <run-directory-or-name>
+```
+
+A bare name is resolved below `profiler_output/`; results go to
+`<run>/analysis/`. Individual `plot_*.py` files are lower-level tools for custom
+figures, not the normal user workflow.
 
 ## References
 

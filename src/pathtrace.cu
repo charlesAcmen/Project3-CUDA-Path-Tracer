@@ -44,6 +44,26 @@ static DeviceBuffers g_dev;
 static Scene* hst_scene = NULL;
 static bool s_initialized = false;
 
+static ProfilerRuntimeConfig currentProfilerRuntimeConfig()
+{
+    ProfilerRuntimeConfig result;
+    result.compactMethod = g_opts.compactMethod;
+    result.sortByMaterial = g_opts.sortByMaterial;
+    result.rngMode = g_opts.rngMode;
+    result.directLighting = g_opts.directLighting;
+    result.bloomEnabled = g_opts.bloom.enabled;
+    result.bloomThreshold = g_opts.bloom.threshold;
+    result.bloomIntensity = g_opts.bloom.intensity;
+    result.bloomRadius = g_opts.bloom.radius;
+    result.bloomSigma = g_opts.bloom.sigma;
+    result.chromaticAberrationEnabled = g_opts.chromaticAberration.enabled;
+    result.chromaticAberrationIntensity = g_opts.chromaticAberration.intensity;
+    result.vignetteEnabled = g_opts.vignette.enabled;
+    result.vignetteIntensity = g_opts.vignette.intensity;
+    result.vignetteExponent = g_opts.vignette.exponent;
+    return result;
+}
+
 // ====================================================================
 // Runtime Configuration — Getters / Setters
 //
@@ -108,12 +128,17 @@ float getVignetteExponent()                  { return g_opts.vignette.exponent; 
 
 void pathtraceInit(Scene* scene)
 {
+    Profiler& profiler = g_profiler();
+    const std::size_t initTimer = profiler.cpuStart(
+        ProfilerOp::PathtraceInit, ProfilerScope::Setup);
     hst_scene = scene;
 
     const Camera& cam = hst_scene->state.camera;
     const int pixelcount = cam.resolution.x * cam.resolution.y;
     const int maxPaddedPathCount = 1 << ilog2ceil(pixelcount);
 
+    const std::size_t coreBufferTimer = profiler.cpuStart(
+        ProfilerOp::AllocateCoreBuffers, ProfilerScope::Setup, -1, pixelcount);
     cudaMalloc(&g_dev.image, pixelcount * sizeof(glm::vec3));
     cudaMemset(g_dev.image, 0, pixelcount * sizeof(glm::vec3));
 
@@ -128,8 +153,18 @@ void pathtraceInit(Scene* scene)
 
     cudaMalloc(&g_dev.materials, scene->materials.size() * sizeof(Material));
     cudaMemcpy(g_dev.materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
+    if (profiler.collectCounters())
+    {
+        cudaMalloc(&g_dev.bounceCounters, sizeof(DeviceBounceCounters));
+        cudaMemset(g_dev.bounceCounters, 0, sizeof(DeviceBounceCounters));
+        g_dev.materialCount = static_cast<int>(scene->materials.size());
+        if (g_dev.materialCount > 0)
+            cudaMalloc(&g_dev.materialHitCounts,
+                       static_cast<size_t>(g_dev.materialCount) * sizeof(unsigned int));
+    }
 
     checkCUDAError("copy materials");
+    profiler.cpuStop(coreBufferTimer);
 
     // ---- Mesh triangles + BVH ----
     // Always build the scene-wide BVH (cheap: scenes are a few thousand
@@ -137,8 +172,12 @@ void pathtraceInit(Scene* scene)
     // the combined scene tree; traversal receives positions, while shading
     // receives attributes plus shared Surface and source-binding tables.
     {
+        const std::size_t bvhBuildTimer = profiler.cpuStart(
+            ProfilerOp::BuildSceneBvh, ProfilerScope::Setup, -1,
+            static_cast<int>(scene->hostTrianglePositions.size()));
         bvh::buildSceneBvh(g_dev.bvh, scene->hostTrianglePositions,
                            scene->hostTriangleAttrs, scene->geoms);
+        profiler.cpuStop(bvhBuildTimer);
 
         for (Surface& surface : g_dev.bvh.hostSurfaces)
         {
@@ -154,6 +193,9 @@ void pathtraceInit(Scene* scene)
             }
         }
 
+        const std::size_t lightBuildTimer = profiler.cpuStart(
+            ProfilerOp::BuildLightSampling, ProfilerScope::Setup, -1,
+            static_cast<int>(g_dev.bvh.hostTrianglePositions.size()));
         const HostLightSampling hostLights = buildLightSampling(
             g_dev.bvh.hostTrianglePositions,
             g_dev.bvh.hostTriangleAttrs,
@@ -161,7 +203,11 @@ void pathtraceInit(Scene* scene)
             scene->materials,
             scene->surfaceBindings,
             scene->textures);
+        profiler.cpuStop(lightBuildTimer);
 
+        const std::size_t sceneUploadTimer = profiler.cpuStart(
+            ProfilerOp::UploadSceneData, ProfilerScope::Setup, -1,
+            static_cast<int>(g_dev.bvh.hostTrianglePositions.size()));
         const int n = (int)g_dev.bvh.hostTrianglePositions.size();
         if (n > 0)
         {
@@ -220,12 +266,16 @@ void pathtraceInit(Scene* scene)
                    cudaMemcpyHostToDevice);
 
         bvh::uploadToDevice(g_dev.bvh);   // node + meta buffers (null if no meshes)
+        profiler.cpuStop(sceneUploadTimer);
     }
 
     // ---- Texture table ----
     // Concatenate every scene image into one flat pixel buffer; record each
     // image's slice (pixelOffset/width/height).
     {
+        const std::size_t textureUploadTimer = profiler.cpuStart(
+            ProfilerOp::UploadTextures, ProfilerScope::Setup, -1,
+            static_cast<int>(scene->textures.size()));
         std::vector<glm::vec3>    pixels;
         std::vector<TextureInfo>  infos;
         int offset = 0;
@@ -245,8 +295,11 @@ void pathtraceInit(Scene* scene)
                        infos.size() * sizeof(TextureInfo), cudaMemcpyHostToDevice);
             g_dev.textures.count = (int)infos.size();
         }
+        profiler.cpuStop(textureUploadTimer);
     }
 
+    const std::size_t pipelineBufferTimer = profiler.cpuStart(
+        ProfilerOp::AllocatePipelineBuffers, ProfilerScope::Setup, -1, pixelcount);
     cudaMalloc(&g_dev.intersections, pixelcount * sizeof(HitRecord));
     cudaMemset(g_dev.intersections, 0, pixelcount * sizeof(HitRecord));
 
@@ -266,10 +319,45 @@ void pathtraceInit(Scene* scene)
 
     // Gaussian weight buffer (small: max 65 floats ≈ 260 bytes)
     cudaMalloc(&g_dev.bloomWeights, (2 * MAX_BLOOM_RADIUS + 1) * sizeof(float));
+    profiler.cpuStop(pipelineBufferTimer);
+
+    ProfilerMemoryStats memory{};
+    memory.pathBuffersBytes = static_cast<size_t>(pixelcount) *
+        (sizeof(glm::vec3) + 2 * sizeof(PathSegment) + sizeof(unsigned char) +
+         sizeof(HitRecord));
+    memory.sceneBuffersBytes =
+        scene->materials.size() * sizeof(Material) +
+        g_dev.bvh.hostTrianglePositions.size() * sizeof(TrianglePos) +
+        g_dev.bvh.hostTriangleAttrs.size() * sizeof(TriangleAttr) +
+        g_dev.bvh.hostSurfaces.size() * sizeof(Surface) +
+        (scene->surfaceBindings.size() + 1) * sizeof(SurfaceBinding);
+    memory.bvhBytes = g_dev.bvh.hostNodes.size() * sizeof(BvhNode);
+    if (g_dev.lightCount > 0)
+        memory.lightSamplingBytes = static_cast<size_t>(g_dev.lightCount) *
+            (sizeof(LightTriangle) + sizeof(LightAliasEntry)) +
+            g_dev.bvh.hostTrianglePositions.size() * sizeof(int);
+    for (const TextureData& texture : scene->textures)
+        memory.textureBytes += texture.pixels.size() * sizeof(glm::vec3);
+    memory.textureBytes += scene->textures.size() * sizeof(TextureInfo);
+    memory.postProcessBytes = static_cast<size_t>(pixelcount) *
+        3 * sizeof(glm::vec3) +
+        (2 * MAX_BLOOM_RADIUS + 1) * sizeof(float);
+    memory.compactionWorkspaceBytes =
+        StreamCompaction::Efficient::compactionWorkspaceBytes();
+    if (g_opts.sortByMaterial)
+        memory.materialSortWorkspaceBytes = static_cast<size_t>(pixelcount) *
+            (2 * sizeof(int) + sizeof(HitRecord));
+    if (profiler.collectCounters())
+        memory.counterBytes = sizeof(DeviceBounceCounters) +
+            static_cast<size_t>(g_dev.materialCount) * sizeof(unsigned int);
+    // Nominal RGBA8 storage for the CUDA-mapped PBO and OpenGL display texture.
+    memory.displayInteropBytes = static_cast<size_t>(pixelcount) * 2 * sizeof(uchar4);
+    profiler.recordMemoryStats(memory);
 
     s_initialized = true;
 
     checkCUDAError("pathtraceInit");
+    profiler.cpuStop(initTimer);
 }
 
 void pathtraceFree()
@@ -284,6 +372,11 @@ void pathtraceFree()
     cudaFree(g_dev.pathsCompacted);
     cudaFree(g_dev.pathActivityFlags);
     g_dev.pathActivityFlags = nullptr;
+    cudaFree(g_dev.bounceCounters);
+    g_dev.bounceCounters = nullptr;
+    cudaFree(g_dev.materialHitCounts);
+    g_dev.materialHitCounts = nullptr;
+    g_dev.materialCount = 0;
     cudaFree(g_dev.materials);
     cudaFree(g_dev.intersections);
     cudaFree(g_dev.sortKeys);
@@ -337,7 +430,7 @@ void pathtraceResetAccumulation()
     // which rebuilt the BVH and re-uploaded the whole scene on every frame
     // while the camera was being dragged.
     if (!hst_scene) return;
-    g_profiler().resetForNewAccumulation();
+    g_profiler().resetForNewAccumulation(currentProfilerRuntimeConfig());
     const int pixelcount = hst_scene->state.camera.resolution.x *
                            hst_scene->state.camera.resolution.y;
     cudaMemset(g_dev.image, 0, pixelcount * sizeof(glm::vec3));
@@ -362,14 +455,6 @@ void pathtraceCopyDisplayToHost()
                            hst_scene->state.camera.resolution.y;
     cudaMemcpy(hst_scene->state.image.data(), g_dev.imageDisplay,
                pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
-}
-
-// Update the ImGui trace-depth display after each frame.
-// Per-kernel timing is synced by Profiler::updateGuiData() internally.
-static void updateGuiAfterFrame(Profiler& prof) {
-    if (prof.enabled()) {
-        prof.updateGuiData();
-    }
 }
 
 // ====================================================================
@@ -400,42 +485,63 @@ void pathtrace(uchar4* pbo, int iter)
 
     Profiler& prof = g_profiler();
     prof.beginIteration(iter);
+    const std::size_t frameGpuTimer = prof.gpuStart(
+        ProfilerOp::FrameGpu, ProfilerScope::Frame, -1, pixelcount);
 
     // ---- 1. Primary rays ------------------------------------------------
+    const std::size_t cameraRayTimer = prof.gpuStart(
+        ProfilerOp::GenerateCameraRays, ProfilerScope::Frame, -1, pixelcount);
     generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(
         cam, iter, traceDepth, g_dev.paths, g_opts.rngMode);
+    prof.gpuStop(cameraRayTimer);
     checkCUDAError("generate camera ray");
 
     int  depth     = 0;
     int  num_paths = pixelcount;
     bool done      = false;
     unsigned char* pathActivityFlags =
-        (g_opts.compactMethod == CompactMethod::SharedMem)
+        (g_opts.compactMethod == CompactMethod::SharedMem || prof.collectCounters())
         ? g_dev.pathActivityFlags
         : nullptr;
 
     // ---- 2. Bounce loop -------------------------------------------------
     while (!done)
     {
-        prof.recordBounce(depth, num_paths);
+        const int bounce = depth;
+
+        if (prof.collectCounters())
+        {
+            cudaMemset(g_dev.bounceCounters, 0, sizeof(DeviceBounceCounters));
+            if (g_dev.materialCount > 0)
+                cudaMemset(g_dev.materialHitCounts, 0,
+                           static_cast<size_t>(g_dev.materialCount) * sizeof(unsigned int));
+        }
 
         // Single world-space BVH closest-hit traversal
-        prof.gpuStart(ProfilerOp::ComputeIntersections);
+        const std::size_t intersectionTimer = prof.gpuStart(
+            ProfilerOp::ComputeIntersections, ProfilerScope::Bounce,
+            bounce, num_paths);
         LAUNCH_KERNEL_AUTO(bvhTraverse, num_paths,
             num_paths, g_dev.paths,
             g_dev.intersections,
             g_dev.deviceTrianglePositions,
-            g_dev.bvh.deviceNodes);
-        prof.gpuStop(ProfilerOp::ComputeIntersections);
+            g_dev.bvh.deviceNodes,
+            prof.collectCounters() ? g_dev.bounceCounters : nullptr);
+        prof.gpuStop(intersectionTimer);
         checkCUDAError("trace one bounce");
         depth++;
 
         // GPU timer via cudaEvent: Thrust transform/sequence/sort/gather
         // are all asynchronous and return immediately; cudaEvent captures
         // the true GPU execution time.
-        prof.gpuStart(ProfilerOp::SortByMaterial);
-        sortPathsByMaterial(num_paths);  // no-op when sortByMaterial is false
-        prof.gpuStop(ProfilerOp::SortByMaterial);
+        if (g_opts.sortByMaterial && num_paths > 1)
+        {
+            const std::size_t sortTimer = prof.gpuStart(
+                ProfilerOp::SortByMaterial, ProfilerScope::Bounce,
+                bounce, num_paths);
+            sortPathsByMaterial(num_paths);
+            prof.gpuStop(sortTimer);
+        }
 
         ShadingConfig shadingCfg = {
             traceDepth, hst_scene->state.rrMinBounces,
@@ -455,17 +561,38 @@ void pathtrace(uchar4* pbo, int iter)
         ShadingBufferView shadingBuffers = {
             g_dev.intersections,
             g_dev.paths,
-            pathActivityFlags
+            pathActivityFlags,
+            prof.collectCounters() ? g_dev.bounceCounters : nullptr,
+            prof.collectCounters() ? g_dev.materialHitCounts : nullptr,
+            g_dev.materialCount
         };
-        prof.gpuStart(ProfilerOp::ShadeMaterial);
+        const std::size_t shadeTimer = prof.gpuStart(
+            ProfilerOp::ShadeMaterial, ProfilerScope::Bounce,
+            bounce, num_paths);
         LAUNCH_KERNEL_AUTO(shadeMaterial, num_paths,
             iter, num_paths,
             shadingCfg,
             shadingScene,
             shadingBuffers);
-        prof.gpuStop(ProfilerOp::ShadeMaterial);
+        prof.gpuStop(shadeTimer);
 
-        bool allDead = compactActivePaths(num_paths);
+        if (prof.collectCounters())
+        {
+            DeviceBounceCounters counters{};
+            cudaMemcpy(&counters, g_dev.bounceCounters,
+                       sizeof(counters), cudaMemcpyDeviceToHost);
+            prof.recordBounceCounters(bounce, num_paths, counters);
+            if (g_dev.materialCount > 0)
+            {
+                std::vector<unsigned int> materialHits(g_dev.materialCount);
+                cudaMemcpy(materialHits.data(), g_dev.materialHitCounts,
+                           materialHits.size() * sizeof(unsigned int),
+                           cudaMemcpyDeviceToHost);
+                prof.recordMaterialHits(bounce, materialHits);
+            }
+        }
+
+        bool allDead = compactActivePaths(num_paths, bounce);
         done = allDead || (depth >= traceDepth);
 
         g_profiler().guiData().TracedDepth = depth;
@@ -476,8 +603,11 @@ void pathtrace(uchar4* pbo, int iter)
     // by gatherTerminatedPaths inside compactActivePaths.
     if (g_opts.compactMethod == CompactMethod::Off)
     {
+        const std::size_t finalGatherTimer = prof.gpuStart(
+            ProfilerOp::FinalGather, ProfilerScope::Frame, -1, pixelcount);
         LAUNCH_KERNEL_AUTO(gatherTerminatedPaths, pixelcount,
             pixelcount, g_dev.image, g_dev.paths);
+        prof.gpuStop(finalGatherTimer);
     }
 
     // ---- 4. Post-Processing → Display -----------------------------------
@@ -487,8 +617,8 @@ void pathtrace(uchar4* pbo, int iter)
                    g_opts.vignette,
                    pbo);
 
+    prof.gpuStop(frameGpuTimer);
     checkCUDAError("pathtrace");
 
     prof.endIteration();
-    updateGuiAfterFrame(prof);
 }

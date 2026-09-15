@@ -17,6 +17,44 @@ static __device__ __forceinline__ void writePathActivity(
     }
 }
 
+enum class PathOutcome : int
+{
+    AlreadyTerminated,
+    Miss,
+    EmissiveTermination,
+    InvalidSurfaceTermination,
+    RussianRouletteTermination,
+    MaxDepthTermination,
+    DebugTermination,
+    Survived
+};
+
+static __device__ __forceinline__ void recordPathOutcome(
+    DeviceBounceCounters* counters,
+    PathOutcome outcome)
+{
+    if (counters == nullptr) return;
+    switch (outcome)
+    {
+        case PathOutcome::AlreadyTerminated:
+            atomicAdd(&counters->alreadyTerminated, 1u); break;
+        case PathOutcome::Miss:
+            atomicAdd(&counters->misses, 1u); break;
+        case PathOutcome::EmissiveTermination:
+            atomicAdd(&counters->emissiveTerminations, 1u); break;
+        case PathOutcome::InvalidSurfaceTermination:
+            atomicAdd(&counters->invalidSurfaceTerminations, 1u); break;
+        case PathOutcome::RussianRouletteTermination:
+            atomicAdd(&counters->russianRouletteTerminations, 1u); break;
+        case PathOutcome::MaxDepthTermination:
+            atomicAdd(&counters->maxDepthTerminations, 1u); break;
+        case PathOutcome::DebugTermination:
+            atomicAdd(&counters->debugTerminations, 1u); break;
+        case PathOutcome::Survived:
+            atomicAdd(&counters->survivors, 1u); break;
+    }
+}
+
 __device__ bool russianRouletteTerminate(
     glm::vec3& throughput,
     int remainingBounces,
@@ -83,6 +121,7 @@ struct DirectLightingContext
     const Material& receiverMaterial;
     const ResolvedBsdf& receiverBsdf;
     const ShadingSceneView& scene;
+    DeviceBounceCounters* profilerCounters;
 };
 
 // A sampled emitter point in the exact area-measure representation produced by
@@ -121,6 +160,7 @@ struct SurfaceShadingContext
     const ShadingConfig& config;
     const ShadingSceneView& scene;
     RngState& rng;
+    DeviceBounceCounters* profilerCounters;
 };
 
 // Shared input for a BSDF-hit emitter contribution.  Both terminating JSON
@@ -155,7 +195,7 @@ static __device__ bool resolveShadeableIntersection(
 static __device__ void accumulateHitEmission(
     const EmissionHitContext& context);
 
-static __device__ void shadeSurfaceHit(
+static __device__ PathOutcome shadeSurfaceHit(
     const SurfaceShadingContext& context);
 
 __global__ void shadeMaterial(
@@ -168,6 +208,7 @@ __global__ void shadeMaterial(
     const HitRecord* __restrict__ hitRecords = buffers.hitRecords;
     PathSegment* __restrict__ pathSegments = buffers.pathSegments;
     unsigned char* __restrict__ pathActivityFlags = buffers.pathActivityFlags;
+    DeviceBounceCounters* __restrict__ bounceCounters = buffers.bounceCounters;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_paths)
     {
@@ -179,6 +220,7 @@ __global__ void shadeMaterial(
         // accumulate emission repeatedly, blowing out the image.
         if (pathSegment.remainingBounces <= 0)
         {
+            recordPathOutcome(bounceCounters, PathOutcome::AlreadyTerminated);
             writePathActivity(pathActivityFlags, idx, pathSegment);
             return;
         }
@@ -187,6 +229,15 @@ __global__ void shadeMaterial(
 
         if (hit.t > 0.0f && hit.triangleIndex >= 0)
         {
+            if (bounceCounters != nullptr)
+                atomicAdd(&bounceCounters->surfaceHits, 1u);
+            if (buffers.materialHitCounts != nullptr)
+            {
+                const int surfaceId = scene.triangleAttrs[hit.triangleIndex].surfaceId;
+                const int materialId = scene.surfaces[surfaceId].materialId;
+                if (materialId >= 0 && materialId < buffers.materialCount)
+                    atomicAdd(&buffers.materialHitCounts[materialId], 1u);
+            }
             int bounceNum = config.traceDepth - pathSegment.remainingBounces;
             RngState rngScatter = makeRngState(iter, pathSegment.pixelIndex,
                 bounceNum * MAX_DRAWS_PER_BOUNCE, config.rngMode);
@@ -196,19 +247,25 @@ __global__ void shadeMaterial(
             // Debug overlay: first-bounce hits on the focal plane in green.
             if (config.debug.showDOFOverlay && pathSegment.remainingBounces == config.traceDepth) {
                 handleDebugDOFOverlay(pathSegment, intersectionPoint, config);
+                recordPathOutcome(
+                    bounceCounters,
+                    pathSegment.remainingBounces <= 0
+                        ? PathOutcome::DebugTermination
+                        : PathOutcome::Survived);
                 writePathActivity(pathActivityFlags, idx, pathSegment);
                 return;
             }
 
             const SurfaceShadingContext surfaceShading{
-                pathSegment, hit, config, scene, rngScatter
+                pathSegment, hit, config, scene, rngScatter, bounceCounters
             };
-            shadeSurfaceHit(surfaceShading);
+            recordPathOutcome(bounceCounters, shadeSurfaceHit(surfaceShading));
         }
         else
         {
             // No intersection: background (black), no radiance contribution
             pathSegment.remainingBounces = 0;
+            recordPathOutcome(bounceCounters, PathOutcome::Miss);
         }
 
         writePathActivity(pathActivityFlags, idx, pathSegment);
@@ -272,7 +329,7 @@ static __device__ void accumulateHitEmission(
         context.pathSegment.throughput * Le * misWeight;
 }
 
-static __device__ void shadeSurfaceHit(
+static __device__ PathOutcome shadeSurfaceHit(
     const SurfaceShadingContext& context)
 {
     ShadeableIntersection intersection{};
@@ -280,7 +337,7 @@ static __device__ void shadeSurfaceHit(
     if (!resolveShadeableIntersection(context.hit, context.scene, intersection, material))
     {
         context.pathSegment.remainingBounces = 0;
-        return;
+        return PathOutcome::InvalidSurfaceTermination;
     }
 
     const EmissionHitContext emission{
@@ -292,7 +349,7 @@ static __device__ void shadeSurfaceHit(
         // JSON Emitting surfaces contribute and terminate.
         accumulateHitEmission(emission);
         context.pathSegment.remainingBounces = 0;
-        return;
+        return PathOutcome::EmissiveTermination;
     }
 
     // A glTF/OBJ emissive factor is additive auto-glow: it contributes first,
@@ -308,7 +365,8 @@ static __device__ void shadeSurfaceHit(
     if (context.config.directLighting)
     {
         const DirectLightingContext directLighting{
-            context.pathSegment, intersection, *material, resolvedBsdf, context.scene
+            context.pathSegment, intersection, *material, resolvedBsdf,
+            context.scene, context.profilerCounters
         };
         accumulateDirectLighting(directLighting, context.rng);
     }
@@ -325,7 +383,11 @@ static __device__ void shadeSurfaceHit(
         context.config.rrMinBounces, context.rng))
     {
         context.pathSegment.remainingBounces = 0;
+        return PathOutcome::RussianRouletteTermination;
     }
+    if (context.pathSegment.remainingBounces <= 0)
+        return PathOutcome::MaxDepthTermination;
+    return PathOutcome::Survived;
 }
 
 static __device__ float powerHeuristic(float a, float b)
@@ -432,9 +494,27 @@ static __device__ __forceinline__ bool directLightIsVisible(
     const float maxT = nextafterf(glm::dot(sample.point - shadowRay.origin, sample.wi), 0.0f);
     // Any-hit returns true when an occluder is found before the sampled
     // emitter.  A visible light sample is therefore the false case.
-    return maxT > RAY_EPSILON && !traverseBvhAnyHit(
-        shadowRay, context.scene.bvhNodes, context.scene.trianglePositions, maxT,
-        context.receiver.triangleIndex);
+    BvhTraversalStats stats{};
+    bool occluded = false;
+    if (maxT > RAY_EPSILON)
+    {
+        occluded = context.profilerCounters != nullptr
+            ? traverseBvhAnyHitProfiled(
+                shadowRay, context.scene.bvhNodes, context.scene.trianglePositions,
+                maxT, context.receiver.triangleIndex, stats)
+            : traverseBvhAnyHit(
+                shadowRay, context.scene.bvhNodes, context.scene.trianglePositions,
+                maxT, context.receiver.triangleIndex);
+    }
+    const bool visible = maxT > RAY_EPSILON && !occluded;
+    if (context.profilerCounters != nullptr)
+    {
+        atomicAdd(&context.profilerCounters->shadowBvhNodeTests,
+                  static_cast<unsigned long long>(stats.nodeTests));
+        atomicAdd(&context.profilerCounters->shadowBvhTriangleTests,
+                  static_cast<unsigned long long>(stats.triangleTests));
+    }
+    return visible;
 }
 
 // This is the sole area-to-solid-angle conversion and MIS accumulation site
@@ -472,13 +552,25 @@ static __device__ void accumulateDirectLighting(
     const int lightIndex = sampleLightTriangle(context.scene.lights,
         rng.next(HaltonDim::LightSelection));
     if (lightIndex < 0) return;
+    if (context.profilerCounters != nullptr)
+        atomicAdd(&context.profilerCounters->lightSelections, 1u);
 
     DirectLightSample sample{};
     if (!sampleDirectLight(context, lightIndex, rng, sample)) return;
 
     DirectLightEvaluation evaluation{};
     if (!evaluateDirectLight(context, sample, evaluation)) return;
-    if (!directLightIsVisible(context, sample)) return;
+    if (context.profilerCounters != nullptr)
+        atomicAdd(&context.profilerCounters->validLightSamples, 1u);
+    const bool visible = directLightIsVisible(context, sample);
+    if (context.profilerCounters != nullptr)
+    {
+        atomicAdd(&context.profilerCounters->shadowRays, 1u);
+        atomicAdd(visible
+            ? &context.profilerCounters->visibleLightSamples
+            : &context.profilerCounters->occludedLightSamples, 1u);
+    }
+    if (!visible) return;
     accumulateDirectLightContribution(context, sample, evaluation);
 }
 

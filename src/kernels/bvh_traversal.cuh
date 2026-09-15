@@ -17,6 +17,7 @@
 
 #include "sceneStructs.h"
 #include "bvh/bvh.h"                       // BvhNode, BvhHit, traverseBvhClosest
+#include "profiler/profiler_counters.h"
 
 /**
  * Compute the nearest ray–scene intersection for every active path using
@@ -34,4 +35,5 @@ __global__ void bvhTraverse(
     PathSegment* __restrict__ pathSegments,
     HitRecord* __restrict__ intersections,
     const TrianglePos* __restrict__ deviceTrianglePositions,
-    BvhNode* __restrict__ deviceBvhNodes);
+    BvhNode* __restrict__ deviceBvhNodes,
+    DeviceBounceCounters* profilerCounters);

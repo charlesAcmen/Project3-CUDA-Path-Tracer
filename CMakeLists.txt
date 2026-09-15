@@ -87,6 +87,7 @@ set(headers
     src/glslUtility.hpp
     src/pathtrace.h
     src/profiler/profiler.h
+    src/profiler/profiler_counters.h
     src/rng/rng.h
     src/app/render_ui.h
     src/scene/loader_internal.h

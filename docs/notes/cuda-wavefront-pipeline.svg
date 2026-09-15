@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="840" viewBox="0 0 1600 840" role="img" aria-labelledby="title desc">
+  <title id="title">CUDA Wavefront 路径追踪单次迭代管线</title>
+  <desc id="desc">每个像素生成主光线；在 bounce 循环中进行 BVH 遍历、着色、BSDF 散射和可选路径压缩；终止路径累加进 HDR 图像，再进行显示后处理。</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10091e"/>
+      <stop offset="1" stop-color="#24103e"/>
+    </linearGradient>
+    <linearGradient id="loopBorder" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff65bc"/>
+      <stop offset="1" stop-color="#9677ff"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#dcd5ff"/>
+    </marker>
+    <style>
+      .title { font: 700 40px 'Microsoft YaHei', 'Noto Sans CJK SC', 'Segoe UI', sans-serif; fill: #ffffff; }
+      .subtitle { font: 400 20px 'Microsoft YaHei', 'Noto Sans CJK SC', 'Segoe UI', sans-serif; fill: #d3cae9; }
+      .loopTitle { font: 700 22px 'Microsoft YaHei', 'Noto Sans CJK SC', 'Segoe UI', sans-serif; fill: #ffc7e7; letter-spacing: 1px; }
+      .label { font: 700 25px 'Microsoft YaHei', 'Noto Sans CJK SC', 'Segoe UI', sans-serif; fill: #ffffff; }
+      .detail { font: 400 17px 'Microsoft YaHei', 'Noto Sans CJK SC', 'Segoe UI', sans-serif; fill: #d7d0ec; }
+      .note { font: 400 16px 'Microsoft YaHei', 'Noto Sans CJK SC', 'Segoe UI', sans-serif; fill: #b8add3; }
+      .card { fill: #291844; stroke: #9f8af1; stroke-width: 2; }
+      .accentCard { fill: #35174f; stroke: #ff7ac8; stroke-width: 2; }
+      .line { stroke: #dcd5ff; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+      .loopLine { stroke: #bd9eff; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="840" rx="32" fill="url(#background)"/>
+  <text x="70" y="78" class="title">CUDA Wavefront 路径追踪：一次迭代如何推进</text>
+  <text x="70" y="116" class="subtitle">每个线程推进一条路径状态；跨 iteration 保留的只有 HDR 累加图像。</text>
+
+  <rect x="70" y="285" width="230" height="170" rx="20" class="accentCard"/>
+  <text x="185" y="347" text-anchor="middle" class="label">生成主光线</text>
+  <text x="185" y="381" text-anchor="middle" class="detail">相机 · AA 抖动</text>
+  <text x="185" y="409" text-anchor="middle" class="detail">初始化 PathSegment</text>
+
+  <rect x="365" y="190" width="820" height="390" rx="28" fill="#1a102e" stroke="url(#loopBorder)" stroke-width="3"/>
+  <text x="410" y="238" class="loopTitle">BOUNCE 循环（至多 traceDepth 次）</text>
+
+  <rect x="410" y="292" width="165" height="165" rx="18" class="card"/>
+  <text x="492" y="350" text-anchor="middle" class="label">BVH 遍历</text>
+  <text x="492" y="384" text-anchor="middle" class="detail">最近三角形命中</text>
+  <text x="492" y="412" text-anchor="middle" class="detail">或未命中</text>
+
+  <rect x="625" y="292" width="165" height="165" rx="18" class="card"/>
+  <text x="707" y="350" text-anchor="middle" class="label">表面着色</text>
+  <text x="707" y="384" text-anchor="middle" class="detail">法线 · 材质</text>
+  <text x="707" y="412" text-anchor="middle" class="detail">纹理属性</text>
+
+  <rect x="840" y="292" width="165" height="165" rx="18" class="card"/>
+  <text x="922" y="350" text-anchor="middle" class="label">BSDF 散射</text>
+  <text x="922" y="384" text-anchor="middle" class="detail">反射 · 折射</text>
+  <text x="922" y="412" text-anchor="middle" class="detail">俄罗斯轮盘赌</text>
+
+  <rect x="1055" y="292" width="90" height="165" rx="18" class="card"/>
+  <text x="1100" y="344" text-anchor="middle" class="label">路径</text>
+  <text x="1100" y="377" text-anchor="middle" class="label">压缩</text>
+  <text x="1100" y="411" text-anchor="middle" class="note">可选</text>
+
+  <path d="M300 370 H410" class="line"/>
+  <path d="M575 375 H625" class="line"/>
+  <path d="M790 375 H840" class="line"/>
+  <path d="M1005 375 H1055" class="line"/>
+  <path d="M1100 457 V510 H492 V457" class="loopLine"/>
+  <text x="798" y="535" text-anchor="middle" class="note">存活路径进入下一次 bounce</text>
+
+  <path d="M1185 375 H1240" class="line"/>
+  <rect x="1240" y="285" width="180" height="170" rx="20" class="card"/>
+  <text x="1330" y="347" text-anchor="middle" class="label">终止路径结算</text>
+  <text x="1330" y="381" text-anchor="middle" class="detail">按 pixelIndex</text>
+  <text x="1330" y="409" text-anchor="middle" class="detail">累加辐射度</text>
+
+  <path d="M1330 455 V540" class="line"/>
+  <rect x="1240" y="560" width="180" height="145" rx="20" class="accentCard"/>
+  <text x="1330" y="617" text-anchor="middle" class="label">HDR 累加图像</text>
+  <text x="1330" y="651" text-anchor="middle" class="detail">跨 iteration 保存</text>
+  <text x="1330" y="679" text-anchor="middle" class="detail">样本和</text>
+
+  <path d="M1420 632 H1470" class="line"/>
+  <rect x="1470" y="560" width="95" height="145" rx="20" class="card"/>
+  <text x="1517" y="612" text-anchor="middle" class="label">显示</text>
+  <text x="1517" y="645" text-anchor="middle" class="detail">平均</text>
+  <text x="1517" y="673" text-anchor="middle" class="detail">色调映射</text>
+
+  <line x1="70" y1="750" x2="1530" y2="750" stroke="#5d4b82" stroke-width="2"/>
+  <circle cx="92" cy="790" r="10" fill="#ff70c7"/>
+  <text x="120" y="797" class="subtitle">终止路径在压缩开启时逐 bounce 结算；关闭时在循环结束后统一结算。</text>
+</svg>

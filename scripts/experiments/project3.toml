@@ -1,0 +1,85 @@
+[runner]
+repetitions = 3
+warmup = 16
+seed = 5650
+timeout_seconds = 900
+output_dir = "profiler_output"
+roles = ["throughput", "detail", "counter"]
+
+[defaults]
+compact = 3
+sort = false
+rng = 0
+direct_lighting = true
+rr_min_bounces = 3
+
+[defaults.postprocess]
+bloom = { enabled = false, threshold = 1.0, intensity = 0.5, radius = 10, sigma = 5.0 }
+chromaticAberration = { enabled = false, intensity = 0.003 }
+vignette = { enabled = false, intensity = 0.5, exponent = 2.0 }
+
+[[experiment]]
+id = "baseline"
+label = "No compaction"
+scene = "../../scenes/cornell_box.json"
+compact = 0
+baseline = true
+
+[[experiment]]
+id = "global_scan"
+label = "Global scan"
+scene = "../../scenes/cornell_box.json"
+compact = 1
+compare_to = "baseline"
+
+[[experiment]]
+id = "thrust"
+label = "Thrust copy_if"
+scene = "../../scenes/cornell_box.json"
+compact = 2
+compare_to = "baseline"
+
+[[experiment]]
+id = "shared_scan"
+label = "Shared-memory scan"
+scene = "../../scenes/cornell_box.json"
+compact = 3
+compare_to = "baseline"
+
+[[experiment]]
+id = "shared_scan_sorted"
+label = "Shared scan + material sort"
+scene = "../../scenes/cornell_box.json"
+compact = 3
+sort = true
+compare_to = "shared_scan"
+
+[[experiment]]
+id = "halton"
+label = "Shared scan + Halton"
+scene = "../../scenes/cornell_box.json"
+compact = 3
+rng = 1
+compare_to = "shared_scan"
+claim_class = "sampling"
+headline = false
+
+[[experiment]]
+id = "no_nee"
+label = "Shared scan, no NEE/MIS"
+scene = "../../scenes/cornell_box.json"
+compact = 3
+direct_lighting = false
+compare_to = "shared_scan"
+claim_class = "estimator"
+headline = false
+
+[[experiment]]
+id = "no_rr"
+label = "Shared scan, RR disabled"
+scene = "../../scenes/cornell_box.json"
+compact = 3
+rr_min_bounces = 64
+compare_to = "shared_scan"
+claim_class = "estimator"
+headline = false

@@ -40,6 +40,10 @@ namespace StreamCompaction {
          */
         void initCompactionWorkspace(int maxElements);
 
+        // Exact bytes held by the renderer-owned scan buffer and hierarchical
+        // scratch allocation. CUDA/Thrust allocator internals are not included.
+        size_t compactionWorkspaceBytes();
+
         /**
          * Releases the compaction workspace allocated by initCompactionWorkspace().
          */

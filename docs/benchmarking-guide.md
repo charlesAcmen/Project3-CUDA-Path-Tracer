@@ -1,421 +1,237 @@
-# Benchmarking & Experiments Guide
+# Benchmarking and visualization guide
 
-## Overview
+The profiling design separates three questions:
 
-The measurement framework instruments user-written GPU kernels and host-side
-operations with **cudaEvent** (GPU) and **std::chrono** (CPU) timers.  Results
-are written as CSV files to `profiler_output/<scene>_<timestamp>/` and can be
-plotted with the companion Python scripts.  When you use
-`scripts/benchmark_runner.py`, each full benchmark batch is archived under
-`profiler_output/runs/<run-id>/` so old runs do not get overwritten.
+1. **Did the renderer get faster?** Use repeated `throughput` processes and
+   end-to-end frame time.
+2. **Where did time move?** Use `detail` processes and per-iteration stage
+   contribution.
+3. **Why did work change?** Use `counter` processes for path termination, BVH
+   tests, and NEE visibility.
 
-Only user-authored or user-modified code and the post-processing pipeline are
-measured.  `ComputeIntersections` is measured — it now times the user-written
-BVH closest-hit traversal kernel `bvhTraverse` (single world-space tree, no
-per-mesh loop).  Primary ray generation (`generateRayFromCamera`) is the only
-starter-code kernel excluded from per-operation timing, though it is included
-in the frame-level wall-clock time recorded by `beginFrame` / `endFrame`.
+Detailed CUDA events and counter atomics are diagnostic overhead. Their frame
+times are never included in the headline speedup chart.
 
-## Quick Start
+Python 3.11+, NumPy, and Matplotlib are required for the runner/report suite:
 
-```
-# Build
-cd build && cmake --build . --config Release
-
-# Normal render (no measurement overhead)
-cis565_path_tracer.exe ../scenes/cornell.json
-
-# Benchmark — CSVs appear in profiler_output/
-cis565_path_tracer.exe ../scenes/cornell.json --benchmark
-
-# Full automation (runs all configs, generates all plots)
-python ../scripts/benchmark_runner.py bin/Release/cis565_path_tracer.exe ../scenes/cornell.json
+```powershell
+python -m pip install -r scripts/requirements.txt
 ```
 
----
+## One-command single-run analysis
 
-## Command-Line Flags
+After any profiler-enabled render, pass either its directory or just its run
+name to the public analysis entrypoint:
 
-| Flag | Values | Default | Effect |
-|------|--------|---------|--------|
-| `--benchmark` | (none) | off | Enables profiler. CSVs are written on shutdown to `profiler_output/<scene>_<timestamp>/`. |
-| `--compact=N` | `0`, `1`, `2`, `3` | `3` | **Stream compaction method.** `0`=disabled, `1`=global-mem scan, `2`=Thrust `copy_if`, `3`=shared-mem scan. Other integers are accepted by the parser, but only these values have defined behavior. |
-| `--sort=N` | `0`, `1` | `0` | **Material sorting.** `0`=disabled, `1`=enabled. Nonzero values are treated as enabled. |
-| `--rng=N` | `0`, `1` | `0` | `0`=LCG, `1`=scrambled Halton. |
-| `--direct-lighting=N` | `0`, `1` | `1` | `0` disables NEE and its MIS direct-light estimate, leaving BSDF continuation sampling intact. Use only for controlled comparisons. |
-| `--warmup=N` | any int | `3` | Warmup iterations excluded from summary statistics. |
-| `--save` | (none) | off | Saves the rendered image when the app exits. Can be used with or without `--benchmark`. |
-| `--save-at=N1,N2,...` | list of ints | off | Saves checkpoint images at the given iteration counts. |
-| `--config=PATH` | path | `config.local.json` | Load runtime config from a JSON file (CLI flags still win). |
-
-Flags are order-independent.  `--benchmark` must be present for CSV output;
-`--warmup` only affects the profiler summary statistics (`--compact`, `--sort`,
-`--rng` change rendering regardless of profiling).  Without
-`--benchmark`, profiling overhead is zero — all `gpuStart` / `gpuStop` /
-`cpuStart` / `cpuStop` calls are no-ops.
-
-**Note:** `--save` is independent of `--benchmark` and writes the final image before shutdown.
-
-### Examples
-
-```
-# Baseline: compaction ON (Thrust), sorting ON, no debug output
-cis565_path_tracer.exe ../scenes/cornell.json --benchmark
-
-# Compaction disabled, everything else default
-cis565_path_tracer.exe ../scenes/cornell.json --benchmark --compact=0
-
-# Both compaction and sorting disabled
-cis565_path_tracer.exe ../scenes/cornell.json --benchmark --compact=0 --sort=0
-
-# Run with a short warmup for quick comparisons
-cis565_path_tracer.exe ../scenes/cornell.json --benchmark --warmup=1
-
+```powershell
+python scripts/analyze_run.py stanford_dragon_refractive_20260911_035855Z
 ```
 
----
+The command validates schema v2, reads the profiler role from `run.json`,
+creates `<run>/analysis/`, generates every figure justified by the available
+data, and writes `analysis.md`. A throughput run gets latency/throughput output,
+a detail run gets stage/bounce/setup attribution, and a counter run gets path,
+termination, BVH/NEE, and material-work figures. Memory is included whenever
+the run records allocation estimates. Counter timing is deliberately excluded
+from performance figures. If camera or setting changes created multiple
+measured accumulation epochs, the command creates one subdirectory per epoch
+and a top-level index instead of mixing incompatible samples. `--epoch N` can
+restrict analysis to one epoch when desired.
 
-## Control Variables
+The individual `plot_*.py` programs remain available for advanced composition,
+but users do not need to invoke them for ordinary single-run analysis.
 
-Two independent toggles define the experiment space:
+## One-command experiment matrix
 
-### Stream Compaction (`--compact=N`)
+Build the Release executable first, then run from the repository root:
 
-Removes terminated paths from the active pool between bounces via
-`gatherTerminatedPaths` + `compactActivePaths`.  Because path count shrinks
-each bounce, **all downstream operations benefit** — most notably
-`sortPathsByMaterial` (sorting fewer elements) and `ComputeIntersections`
-(fewer ray-geometry tests — the BVH traversal).  `shadeMaterial`
-shows a smaller benefit because terminated paths early-return at the top of
-the kernel anyway.
-
-The net benefit is the sum of: reduced `sortPathsByMaterial` + reduced
-`shadeMaterial` − `gatherTerminatedPaths` overhead − `compactPaths` overhead.
-The `ComputeIntersections` saving is additional.
-
-When compaction is **disabled** (`--compact=0`), `compactPaths` is not
-launched and `gatherTerminatedPaths` only runs as a single untimed tail call
-after the bounce loop (to bank the remaining live paths' colors) — both are
-absent from the CSV output (not present as zero-valued rows).  Paths terminate
-via the `remainingBounces` guard in `shadeMaterial` and are collected by that
-tail `gatherTerminatedPaths` call.
-
-| Value | Meaning |
-|-------|---------|
-| `0` | **Disabled.** Terminated paths are guarded by `remainingBounces` in `shadeMaterial`. No compaction overhead. |
-| `1` | Custom work-efficient scan-based compaction (from Project 2). |
-| `2` | **Thrust `copy_if`** — reference implementation used in benchmarks. |
-| `3` | Shared-memory multi-block scan-based compaction (GPU Gems 3, Ch. 39). **Default.** |
-
-### Material Sorting (`--sort=N`)
-
-Permutes `dev_paths` and `dev_intersections` before `shadeMaterial` so that
-paths hitting the same material become contiguous.  This reduces warp divergence
-(the emissive / diffuse / specular branch in `shadeMaterial`) and improves
-memory coalescing for material lookups.
-
-| Value | Meaning |
-|-------|---------|
-| `0` | **Disabled.** `sortPathsByMaterial` returns immediately. |
-| `1` | **Enabled** (default). Thrust radix sort + double gather. |
-
-### Scenes
-
-| Scene | Type | Paths escape? |
-|-------|------|---------------|
-| `cornell.json` | Open Cornell Box (5 walls + diffuse sphere) | Yes — through the missing front wall |
-| `cornellRefra.json` | Open Cornell Box + glass sphere | Yes — plus refraction/reflection chains keep some paths alive longer |
-| `cornellGlossy.json` | Open Cornell Box + mirror/glossy spheres | Yes — specular chains keep many paths alive for deep bounces |
-
-> **Note:** the old `cornell_closed.json` (6 walls, camera inside) was removed
-> from the repo; there is currently no closed scene.  The path-survival
-> contrast now comes from *scene complexity* — simple diffuse (`cornell.json`)
-> vs. specular/refractive (`cornellRefra.json`, `cornellGlossy.json`), where
-> fewer paths terminate each bounce.
-
-**Hypothesis:** Compaction removes *more* paths per bounce in a scene where
-paths terminate early (escape through the open front wall → miss) than in a
-scene where specular/refractive chains keep paths bouncing.  Therefore the
-performance benefit of compaction should be larger for simple diffuse scenes.
-
----
-
-## Experiment Recipes
-
-### Recipe A — Compaction ON vs OFF
-
-**Purpose:** Quantify stream compaction benefit.  Answer: "How many paths does
-compaction remove per bounce, and what is the benefit?"
-
-**Commands:**
-```
-:: With compaction (baseline)
-cis565_path_tracer.exe ../scenes/cornell.json --benchmark --compact=2
-
-:: Without compaction
-cis565_path_tracer.exe ../scenes/cornell.json --benchmark --compact=0
+```powershell
+python scripts/benchmark_runner.py build/bin/Release/cis565_path_tracer.exe --spec scripts/experiments/project3.toml
 ```
 
-**Where the benefit shows up (not just shadeMaterial):**
+The checked-in TOML matrix pins compaction, sorting, RNG, NEE, RR, save
+checkpoints, post-processing, profiler role, and output root. It includes the
+no-compaction baseline, all three compaction implementations, material sorting,
+scrambled Halton, NEE-off, and RR-off variants. Jobs are shuffled independently
+within each process-repetition round to reduce fixed-order thermal bias.
+Report figures restore the experiment order declared in the TOML after the
+randomized execution finishes.
 
-Compaction removes terminated paths after each bounce, so **all** downstream
-operations process fewer elements. The benefit is spread across:
+Validate the matrix without rendering:
 
-| Operation | Measured? | Why it benefits |
-|-----------|-----------|-----------------|
-| `ComputeIntersections` | ✅ Yes (BVH traversal) | Fewer ray-geometry tests — likely the largest absolute saving |
-| `sortPathsByMaterial` | ✅ Yes | Sorting fewer elements — **largest measured benefit** |
-| `shadeMaterial` | ✅ Yes | Fewer threads launched; terminated paths early-return anyway, so the per-path saving is modest |
-
-The cost of compaction is:
-| Operation | What it does |
-|-----------|-------------|
-| `gatherTerminatedPaths` | Banks dead-path colors before they are discarded |
-| `compactPaths` | Thrust `copy_if` (or custom scan) to squeeze out terminated entries |
-
-**Net benefit** = reduced `sortPathsByMaterial` + reduced `shadeMaterial` − `gatherTerminatedPaths` − `compactPaths`.  The `ComputeIntersections` (BVH traversal) saving comes on top.
-
-**When `--compact=0`:** `gatherTerminatedPaths` (per-bounce) and `compactPaths`
-are **absent from the CSV entirely** (not zero — the kernels are never
-launched inside the bounce loop). Path colors are banked by a single untimed
-tail `gatherTerminatedPaths` call after the loop. All `pixelcount` paths stay
-alive through every bounce, so `sortPathsByMaterial` and `shadeMaterial`
-always process the full element count.
-
-**Generate plots:**
-```
-python scripts/plot_comparison.py profiler_output/cornell_<ts>_*/timing.csv profiler_output/cornell_<ts2>_*/timing.csv --labels "Compaction ON" "Compaction OFF"
+```powershell
+python scripts/benchmark_runner.py build/bin/Release/cis565_path_tracer.exe --spec scripts/experiments/project3.toml --dry-run
 ```
 
-If you want a durable, code-versioned archive instead of ad-hoc plots, prefer:
+Useful runner overrides are `--repetitions`, `--warmup`, `--seed`, `--timeout`,
+`--output-dir`, and `--keep-going`. A successful batch produces
+`profiler_output/benchmark_<UTC>/report.md`, figures, complete logs, generated
+configs, and a JSON manifest with Git/executable/spec hashes.
+Each job also records the exact scene JSON hash.
 
-```
-python scripts/benchmark_runner.py build/bin/Release/cis565_path_tracer.exe scenes/cornell.json
-```
+For a quick iteration, copy the TOML and restrict experiments or roles; do not
+edit a scene's production sample count just for an undocumented benchmark.
 
-That will leave the results in `profiler_output/runs/<run-id>/`, including the per-experiment PNGs and the comparison plots.
+## Direct executable controls
 
----
+| Flag | Meaning |
+|---|---|
+| `--benchmark` | enable schema-v2 profiling |
+| `--profile-mode=throughput\|detail` | whole-pipeline only or granular stages |
+| `--profile-counters=0\|1` | exact work counters; use only for counter runs |
+| `--warmup=N` | excludes 1-based iterations `1..N` everywhere |
+| `--profiler-output=PATH` | result root |
+| `--profile-tag=NAME` | stable batch tag in the directory name |
+| `--compact=0..3` | off, global scan, Thrust, shared-memory scan |
+| `--sort=0\|1` | material sorting |
+| `--rng=0\|1` | LCG or scrambled Halton |
+| `--direct-lighting=0\|1` | NEE/MIS toggle |
+| `--rr-min-bounces=N` | guaranteed bounces; `N >= traceDepth` disables RR |
 
-### Recipe B — Sorting ON vs OFF
+Configuration priority remains CLI, selected `--config`, local config, code
+defaults. The runner uses a generated selected config with every experimental
+variable explicit, so a developer's `config.local.json` does not silently
+change the matrix.
 
-**Purpose:** Quantify material sorting benefit.  Answer: "Does reduced warp
-divergence in `shadeMaterial` outweigh the Thrust sort overhead?"
+## Timing boundaries
 
-**Commands:**
-```
-:: With sorting
-cis565_path_tracer.exe ../scenes/cornell.json --benchmark --sort=1
+`end_to_end_ms` begins before CUDA-GL PBO map and ends after the required device
+synchronization and PBO unmap. It includes the work the interactive renderer
+must complete for one accumulation iteration. It excludes PNG readback,
+encoding, checkpoint I/O, GUI draw, and swap/present.
 
-:: Without sorting (default)
-cis565_path_tracer.exe ../scenes/cornell.json --benchmark --sort=0
-```
+`gpu_pipeline_ms` is a CUDA event around camera-ray generation, all bounce work,
+accumulation, post-processing, and PBO write. Detail mode additionally records:
 
-**What to compare:**
-- `shadeMaterial` time: should be lower with sorting (reduced warp divergence)
-- `SortByMaterial` time: should be ~0 when `--sort=0`
-- Total per-bounce time: `shadeMaterial + SortByMaterial` — is this sum lower with sorting?
+- setup: core/pipeline allocation, scene BVH and light-table construction,
+  scene/texture upload;
+- frame: camera rays, final gather, bloom stages, display preparation, tonemap,
+  chromatic aberration, vignette, copies, PBO write;
+- bounce: closest-hit traversal, optional material sort, shading, terminated
+  path gathering, and compaction.
 
-**Generate plot:**
-```
-python scripts/plot_comparison.py profiler_output/cornell_<ts1>_*/timing.csv profiler_output/cornell_<ts2>_*/timing.csv --labels "With Sorting" "Without Sorting"
-```
+GPU ranges are resolved after the application's existing completion point. The
+profiler does not synchronize after every operation. Stage stacks include GPU
+ranges only; their `UninstrumentedGpuSpan` is the enclosing GPU timeline minus
+the named ranges, so launch gaps or work without a child marker remain visible
+without being falsely assigned to a kernel. CPU startup is shown separately,
+so host wait time is never added on top of the GPU work it waited for.
 
----
+## Correct aggregation
 
-### Recipe C — Scene Complexity (Diffuse vs Specular/Refractive)
+An operation may run once per frame or once per surviving bounce. Its
+contribution is therefore:
 
-**Purpose:** Understand how scene geometry affects compaction efficiency.
-Answer: "Does compaction help more in a simple diffuse scene or one with
-specular/refractive chains that keep paths alive?"
-
-**Commands:**
-```
-:: Simple diffuse scene
-cis565_path_tracer.exe ../scenes/cornell.json --benchmark
-
-:: Glass scene (refraction keeps paths bouncing)
-cis565_path_tracer.exe ../scenes/cornellRefra.json --benchmark
-```
-
-**What to compare:**
-- Path survival curves: the glass scene should have more survivors at deep bounces
-- `gatherTerminatedPaths` time: should be higher in the diffuse scene (more paths terminate each bounce)
-- `shadeMaterial` time: should be lower in the diffuse scene in later bounces (fewer active paths)
-
-**Generate plot:**
-```
-python scripts/plot_comparison.py profiler_output/cornell_<ts1>_*/timing.csv profiler_output/cornellRefra_<ts2>_*/timing.csv --labels "Diffuse (Cornell)" "Glass (CornellRefra)"
-```
-
----
-
-### Recipe D — Full Matrix (Automated)
-
-**Purpose:** Run all configurations and generate every comparison plot.
-One command, hands-off.
-
-**Command:**
-```
-python scripts/benchmark_runner.py build/bin/Release/cis565_path_tracer.exe scenes/cornell.json
+```text
+stage_ms(iteration, operation) = sum(time_ms of every call in that iteration)
 ```
 
-**Configuration matrix run by the runner** (default `--configs quick` runs the
-first 3; `--configs all` adds the "neither" row):
+Only after that sum do scripts calculate cross-frame means or process-repeat
+confidence intervals. A direct unweighted mean across all bounce calls answers
+only “average invocation latency”; it overweights shallow frames and cannot
+explain total optimization benefit. The old `plot_comparison.py` was removed.
 
-| # | Compact | Sort | Label |
-|---|---------|------|-------|
-| 1 | 3 | 1 | baseline (shared-mem scan) |
-| 2 | 0 | 1 | no compaction |
-| 3 | 3 | 0 | no sorting |
-| 4 | 0 | 0 | neither (`--configs all`) |
+Missing deep bounces count as zero contribution for per-rendered-iteration
+bounce plots. Warm-up rows are filtered centrally using the recorded
+`is_warmup` bit. A run containing multiple measured accumulation epochs is
+rejected by default instead of merging camera/setting resets silently.
 
-The same matrix is repeated for a second scene if you pass `--closed-scene <scene>` and the file exists. The default `--closed-scene scenes/cornell_closed.json` no longer exists, so the runner prints a NOTE and skips it — pass e.g. `--closed-scene scenes/cornellRefra.json` to get the "open vs closed" pair.
+## Canonical plots
 
-**Plots generated** (inside `runs/<run-id>/`):
+`make_report.py` generates the normal batch report. Individual tools accept
+schema-v2 run directories, not loose CSV paths:
 
-| Plot | Comparison |
-|------|------------|
-| `<experiment>/kernel_breakdown.png` | Per-bounce kernel breakdown, one per experiment |
-| `<experiment>/path_survival.png` | Path survival curve, one per experiment |
-| `comparisons/compare_compact_<type>.png` | Compaction ON vs OFF |
-| `comparisons/compare_sort_<type>.png` | Sorting ON vs OFF |
-| `comparisons/compare_open_vs_closed.png` | Primary vs second scene, both with compaction |
-| `comparisons/fps_open.png` | FPS across all configs, primary scene |
-| `comparisons/fps_open_vs_closed.png` | FPS comparison between the two scenes |
+```powershell
+python scripts/plot_frame_time.py RUN_DIRS... -o frame_time.png
+python scripts/plot_stage_breakdown.py DETAIL_RUN_DIRS... -o stages.png
+python scripts/plot_stage_delta.py BASELINE_DETAIL VARIANT_DETAILS... -o delta.png
+python scripts/plot_bounce_breakdown.py DETAIL_RUN_DIRS... -o bounce.png
+python scripts/plot_path_survival.py COUNTER_RUN_DIRS... -o survival.png --termination-output termination.png --work-output work.png
+python scripts/plot_setup_breakdown.py DETAIL_RUN_DIRS... -o setup.png
+python scripts/plot_material_mix.py COUNTER_RUN_DIRS... -o material_mix.png
+python scripts/plot_memory.py RUN_DIRS... -o memory.png
+python scripts/plot_scaling.py THROUGHPUT_RUN_DIRS... -x triangles -o scaling.png
+python scripts/plot_optimization_history.py THROUGHPUT_RUN_DIRS... --baseline baseline -o history.png
+```
 
----
+The figures answer distinct questions:
 
-## CSV Output Format
+- frame time: repeated-process end-to-end/GPU-span latency, p95, and throughput;
+- stage breakdown/delta: total stage contribution per rendered iteration;
+- uninstrumented stage span: parent timer minus named, non-overlapping ranges;
+- bounce breakdown: where deeper path work accumulates;
+- path survival/termination: true live paths versus slots processed;
+- work diagnostics: closest/shadow BVH tests and visible/occluded light samples;
+- material mix: hit share and effective material diversity per bounce;
+- memory: renderer-owned device allocation categories from compile-time layouts;
+- setup: one-time SAH BVH, upload, and allocation cost;
+- scaling: pixels/triangles/texture pixels versus latency;
+- optimization history: end-to-end speedup relative to a declared baseline.
 
-Three files are written to `profiler_output/<scene>_<timestamp>/` on
-the final iteration.  If you use `benchmark_runner.py`, the whole run is then
-archived under `profiler_output/runs/<run-id>/experiments/` together with the
-PNG plots.
+## Quality and external validation
 
-### `timing.csv`
+Timing alone cannot justify an estimator change. Use same-camera, same
+post-processing PNGs and a high-SPP reference:
 
-One row per measured operation per bounce per iteration.
+```powershell
+python scripts/plot_quality.py reference.png "LCG=lcg.png@8.4" "Halton=halton.png@8.6" -o quality.png
+```
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `iteration` | int | Frame number (0-based) |
-| `bounce_depth` | int | Bounce index within this iteration |
-| `operation` | string | `ShadeMaterial`, `GatherTerminatedPaths`, `SortByMaterial`, `CompactPaths`, `ComputeIntersections`, `BloomPass`, `PostProcessTail` |
-| `time_ms` | float | Elapsed time in milliseconds |
-| `num_active_paths` | int | Active path count at start of this bounce |
-| `compact_method` | int | `0`, `1`, `2`, or `3` |
-| `sort_by_material` | int | `0` or `1` |
+This reports display-space RGB RMSE/PSNR and, when `@milliseconds` is supplied,
+a speed-quality plot. It is not linear-HDR error. Keep NEE/RR/RNG image quality
+claims separate from pure implementation speedups.
 
-### `path_survival.csv`
+For a second timing source, export `cuda_gpu_kern_sum` from Nsight Systems and
+plot it with:
 
-One row per bounce per iteration.
+```powershell
+python scripts/plot_nsight.py cuda_gpu_kern_sum.csv -o nsight_kernels.png
+```
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `iteration` | int | Frame number |
-| `bounce_depth` | int | Bounce index |
-| `num_active_paths` | int | Active paths at the start of this bounce |
-| `compact_method` | int | `0`, `1`, `2`, or `3` |
-| `sort_by_material` | int | `0` or `1` |
+Use Nsight Compute separately for occupancy, register pressure, branch
+efficiency, and memory behavior. Those tools validate microarchitecture; they
+do not replace repeated application-level end-to-end timing.
 
-### `summary.csv`
+## Extending profiling after a feature or refactor
 
-Per-operation aggregate statistics (warmup iterations excluded).
+Use this contract so source changes and plots cannot silently drift apart:
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `operation` | string | Operation name |
-| `mean_ms` | float | Mean time across all bounces and non-warmup iterations |
-| `std_ms` | float | Standard deviation |
-| `min_ms` | float | Minimum observed time |
-| `max_ms` | float | Maximum observed time |
-| `num_samples` | int | Number of measurements (excluding warmup) |
+1. Add or rename the non-overlapping C++ range in `ProfilerOp` and
+   `profilerOpName`. Generic stage plots discover operations from `timing.csv`;
+   do not add another hard-coded operation list to a plot.
+2. Put the range in the narrowest correct scope (`setup`, `frame`, or
+   `bounce`) and record its work-item count. Keep an enclosing parent timer so
+   uninstrumented time remains auditable.
+3. If the feature changes work rather than only time, add a counter-mode field
+   plus a loader invariant. Counter atomics/readbacks must remain absent from
+   throughput and detail roles.
+4. If an interactive switch can reset accumulation, add it to
+   `ProfilerRuntimeConfig`/`epochs.csv`; otherwise samples from different
+   settings may never share an epoch.
+5. Add one TOML experiment that changes only the intended variable. Declare
+   `compare_to`, `claim_class`, and whether it is safe for the headline
+   implementation-speed chart. The report restores TOML declaration order
+   after randomized execution.
+6. When CSV meaning or required columns change, increment
+   `kProfilerSchemaVersion`, update `profiler_utils.py`, its synthetic tests,
+   and this document in the same change. Never coerce an old run into a new
+   schema.
+7. Estimator/sampling changes need same-camera image-quality evidence; kernel
+   microarchitecture claims need a separate Nsight export.
 
----
+Retain a plot only when its title can be phrased as a concrete question and
+its metric answers that question without mixing evidence roles.
 
-## Measured Operations
+## Interpretation checklist
 
-| Operation | Timer | When | What it measures |
-|-----------|-------|------|-----------------|
-| `shadeMaterial` | GPU | Every bounce | BSDF evaluation + Russian roulette. Affected by material sorting (warp divergence) and path count (fewer threads when compaction is on). |
-| `gatherTerminatedPaths` | GPU | Every bounce (inside `compactActivePaths`) | Banking dead-path colors into the accumulation buffer. **Absent from CSV when `--compact=0`** (kernel never launched). |
-| `sortPathsByMaterial` | GPU | Every bounce | Thrust `sort_by_key` + double `gather`. Time is near-0 when `--sort=0` (early return). **This is typically the largest measured beneficiary of compaction** — fewer active paths → fewer elements to sort. |
-| `compactActivePaths` | CPU | Every bounce | Thrust `copy_if` (or custom scan). Includes `cudaDeviceSynchronize` cost from internal Thrust calls. **Absent from CSV when `--compact=0`.** |
-| `ComputeIntersections` | GPU | Every bounce | BVH closest-hit traversal (`bvhTraverse`) over the single world-space tree. Benefits from compaction (fewer active paths → fewer traversals). |
-| `BloomPass` | GPU | Once per frame (after bounce loop) | Full bloom pipeline: `thresholdExtract` + separable Gaussian blur (horizontal + vertical). Only recorded when bloom is enabled (`intensity > 0`). |
-| `PostProcessTail` | GPU | Once per frame (after bounce loop) | Remaining display pipeline: `prepareDisplayKernel` + `tonemapKernel` + (optional) chromatic aberration + (optional) vignette + `sendImageToPBO`. Always recorded. |
-
-Additionally, `num_active_paths` is recorded at the start of every bounce
-(path survival metadata).
-
-### NOT measured (starter code / trivial)
-
-- `generateRayFromCamera` — primary ray generation (trivial, single kernel launch)
-- `gatherTerminatedPaths` (tail call) — when compaction is OFF, remaining
-  path colors are banked by one untimed `gatherTerminatedPaths` launch after
-  the bounce loop (the same kernel IS timed per-bounce inside
-  `compactActivePaths` when compaction is on).
-
-These are not individually timed.
-`sendImageToPBO` is now included inside `PostProcessTail`.
-
-### Note on per-operation vs frame timing
-
-The `beginFrame` / `endFrame` wall-clock timer in `main.cpp` wraps the entire
-`pathtrace()` call, including all measured and unmeasured operations, the
-post-processing pipeline, and the `cudaMemcpy` D2H of the accumulation buffer.
-This is the best measure of real per-iteration cost and is reported in
-`frame_times.csv`.  The per-operation timings in `timing.csv` sum to less than
-the frame time — the difference is the unmeasured work (primary ray generation,
-the tail `gatherTerminatedPaths` call when compaction is off, `cudaMemcpy`,
-driver overhead).
-
----
-
-## ImGui Overlay
-
-When `--benchmark` is active, the "Path Tracer Analytics" window shows:
-
-- Traced depth
-- FPS (ImGui rolling average)
-- Per-kernel timing for the most recent frame:
-  - `ShadeMaterial`
-  - `GatherTerminatedPaths`
-  - `SortByMaterial`
-  - `CompactPaths`
-  - `BloomPass` (post-process: bloom pipeline)
-  - `PostProcessTail` (post-process: tonemap + CA + vignette + PBO)
-- Bounce count for the most recent frame
-
-This is useful for spot-checking during development without waiting for CSV
-output.
-
----
-
-## Tips
-
-1. **Use low iteration counts for quick experiments.**  `"ITERATIONS": 50`
-   in the scene JSON gives enough data for a rough comparison and runs in
-   seconds.
-
-2. **Increase warmup for production runs.**  `--warmup=5` discards the first
-   5 iterations where the GPU may still be thermally throttling or where CUDA
-   driver overhead is elevated.
-
-3. **Compare at the same iteration count.**  When comparing configs, use the
-   same scene with the same `ITERATIONS` value.  The summary CSV excludes
-   warmup iterations automatically.
-
-4. **Nsight for micro-architecture.**  The cudaEvent framework measures
-   kernel-level elapsed time.  For branch efficiency, memory coalescing, and
-   occupancy analysis, use NVIDIA Nsight Compute.
-
-5. **CSV naming.**  Timestamps prevent overwrites.  When running multiple
-   experiments, note the timestamp or rename the files afterward for clarity.
-   The `benchmark_runner.py` script tracks this automatically.
-
-6. **Watch the scene camera.**  All shipped scenes place the camera at
-   `[0, 5, 10.5]` looking into an open-front box.  When making your own scene,
-   keep the camera outside the geometry and clear of the walls — a camera
-   clipping into a wall produces a dark or black image.
+- Use Release, the same executable hash, scene, resolution, depth, sample count,
+  post-processing, and GPU power/clock conditions.
+- Use at least three independent throughput processes; confidence intervals
+  over frames from one process are pseudo-replication.
+- Treat p95 as a latency-tail descriptor, not a confidence interval.
+- Compare compaction net benefit: traversal/shading work saved minus gather and
+  scan overhead. Counter curves supply the causal work evidence.
+- Compare material sorting using `SortByMaterial + ShadeMaterial` and final
+  end-to-end time; lower shading time alone does not prove a net win.
+- Never report counter-run timing as FPS, and never claim visual equivalence
+  from CSV/static inspection alone.

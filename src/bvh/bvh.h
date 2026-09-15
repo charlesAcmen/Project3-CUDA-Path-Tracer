@@ -74,6 +74,14 @@ struct BvhHit
     float     v     = 0.0f;
 };
 
+// Optional counter-mode output. Keeping this caller-owned avoids atomics in
+// the traversal hot loop and makes nullptr calls behave exactly as before.
+struct BvhTraversalStats
+{
+    unsigned int nodeTests = 0;
+    unsigned int triangleTests = 0;
+};
+
 /**
  * Iterative closest-hit BVH traversal with NEAR-CHILD-FIRST ordering —
  * THE algorithm both the GPU kernel and the host test execute.
@@ -98,12 +106,14 @@ struct BvhHit
  *                             numerical self-intersection guard.
  * @return              BvhHit — hit = true only if a triangle with t < maxT
  */
-__host__ __device__ inline BvhHit traverseBvhClosest(
+template <bool CollectStats>
+__host__ __device__ inline BvhHit traverseBvhClosestImpl(
     const Ray& objRay,
     const BvhNode* nodes,
     const TrianglePos* tris,
     float maxT,
-    int ignoredTriangleIndex = -1)
+    int ignoredTriangleIndex,
+    BvhTraversalStats* stats)
 {
     BvhHit result;
     result.t = maxT;   // tighten this as closer hits are found
@@ -130,8 +140,14 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
 
         // Near side: RAY_EPSILON, far side: current best (result.t).  Skip
         // the node and its subtree if the ray misses the AABB in that window.
-        if (!nodeBoundsKnownHit &&
-            !intersectRayAABB(objRay.origin, invDir, node.bounds, RAY_EPSILON, result.t))
+        bool nodeBoundsHit = true;
+        if (!nodeBoundsKnownHit)
+        {
+            if constexpr (CollectStats) ++stats->nodeTests;
+            nodeBoundsHit = intersectRayAABB(
+                objRay.origin, invDir, node.bounds, RAY_EPSILON, result.t);
+        }
+        if (!nodeBoundsHit)
         {
             if (sp == 0) break;
             nodeIndex = stack[--sp];        // pop
@@ -149,6 +165,7 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
             {
                 const int triangleIndex = triBase + j;
                 if (triangleIndex == ignoredTriangleIndex) continue;
+                if constexpr (CollectStats) ++stats->triangleTests;
                 float t;
                 float u;
                 float v;
@@ -176,6 +193,7 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
         // Internal node: order children by ray-entry distance.  Descend into
         // the nearer child immediately; push the farther one for later.
         float entryL, entryR;
+        if constexpr (CollectStats) stats->nodeTests += 2;
         const bool hitL = intersectRayAABBEntry(objRay.origin, invDir,
             nodes[node.childL()].bounds, RAY_EPSILON, result.t, entryL);
         const bool hitR = intersectRayAABBEntry(objRay.origin, invDir,
@@ -215,6 +233,29 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
     return result;
 }
 
+__host__ __device__ inline BvhHit traverseBvhClosest(
+    const Ray& ray,
+    const BvhNode* nodes,
+    const TrianglePos* tris,
+    float maxT,
+    int ignoredTriangleIndex = -1)
+{
+    return traverseBvhClosestImpl<false>(
+        ray, nodes, tris, maxT, ignoredTriangleIndex, nullptr);
+}
+
+__host__ __device__ inline BvhHit traverseBvhClosestProfiled(
+    const Ray& ray,
+    const BvhNode* nodes,
+    const TrianglePos* tris,
+    float maxT,
+    int ignoredTriangleIndex,
+    BvhTraversalStats& stats)
+{
+    return traverseBvhClosestImpl<true>(
+        ray, nodes, tris, maxT, ignoredTriangleIndex, &stats);
+}
+
 /**
  * Bounded any-hit BVH traversal for visibility rays.
  *
@@ -224,12 +265,14 @@ __host__ __device__ inline BvhHit traverseBvhClosest(
  * ignored triangle is a numerical self-intersection guard; all other
  * triangles remain blockers.  Callers without a previous primitive pass -1.
  */
-__host__ __device__ inline bool traverseBvhAnyHit(
+template <bool CollectStats>
+__host__ __device__ inline bool traverseBvhAnyHitImpl(
     const Ray& ray,
     const BvhNode* nodes,
     const TrianglePos* tris,
     float maxT,
-    int ignoredTriangleIndex = -1)
+    int ignoredTriangleIndex,
+    BvhTraversalStats* stats)
 {
     if (nodes == nullptr || tris == nullptr || !(maxT > RAY_EPSILON))
         return false;
@@ -247,8 +290,14 @@ __host__ __device__ inline bool traverseBvhAnyHit(
     while (true)
     {
         const BvhNode& node = nodes[nodeIndex];
-        if (!nodeBoundsKnownHit &&
-            !intersectRayAABB(ray.origin, invDir, node.bounds, RAY_EPSILON, maxT))
+        bool nodeBoundsHit = true;
+        if (!nodeBoundsKnownHit)
+        {
+            if constexpr (CollectStats) ++stats->nodeTests;
+            nodeBoundsHit = intersectRayAABB(
+                ray.origin, invDir, node.bounds, RAY_EPSILON, maxT);
+        }
+        if (!nodeBoundsHit)
         {
             if (sp == 0) break;
             nodeIndex = stack[--sp];
@@ -264,6 +313,7 @@ __host__ __device__ inline bool traverseBvhAnyHit(
             {
                 const int triangleIndex = triBase + j;
                 if (triangleIndex == ignoredTriangleIndex) continue;
+                if constexpr (CollectStats) ++stats->triangleTests;
                 float t, u, v;
                 if (intersectTrianglePositions(ray, tris[triangleIndex], t, u, v) &&
                     t < maxT)
@@ -276,6 +326,7 @@ __host__ __device__ inline bool traverseBvhAnyHit(
         }
 
         float entryL, entryR;
+        if constexpr (CollectStats) stats->nodeTests += 2;
         const bool hitL = intersectRayAABBEntry(ray.origin, invDir,
             nodes[node.childL()].bounds, RAY_EPSILON, maxT, entryL);
         const bool hitR = intersectRayAABBEntry(ray.origin, invDir,
@@ -313,6 +364,29 @@ __host__ __device__ inline bool traverseBvhAnyHit(
     }
 
     return false;
+}
+
+__host__ __device__ inline bool traverseBvhAnyHit(
+    const Ray& ray,
+    const BvhNode* nodes,
+    const TrianglePos* tris,
+    float maxT,
+    int ignoredTriangleIndex = -1)
+{
+    return traverseBvhAnyHitImpl<false>(
+        ray, nodes, tris, maxT, ignoredTriangleIndex, nullptr);
+}
+
+__host__ __device__ inline bool traverseBvhAnyHitProfiled(
+    const Ray& ray,
+    const BvhNode* nodes,
+    const TrianglePos* tris,
+    float maxT,
+    int ignoredTriangleIndex,
+    BvhTraversalStats& stats)
+{
+    return traverseBvhAnyHitImpl<true>(
+        ray, nodes, tris, maxT, ignoredTriangleIndex, &stats);
 }
 
 // Host-side construction + GPU memory management, implemented in bvh.cu.

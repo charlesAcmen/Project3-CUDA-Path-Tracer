@@ -8,7 +8,7 @@
 // Usage in main.cpp:
 //   initAppConfig(argc, argv);           // JSON + CLI → appConfig()
 //   const auto& cfg = appConfig();       // read-only access
-//   g_profiler().init(cfg.profCfg);      // profiler from config
+//   g_profiler().init(enrichedCfg);      // scene metadata + profiler config
 //   4. Apply to runtime via setters
 // ====================================================================
 
@@ -94,6 +94,8 @@ struct AppConfig {
     bool             sortByMaterial   = false;
     RngMode          rngMode          = RngMode::LCG;
     bool             directLighting   = true;
+    // -1 preserves the scene file value; a value >= traceDepth disables RR.
+    int              rrMinBouncesOverride = -1;
 
     // Post-processing
     BloomConfig              bloom;

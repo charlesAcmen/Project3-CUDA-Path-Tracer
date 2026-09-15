@@ -15,6 +15,7 @@
 #include "rng/rng.h"
 #include "constants.h"
 #include "bvh/bvh.h"
+#include "profiler/profiler_counters.h"
 
 // Read-only scene resources consumed together by the shading stage.
 // DeviceBuffers owns these allocations; this view only exposes the subset
@@ -38,6 +39,9 @@ struct ShadingBufferView
     const HitRecord* hitRecords;
     PathSegment* pathSegments;
     unsigned char* pathActivityFlags;
+    DeviceBounceCounters* bounceCounters;
+    unsigned int* materialHitCounts;
+    int materialCount;
 };
 
 /**

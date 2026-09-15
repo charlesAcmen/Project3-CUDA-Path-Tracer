@@ -35,13 +35,10 @@ void renderImGui(AppState& app)
             ImGui::Text("  %-23s %.3f ms total | %.3f ms/call | %d calls",
                         name, total, perCall, calls);
         };
-        phaseTiming("ComputeIntersections",  static_cast<int>(ProfilerOp::ComputeIntersections));
-        phaseTiming("ShadeMaterial",         static_cast<int>(ProfilerOp::ShadeMaterial));
-        phaseTiming("GatherTerminatedPaths", static_cast<int>(ProfilerOp::GatherTerminatedPaths));
-        phaseTiming("SortByMaterial",        static_cast<int>(ProfilerOp::SortByMaterial));
-        phaseTiming("CompactPaths",          static_cast<int>(ProfilerOp::CompactPaths));
-        phaseTiming("BloomPass",             static_cast<int>(ProfilerOp::BloomPass));
-        phaseTiming("PostProcessTail",       static_cast<int>(ProfilerOp::PostProcessTail));
+        for (int op = 0; op < kProfilerOpCount; ++op) {
+            if (profGui.perKernelCalls[op] > 0)
+                phaseTiming(profilerOpName(static_cast<ProfilerOp>(op)), op);
+        }
         ImGui::Text("Bounces Last Frame: %d", g_profiler().guiData().lastBounceCount);
     }
 

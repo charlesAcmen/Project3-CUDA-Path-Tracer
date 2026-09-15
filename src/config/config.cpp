@@ -113,6 +113,21 @@ static RngMode parseRngMode(const json& v, RngMode fallback)
     return fallback;
 }
 
+static ProfilerMode parseProfilerMode(const json& v, ProfilerMode fallback)
+{
+    if (!v.is_string())
+    {
+        Log::warn("Config", "profiler mode must be 'throughput' or 'detail'");
+        return fallback;
+    }
+    const std::string value = toLower(v.get<std::string>());
+    if (value == "throughput") return ProfilerMode::Throughput;
+    if (value == "detail" || value == "detailed") return ProfilerMode::Detail;
+    Log::warn("Config", "unknown profiler mode '%s' — keeping %s",
+              v.get<std::string>().c_str(), toString(fallback));
+    return fallback;
+}
+
 static std::string_view trim(std::string_view value)
 {
     while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
@@ -258,6 +273,9 @@ void mergeConfigJson(AppConfig& cfg, const json& data)
     if (const auto* value = JsonUtil::findKey(data, "directLighting"))
         cfg.directLighting = value->get<bool>();
 
+    if (const auto* value = JsonUtil::findKey(data, "rrMinBounces"))
+        cfg.rrMinBouncesOverride = value->get<int>();
+
     if (const auto* value = JsonUtil::findKey(data, "saveAt"))
     {
         std::vector<int> parsed;
@@ -300,6 +318,14 @@ void mergeConfigJson(AppConfig& cfg, const json& data)
     {
         if (const auto* value = JsonUtil::findKey(*p, "enabled")) cfg.profCfg.enabled     = value->get<bool>();
         if (const auto* value = JsonUtil::findKey(*p, "warmup"))  cfg.profCfg.warmupIters = value->get<int>();
+        if (const auto* value = JsonUtil::findKey(*p, "mode"))
+            cfg.profCfg.mode = parseProfilerMode(*value, cfg.profCfg.mode);
+        if (const auto* value = JsonUtil::findKey(*p, "collectCounters"))
+            cfg.profCfg.collectCounters = value->get<bool>();
+        if (const auto* value = JsonUtil::findKey(*p, "outputDir"))
+            cfg.profCfg.outputDir = value->get<std::string>();
+        if (const auto* value = JsonUtil::findKey(*p, "tag"))
+            cfg.profCfg.runTag = value->get<std::string>();
     }
 
     // Clamp merged values to their legal ranges (the constexpr bounds on each
@@ -385,9 +411,30 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
         {
             cfg.directLighting = (std::stoi(arg.substr(18)) != 0);
         }
+        else if (arg.rfind("--rr-min-bounces=", 0) == 0)
+        {
+            cfg.rrMinBouncesOverride = std::stoi(arg.substr(17));
+        }
         else if (arg.rfind("--warmup=", 0) == 0)
         {
             cfg.profCfg.warmupIters = std::stoi(arg.substr(9));
+        }
+        else if (arg.rfind("--profile-mode=", 0) == 0)
+        {
+            const json mode = arg.substr(15);
+            cfg.profCfg.mode = parseProfilerMode(mode, cfg.profCfg.mode);
+        }
+        else if (arg.rfind("--profile-counters=", 0) == 0)
+        {
+            cfg.profCfg.collectCounters = (std::stoi(arg.substr(19)) != 0);
+        }
+        else if (arg.rfind("--profiler-output=", 0) == 0)
+        {
+            cfg.profCfg.outputDir = arg.substr(18);
+        }
+        else if (arg.rfind("--profile-tag=", 0) == 0)
+        {
+            cfg.profCfg.runTag = arg.substr(14);
         }
         else if (arg[0] != '-')
         {
@@ -395,9 +442,21 @@ void parseCliFlags(AppConfig& cfg, int argc, char** argv)
         }
     }
 
-    // ---- Seed profCfg metadata ----
-    cfg.profCfg.compactMethod  = cfg.compactMethod;
-    cfg.profCfg.sortByMaterial = cfg.sortByMaterial;
+    // ---- Seed the profiler's initial runtime snapshot ----
+    cfg.profCfg.runtime.compactMethod = cfg.compactMethod;
+    cfg.profCfg.runtime.sortByMaterial = cfg.sortByMaterial;
+    cfg.profCfg.runtime.rngMode = cfg.rngMode;
+    cfg.profCfg.runtime.directLighting = cfg.directLighting;
+    cfg.profCfg.runtime.bloomEnabled = cfg.bloom.enabled;
+    cfg.profCfg.runtime.bloomThreshold = cfg.bloom.threshold;
+    cfg.profCfg.runtime.bloomIntensity = cfg.bloom.intensity;
+    cfg.profCfg.runtime.bloomRadius = cfg.bloom.radius;
+    cfg.profCfg.runtime.bloomSigma = cfg.bloom.sigma;
+    cfg.profCfg.runtime.chromaticAberrationEnabled = cfg.chromaticAberration.enabled;
+    cfg.profCfg.runtime.chromaticAberrationIntensity = cfg.chromaticAberration.intensity;
+    cfg.profCfg.runtime.vignetteEnabled = cfg.vignette.enabled;
+    cfg.profCfg.runtime.vignetteIntensity = cfg.vignette.intensity;
+    cfg.profCfg.runtime.vignetteExponent = cfg.vignette.exponent;
 
     // ---- Derive scene name for CSV ----
     if (!cfg.sceneFile.empty())
@@ -455,10 +514,15 @@ void printStartupHelp(const char* exeName)
     Log::raw("    --benchmark    Enable profiler CSV output.\n");
     Log::raw("    --compact=N    Compaction mode: 0=off, 1=global scan, 2=Thrust copy_if,\n");
     Log::raw("                   3=shared-memory scan (default).\n");
-    Log::raw("    --sort=N       Material sorting: 0=off, nonzero=on (default on).\n");
+    Log::raw("    --sort=N       Material sorting: 0=off, nonzero=on (default off).\n");
     Log::raw("    --rng=N        RNG mode: 0=LCG (default), 1=scrambled Halton.\n");
     Log::raw("    --direct-lighting=N  Next-event estimation: 0=off, nonzero=on (default).\n");
+    Log::raw("    --rr-min-bounces=N  Guaranteed bounces; >= trace depth disables RR.\n");
     Log::raw("    --warmup=N     Warmup iterations excluded from profiler stats.\n");
+    Log::raw("    --profile-mode=throughput|detail  Whole-frame or per-stage timing.\n");
+    Log::raw("    --profile-counters=N  Benchmark-only exact path/termination counters.\n");
+    Log::raw("    --profiler-output=PATH  Profiler result root directory.\n");
+    Log::raw("    --profile-tag=NAME  Stable experiment tag for batch runners.\n");
     Log::raw("    --save-at=N1,N2,...  Override config saveAt with checkpoints\n");
     Log::raw("                   (e.g., --save-at=50,200,1000).\n");
     Log::raw("    --config=PATH  Load runtime config from a JSON file.\n");

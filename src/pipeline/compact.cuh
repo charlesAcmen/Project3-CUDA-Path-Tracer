@@ -59,7 +59,7 @@ static int compactCoreSharedMem(
  * @return            true if EVERY path terminated (caller may exit
  *                    bounce loop immediately).
  */
-static bool compactActivePaths(int& num_paths)
+static bool compactActivePaths(int& num_paths, int bounce)
 {
     Profiler& prof = g_profiler();
 
@@ -71,17 +71,20 @@ static bool compactActivePaths(int& num_paths)
     // 1. Bank terminated-path colors before compaction discards them.
     //    Without this gather, paths that hit a light would have their
     //    radiance lost, producing a black image.
-    prof.gpuStart(ProfilerOp::GatherTerminatedPaths);
+    const std::size_t gatherTimer = prof.gpuStart(
+        ProfilerOp::GatherTerminatedPaths, ProfilerScope::Bounce,
+        bounce, num_paths);
     LAUNCH_KERNEL_AUTO(gatherTerminatedPaths, num_paths,
         num_paths, g_dev.image, g_dev.paths);
-    prof.gpuStop(ProfilerOp::GatherTerminatedPaths);
+    prof.gpuStop(gatherTimer);
     checkCUDAError("gatherTerminatedPaths");
 
-    // 2. Compact via the runtime-selected method.
-    //    CPU timer is correct here because each method implicitly syncs
-    //    (Thrust copy_if returns a host iterator; custom scans do a
-    //    cudaMemcpy for the survivor count).
-    prof.cpuStart(ProfilerOp::CompactPaths);
+    // 2. Compact via the runtime-selected method. A CUDA event measures the
+    //    actual stream work. Host-side synchronization needed to recover the
+    //    survivor count is deliberately not stacked on top of GPU stages.
+    const std::size_t compactTimer = prof.gpuStart(
+        ProfilerOp::CompactPaths, ProfilerScope::Bounce,
+        bounce, num_paths);
     int survivors = 0;
     if (g_opts.compactMethod == CompactMethod::GlobalScan) {
         survivors = compactCoreGlobalMem(num_paths, g_dev.pathsCompacted, g_dev.paths);
@@ -92,7 +95,7 @@ static bool compactActivePaths(int& num_paths)
             num_paths, g_dev.pathsCompacted, g_dev.paths,
             g_dev.pathActivityFlags);
     }
-    prof.cpuStop(ProfilerOp::CompactPaths);
+    prof.gpuStop(compactTimer);
 
     // 3. Swap buffers — compacted array becomes the active one
     std::swap(g_dev.paths, g_dev.pathsCompacted);

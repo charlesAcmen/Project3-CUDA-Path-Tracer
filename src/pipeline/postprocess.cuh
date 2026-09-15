@@ -51,20 +51,27 @@ static void runPostProcess(
     // Precomputed per-sample average:one host-side division instead of one per pixel).
     const float invIter = 1.0f / (float)iter;
 
-    // ---- Bloom (linear HDR space) — timed as BloomPass ----
+    // ---- Bloom (linear HDR space) — each stage is timed independently ----
     bool bloomHasRun = (bloomCfg.enabled && bloomCfg.intensity > 0.0f);
     if (bloomHasRun)
     {
-        g_profiler().gpuStart(ProfilerOp::BloomPass);
-
+        Profiler& profiler = g_profiler();
+        const std::size_t weightsTimer = profiler.cpuStart(
+            ProfilerOp::BloomWeights, ProfilerScope::Frame, -1,
+            bloomCfg.kernelSize());
         int kernelSize = bloomCfg.kernelSize();
         std::vector<float> weights = computeGaussianWeights(bloomCfg.radius, bloomCfg.sigma);
         cudaMemcpy(dev.bloomWeights, weights.data(),
                    kernelSize * sizeof(float), cudaMemcpyHostToDevice);
+        profiler.cpuStop(weightsTimer);
 
         // Threshold: keep only pixels brighter than the cutoff
+        const std::size_t thresholdTimer = profiler.gpuStart(
+            ProfilerOp::BloomThreshold, ProfilerScope::Frame, -1,
+            resolution.x * resolution.y);
         thresholdExtract<<<blocksPerGrid2d, blockSize2d>>>(
             dev.image, dev.bloomBufA, resolution, invIter, bloomCfg.threshold);
+        profiler.gpuStop(thresholdTimer);
 
         // Horizontal separable blur (shared-memory tiled)
         {
@@ -72,10 +79,14 @@ static void runPostProcess(
                        resolution.y, 1);
             dim3 blockH(BLOOM_BLOCK_SIZE, 1, 1);
             size_t smem = (BLOOM_BLOCK_SIZE + 2 * bloomCfg.radius) * sizeof(float) * 3;
+            const std::size_t blurHTimer = profiler.gpuStart(
+                ProfilerOp::BloomBlurHorizontal, ProfilerScope::Frame, -1,
+                resolution.x * resolution.y);
             blurHorizontal<<<gridH, blockH, smem>>>(
                 dev.bloomBufA, dev.bloomBufB,
                 resolution.x, resolution.y,
                 dev.bloomWeights, bloomCfg.radius);
+            profiler.gpuStop(blurHTimer);
         }
         checkCUDAError("bloom blurHorizontal");
 
@@ -85,29 +96,37 @@ static void runPostProcess(
                        resolution.x, 1);
             dim3 blockV(BLOOM_BLOCK_SIZE, 1, 1);
             size_t smem = (BLOOM_BLOCK_SIZE + 2 * bloomCfg.radius) * sizeof(float) * 3;
+            const std::size_t blurVTimer = profiler.gpuStart(
+                ProfilerOp::BloomBlurVertical, ProfilerScope::Frame, -1,
+                resolution.x * resolution.y);
             blurVertical<<<gridV, blockV, smem>>>(
                 dev.bloomBufB, dev.bloomBufA,
                 resolution.x, resolution.y,
                 dev.bloomWeights, bloomCfg.radius);
+            profiler.gpuStop(blurVTimer);
         }
         checkCUDAError("bloom blurVertical");
-
-        g_profiler().gpuStop(ProfilerOp::BloomPass);
     }
 
-    // ---- Remaining post-process (prepareDisplay → tonemap → CA → vignette → PBO)
-    //      timed together as PostProcessTail ----
-    g_profiler().gpuStart(ProfilerOp::PostProcessTail);
+    Profiler& profiler = g_profiler();
 
     // ---- Prepare display buffer: average HDR, composite bloom ----
+    const std::size_t prepareTimer = profiler.gpuStart(
+        ProfilerOp::PrepareDisplay, ProfilerScope::Frame, -1,
+        resolution.x * resolution.y);
     prepareDisplayKernel<<<blocksPerGrid2d, blockSize2d>>>(
         dev.image, dev.imageDisplay, resolution, invIter,
         bloomHasRun ? dev.bloomBufA : nullptr,
         bloomCfg.intensity);
+    profiler.gpuStop(prepareTimer);
     checkCUDAError("prepareDisplayKernel");
     // ---- Tone mapping: ACES filmic + sRGB gamma (in-place) ----
+    const std::size_t tonemapTimer = profiler.gpuStart(
+        ProfilerOp::Tonemap, ProfilerScope::Frame, -1,
+        resolution.x * resolution.y);
     tonemapKernel<<<blocksPerGrid2d, blockSize2d>>>(
         dev.imageDisplay, dev.imageDisplay, resolution);
+    profiler.gpuStop(tonemapTimer);
     checkCUDAError("tonemapKernel");
     // ---- Chromatic Aberration (sRGB, after tone mapping) ----
     // Writes to bloomBufB as scratch, then copies back or chains into
@@ -115,8 +134,12 @@ static void runPostProcess(
     bool caHasRun = (caCfg.enabled && caCfg.intensity > 0.0f);
     if (caHasRun)
     {
+        const std::size_t caTimer = profiler.gpuStart(
+            ProfilerOp::ChromaticAberration, ProfilerScope::Frame, -1,
+            resolution.x * resolution.y);
         chromaticAberrationKernel<<<blocksPerGrid2d, blockSize2d>>>(
             dev.imageDisplay, dev.bloomBufB, resolution, caCfg.intensity);
+        profiler.gpuStop(caTimer);
         checkCUDAError("chromaticAberrationKernel");
     }
 
@@ -126,22 +149,32 @@ static void runPostProcess(
     if (vignetteCfg.enabled && vignetteCfg.intensity > 0.0f)
     {
         const glm::vec3* vigSrc = caHasRun ? dev.bloomBufB : dev.imageDisplay;
+        const std::size_t vignetteTimer = profiler.gpuStart(
+            ProfilerOp::Vignette, ProfilerScope::Frame, -1,
+            resolution.x * resolution.y);
         vignetteKernel<<<blocksPerGrid2d, blockSize2d>>>(
             vigSrc, dev.imageDisplay, resolution,
             vignetteCfg.intensity, vignetteCfg.exponent);
+        profiler.gpuStop(vignetteTimer);
         checkCUDAError("vignetteKernel");
     }
     else if (caHasRun)
     {
         // CA ran but vignette is off: copy CA result back to display buffer
+        const std::size_t copyTimer = profiler.gpuStart(
+            ProfilerOp::PostProcessCopy, ProfilerScope::Frame, -1,
+            resolution.x * resolution.y);
         cudaMemcpy(dev.imageDisplay, dev.bloomBufB,
                    resolution.x * resolution.y * sizeof(glm::vec3),
                    cudaMemcpyDeviceToDevice);
+        profiler.gpuStop(copyTimer);
     }
 
     // ---- Display: write LDR sRGB data to OpenGL pixel buffer ----
+    const std::size_t pboTimer = profiler.gpuStart(
+        ProfilerOp::SendImageToPbo, ProfilerScope::Frame, -1,
+        resolution.x * resolution.y);
     sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(
         pbo, resolution, dev.imageDisplay);
-
-    g_profiler().gpuStop(ProfilerOp::PostProcessTail);
+    profiler.gpuStop(pboTimer);
 }

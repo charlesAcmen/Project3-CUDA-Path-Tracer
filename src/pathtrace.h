@@ -16,6 +16,8 @@ struct DeviceBuffers {
     PathSegment*            paths               = nullptr;
     PathSegment*            pathsCompacted      = nullptr;
     unsigned char*          pathActivityFlags   = nullptr;  // shading output consumed by mask-based compaction
+    DeviceBounceCounters*   bounceCounters      = nullptr;  // benchmark-only, null unless counters are enabled
+    unsigned int*           materialHitCounts   = nullptr;  // counter-only hit histogram
     Material*               materials           = nullptr;
     HitRecord*              intersections       = nullptr;
     // Allocated together on first material-sort use.  They stay resident
@@ -45,6 +47,7 @@ struct DeviceBuffers {
     LightAliasEntry*        lightAliasEntries         = nullptr;
     int*                    lightIndexByTriangle      = nullptr;
     int                     lightCount                = 0;
+    int                     materialCount             = 0;
 
     // Texture table: every scene image concatenated into one flat texel
     // buffer, with one TextureInfo per image telling the sampler where its

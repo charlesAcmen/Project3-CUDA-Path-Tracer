@@ -85,6 +85,7 @@ static int testDefaults()
     if (checkBool("sortByMaterial", cfg.sortByMaterial, false)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::LCG)) return 1;
     if (checkBool("directLighting", cfg.directLighting, true)) return 1;
+    if (checkEq("rrMinBouncesOverride", cfg.rrMinBouncesOverride, -1)) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, false)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, false)) return 1;
     if (checkIterations("saveAtIterations", cfg.saveAtIterations, {})) return 1;
@@ -103,11 +104,13 @@ static int testJsonMerge()
         "sortByMaterial": true,
         "rngMode": "Halton",
         "directLighting": false,
+        "rrMinBounces": 8,
         "saveAt": [50, 1, 10],
         "bloom": { "enabled": true, "threshold": 0.5, "intensity": 0.3, "radius": 5 },
         "chromaticAberration": { "enabled": true },
         "vignette": { "enabled": true, "intensity": 0.8, "exponent": 4.0 },
-        "profiler": { "enabled": true, "warmup": 10 }
+        "profiler": { "enabled": true, "warmup": 10, "mode": "throughput",
+                      "collectCounters": true, "outputDir": "results", "tag": "json" }
     })");
     mergeConfigJson(cfg, j);
 
@@ -115,10 +118,15 @@ static int testJsonMerge()
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
     if (checkBool("directLighting", cfg.directLighting, false)) return 1;
+    if (checkEq("rrMinBouncesOverride", cfg.rrMinBouncesOverride, 8)) return 1;
     if (checkIterations("saveAt (normalized)", cfg.saveAtIterations, {1, 10, 50})) return 1;
     if (checkBool("bloom.enabled", cfg.bloom.enabled, true)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
     if (checkEq("profCfg.warmupIters", cfg.profCfg.warmupIters, 10)) return 1;
+    if (checkEq("profCfg.mode", (int)cfg.profCfg.mode, (int)ProfilerMode::Throughput)) return 1;
+    if (checkBool("profCfg.collectCounters", cfg.profCfg.collectCounters, true)) return 1;
+    if (checkStr("profCfg.outputDir", cfg.profCfg.outputDir, "results")) return 1;
+    if (checkStr("profCfg.runTag", cfg.profCfg.runTag, "json")) return 1;
     PASS();
     return 0;
 }
@@ -131,7 +139,9 @@ static int testCliOverride()
     AppConfig cfg;
     const char* argv[] = {
         "prog", "--direct-lighting=0", "--compact=1", "--sort=1", "--rng=1",
-        "--save-at=50,10,100", "--warmup=5", "--benchmark", "test.json"
+        "--rr-min-bounces=9", "--save-at=50,10,100", "--warmup=5", "--benchmark",
+        "--profile-mode=throughput", "--profile-counters=1",
+        "--profiler-output=bench-out", "--profile-tag=cli", "test.json"
     };
     int argc = sizeof(argv) / sizeof(argv[0]);
     parseCliFlags(cfg, argc, (char**)argv);
@@ -140,6 +150,7 @@ static int testCliOverride()
     if (checkBool("sortByMaterial", cfg.sortByMaterial, true)) return 1;
     if (checkEq("rngMode", (int)cfg.rngMode, (int)RngMode::HALTON)) return 1;
     if (checkBool("directLighting", cfg.directLighting, false)) return 1;
+    if (checkEq("rrMinBouncesOverride", cfg.rrMinBouncesOverride, 9)) return 1;
     if (checkIterations("CLI saveAt (normalized)", cfg.saveAtIterations, {10, 50, 100})) return 1;
     if (checkEq("profCfg.warmupIters", cfg.profCfg.warmupIters, 5)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
@@ -290,7 +301,14 @@ static int testCaseInsensitiveJsonKeys()
         "BLOOM": { "ENABLED": true, "THRESHOLD": 0.7, "RADIUS": 4 },
         "CHROMATICABERRATION": { "ENABLED": true, "INTENSITY": 0.006 },
         "VIGNETTE": { "ENABLED": true, "EXPONENT": 3.0 },
-        "PROFILER": { "ENABLED": true, "WARMUP": 6 }
+        "PROFILER": {
+            "ENABLED": true,
+            "WARMUP": 6,
+            "MODE": "throughput",
+            "COLLECTCOUNTERS": true,
+            "OUTPUTDIR": "bench-out",
+            "TAG": "cli"
+        }
     })"));
 
     if (checkEq("compactMethod", (int)cfg.compactMethod, (int)CompactMethod::Thrust)) return 1;
@@ -302,6 +320,10 @@ static int testCaseInsensitiveJsonKeys()
     if (checkBool("chromaticAberration.enabled", cfg.chromaticAberration.enabled, true)) return 1;
     if (checkBool("vignette.enabled", cfg.vignette.enabled, true)) return 1;
     if (checkBool("profCfg.enabled", cfg.profCfg.enabled, true)) return 1;
+    if (checkEq("profCfg.mode", (int)cfg.profCfg.mode, (int)ProfilerMode::Throughput)) return 1;
+    if (checkBool("profCfg.collectCounters", cfg.profCfg.collectCounters, true)) return 1;
+    if (checkStr("profCfg.outputDir", cfg.profCfg.outputDir, "bench-out")) return 1;
+    if (checkStr("profCfg.runTag", cfg.profCfg.runTag, "cli")) return 1;
     if (checkEq("profCfg.warmupIters", cfg.profCfg.warmupIters, 6)) return 1;
     PASS();
     return 0;

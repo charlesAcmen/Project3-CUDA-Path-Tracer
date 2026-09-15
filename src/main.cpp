@@ -8,6 +8,8 @@
 
 #include <cstdlib>
 #include <ctime>
+#include <cstddef>
+#include <algorithm>
 #include <string>
 
 namespace {
@@ -39,27 +41,58 @@ void printStartupSummary(const AppState& app, const AppConfig& cfg)
     Log::raw("  Timestamp: %s\n", app.startTimeString.c_str());
     Log::raw("  Resolution: %d x %d\n", app.width, app.height);
     if (app.renderState) {
-        Log::raw("  Trace iterations (depth): %d\n", app.renderState->iterations);
+        Log::raw("  Iterations: %d  trace depth: %d  RR starts after: %d\n",
+                 app.renderState->iterations,
+                 app.renderState->traceDepth,
+                 app.renderState->rrMinBounces);
     }
     Log::raw("  Profiler: %s\n", profCfg.enabled ? "ENABLED" : "disabled");
     if (profCfg.enabled) {
-        Log::raw("    Warmup iters: %d\n", profCfg.warmupIters);
+        Log::raw("    Mode: %s  warmup: %d  counters: %s\n",
+                 toString(profCfg.mode), profCfg.warmupIters,
+                 profCfg.collectCounters ? "yes" : "no");
     }
     const char* compactName = "Unknown";
-    switch (profCfg.compactMethod) {
+    switch (cfg.compactMethod) {
         case CompactMethod::Off:        compactName = "Disabled (no compaction)"; break;
         case CompactMethod::GlobalScan: compactName = "Global-memory scan (custom)"; break;
         case CompactMethod::Thrust:     compactName = "Thrust copy_if"; break;
         case CompactMethod::SharedMem:  compactName = "Shared-memory multi-block scan"; break;
     }
     Log::raw("  Compact method: %s\n", compactName);
-    Log::raw("  Sort by material: %s\n", profCfg.sortByMaterial ? "yes" : "no");
+    Log::raw("  Sort by material: %s\n", cfg.sortByMaterial ? "yes" : "no");
     const char* rngName = (rngMode == RngMode::HALTON ? "Scrambled Halton" : "LCG");
     Log::raw("  RNG mode: %s\n", rngName);
     Log::raw("  BVH traversal: enabled  (max depth %d, leaf size %d)\n",
            kBvhMaxDepth, kBvhLeafSize);
     Log::raw("======================================================================\n");
     Log::raw("\n");
+}
+
+ProfilerConfig makeProfilerConfig(const AppState& app, const AppConfig& cfg)
+{
+    ProfilerConfig result = cfg.profCfg;
+    result.sceneFile = cfg.sceneFile;
+    if (app.renderState)
+    {
+        result.width = app.width;
+        result.height = app.height;
+        result.iterations = static_cast<int>(app.renderState->iterations);
+        result.traceDepth = app.renderState->traceDepth;
+        result.rrMinBounces = app.renderState->rrMinBounces;
+    }
+    if (app.scene)
+    {
+        const SceneStats stats = computeSceneStats(*app.scene);
+        result.numObjects = stats.numObjects;
+        result.numMeshes = stats.numMeshes;
+        result.numMaterials = stats.numMaterials;
+        result.numTriangles = stats.numTriangles;
+        result.numTextures = static_cast<int>(app.scene->textures.size());
+        for (const TextureData& texture : app.scene->textures)
+            result.texturePixels += texture.pixels.size();
+    }
+    return result;
 }
 
 } // namespace
@@ -110,6 +143,19 @@ int main(int argc, char** argv)
     // Load scene file
     app.scene = new Scene(SceneLoader::loadFromJSON(sceneFile));
 
+    if (cfg.rrMinBouncesOverride < -1)
+    {
+        Log::error("Config", "rrMinBounces must be non-negative");
+        delete app.scene;
+        app.scene = nullptr;
+        return 1;
+    }
+    if (cfg.rrMinBouncesOverride >= 0)
+    {
+        app.scene->state.rrMinBounces = std::min(
+            cfg.rrMinBouncesOverride, app.scene->state.traceDepth);
+    }
+
     std::string saveAtError;
     if (!validateSaveAtIterations(cfg.saveAtIterations,
                                   app.scene->state.iterations, saveAtError))
@@ -144,7 +190,7 @@ int main(int argc, char** argv)
 
     // Profiler init must come AFTER initCuda() so that CUDA-GL interop is
     // properly configured before cudaEventCreate touches the CUDA runtime.
-    g_profiler().init(cfg.profCfg);
+    g_profiler().init(makeProfilerConfig(app, cfg));
 
     // Graceful CSV write on any exit path (Esc key, completion, etc.)
     if (cfg.profCfg.enabled) {

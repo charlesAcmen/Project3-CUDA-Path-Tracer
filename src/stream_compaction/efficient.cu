@@ -75,6 +75,12 @@ namespace StreamCompaction {
             }
         }
 
+        size_t compactionWorkspaceBytes()
+        {
+            return (s_compactionWorkspace.scanBufferInts +
+                    s_compactionWorkspace.scanScratchInts) * sizeof(int);
+        }
+
         void freeCompactionWorkspace()
         {
             cudaFree(s_compactionWorkspace.scanBuffer);

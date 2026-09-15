@@ -57,6 +57,11 @@ void runCuda(AppState& app)
         uchar4* pbo_dptr = NULL;
         app.iteration++;
 
+        // End-to-end profiler timing includes interop map, the GPU pipeline,
+        // the required completion point, and unmap. Saving remains outside so
+        // checkpoint I/O cannot masquerade as renderer throughput.
+        g_profiler().beginFrame();
+
         // ---- Map PBO for CUDA write access (modern stream-level interop) ----
         // Modern API: cudaGraphicsMapResources avoids the full-context
         // synchronisation that the deprecated cudaGLMapBufferObject performed,
@@ -67,15 +72,14 @@ void runCuda(AppState& app)
                                              NULL, app.cudaPboResource);
 
         // execute the kernel
-        g_profiler().beginFrame();
         pathtrace(pbo_dptr, app.iteration);
-        g_profiler().endFrame();
 
         // Ensure CUDA work completes before GL touches the PBO.
         cudaDeviceSynchronize();
 
         // unmap buffer object
         cudaGraphicsUnmapResources(1, &app.cudaPboResource, 0);
+        g_profiler().endFrame();
 
         // A checkpoint can only be consumed at its exact iteration. Completion
         // is also an automatic save; SaveSchedule coalesces a final checkpoint

@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 
 DEFAULT_CSV  = "profiler_output/rng_test/rng_data.csv"
 DEFAULT_OUT  = "profiler_output/rng_test"
-DIMS         = 10            # match HALTON_NUM_DIMS
+DIMS         = 14            # every currently assigned Halton dimension
 DIM_LABELS   = [
     "AA jitter x  (b=2)",
     "AA jitter y  (b=3)",
@@ -41,8 +41,12 @@ DIM_LABELS   = [
     "Specular φ   (b=19)",
     "Fresnel RR   (b=23)",
     "Path RR      (b=29)",
+    "PBR split    (b=31)",
+    "Light select (b=37)",
+    "Light u      (b=41)",
+    "Light v      (b=43)",
 ]
-DIM_PRIMES    = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+DIM_PRIMES    = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43]
 
 # Matplotlib style — match existing scripts/ style
 plt.rcParams.update({
@@ -64,13 +68,16 @@ def load_csv(path):
     rows = []
     with open(path, "r") as f:
         reader = csv.DictReader(f)
+        halton_column = "halton_owen" if "halton_owen" in (reader.fieldnames or []) else "halton"
+        if halton_column not in (reader.fieldnames or []):
+            raise ValueError("CSV must contain the current halton_owen column")
         for row in reader:
             row["pixel"]  = int(row["pixel"])
             row["iter"]   = int(row["iter"])
             row["bounce"] = int(row["bounce"])
             row["dim"]    = int(row["dim"])
             row["lcg"]    = float(row["lcg"])
-            row["halton"] = float(row["halton"])
+            row["halton"] = float(row[halton_column])
             rows.append(row)
     return rows
 
@@ -283,8 +290,8 @@ def plot_histograms(groups, out_dir):
     N = min(10000, g["num_iters"])
 
     ncols = 5
-    nrows = 2
-    fig, axes = plt.subplots(nrows, ncols, figsize=(15, 6))
+    nrows = int(np.ceil(DIMS / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(15, 3 * nrows))
     axes = axes.flatten()
 
     for dim in range(min(DIMS, ncols * nrows)):

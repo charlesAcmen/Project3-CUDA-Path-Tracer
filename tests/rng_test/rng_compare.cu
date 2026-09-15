@@ -57,7 +57,7 @@ struct Args {
     int    numSamples = 4096;   // iterations per pixel
     int    numPixels  = 16;     // number of pixels to simulate
     int    numBounces = 3;      // bounce depths
-    int    numDims    = 10;     // dimensions 0..9
+    int    numDims    = 14;     // currently assigned dimensions 0..13
     const char* outFile = "profiler_output/rng_test/rng_data.csv";
 };
 
@@ -67,7 +67,7 @@ static void printUsage(const char* prog) {
         "  --samples N    iterations per pixel  (default: 4096)\n"
         "  --pixels  N    number of pixels      (default: 16)\n"
         "  --bounces N    bounce depths         (default: 3)\n"
-        "  --dims    N    dimensions            (default: 10)\n"
+        "  --dims    N    dimensions            (default: 14)\n"
         "  --out     FILE output CSV path       (default: rng_data.csv)\n"
         "  --help         show this message\n",
         prog);

@@ -1,180 +1,291 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
+#include <limits>
 #include <string>
 #include <vector>
+
 #include <cuda_runtime.h>
 
-#include "sceneStructs.h"   // CompactMethod, RngMode
+#include "profiler/profiler_counters.h"
+#include "sceneStructs.h"
 
-// ---------------------------------------------------------------------------
-// Enumeration of every measurable operation.
-// Starter-code kernels previously excluded are now measured when they are
-// needed to quantify cross-cutting optimisations such as stream compaction.
-// ---------------------------------------------------------------------------
+inline constexpr int kProfilerSchemaVersion = 2;
+inline constexpr std::size_t kInvalidProfilerToken =
+    std::numeric_limits<std::size_t>::max();
+
+enum class ProfilerMode : int {
+    Throughput = 0,
+    Detail = 1
+};
+
+inline const char* toString(ProfilerMode mode)
+{
+    return mode == ProfilerMode::Detail ? "detail" : "throughput";
+}
+
+enum class ProfilerScope : int {
+    Setup = 0,
+    Frame,
+    Bounce
+};
+
+enum class ProfilerTimerDomain : int {
+    CPU = 0,
+    GPU
+};
+
+// Python discovers operations from timing.csv; plot scripts never carry a
+// second hard-coded list that can drift after a renderer refactor.
 enum class ProfilerOp : int {
-    ShadeMaterial = 0,         // GPU kernel -- GPU timer (user-modified)
-    GatherTerminatedPaths,     // GPU kernel -- GPU timer (user-written)
-    SortByMaterial,            // async Thrust -- GPU timer (user-written)
-                               //   Thrust transform/sequence/sort_by_key/gather are
-                               //   all asynchronous; CPU timer would miss GPU work.
-    CompactPaths,              // Thrust copy_if/scan -- CPU timer (user-written)
-                               //   copy_if returns a host-visible iterator, forcing
-                               //   an internal sync; CPU timer naturally captures it.
-    ComputeIntersections,      // GPU kernel -- GPU timer (user-written BVH traversal bvhTraverse)
-
-    // Post-processing pipeline — GPU timers (all use cudaEvent on the
-    // default stream, so each section is measured independently while
-    // still correctly sequencing with the kernel launches between them).
-    BloomPass,                 // thresholdExtract + blurH + blurV
-    PostProcessTail,           // prepareDisplayKernel + tonemap + CA + vignette + PBO
-
+    FrameGpu = 0,
+    PathtraceInit,
+    AllocateCoreBuffers,
+    BuildSceneBvh,
+    BuildLightSampling,
+    UploadSceneData,
+    UploadTextures,
+    AllocatePipelineBuffers,
+    GenerateCameraRays,
+    ComputeIntersections,
+    SortByMaterial,
+    ShadeMaterial,
+    GatherTerminatedPaths,
+    CompactPaths,
+    FinalGather,
+    BloomWeights,
+    BloomThreshold,
+    BloomBlurHorizontal,
+    BloomBlurVertical,
+    PrepareDisplay,
+    Tonemap,
+    ChromaticAberration,
+    Vignette,
+    PostProcessCopy,
+    SendImageToPbo,
     COUNT
 };
 
-// Compile-time count of profiler operations.  Use this instead of
-// magic numbers in GUI data arrays.
 inline constexpr int kProfilerOpCount = static_cast<int>(ProfilerOp::COUNT);
 
-// ---- GUI Data Transfer Object ------------------------------------------
-// Thin channel from Profiler → ImGui.  Populated each frame by
-// Profiler::updateGuiData() and read by main.cpp's ImGui panel.
-struct GuiDataContainer {
-    int   TracedDepth             = 0;
-    // Per-frame sum across every invocation of an operation.  Bounce-loop
-    // phases therefore include every bounce, not one representative launch.
-    float perKernelMs[kProfilerOpCount] = {};
-    int   perKernelCalls[kProfilerOpCount] = {};
-    int   lastBounceCount         = 0;
-};
-
 const char* profilerOpName(ProfilerOp op);
+const char* profilerScopeName(ProfilerScope scope);
+const char* profilerTimerDomainName(ProfilerTimerDomain domain);
 
-// ---------------------------------------------------------------------------
-// Configuration (populated from command-line flags)
-// ---------------------------------------------------------------------------
-struct ProfilerConfig {
-    bool        enabled        = false;
-    int         warmupIters    = 3;
-    std::string sceneName      = "unknown";
-    
-    // CSV metadata tags only — runtime behavior is controlled by
-    // appConfig().compactMethod / sortByMaterial (singleton in config.cpp).
-    // parseCliFlags() seeds these fields from the active config after all
-    // overrides (config JSON + CLI) have been applied.
-    CompactMethod compactMethod  = CompactMethod::SharedMem;
-    bool          sortByMaterial = false;
+struct ProfilerRuntimeConfig
+{
+    CompactMethod compactMethod = CompactMethod::SharedMem;
+    bool sortByMaterial = false;
+    RngMode rngMode = RngMode::LCG;
+    bool directLighting = true;
+
+    bool bloomEnabled = false;
+    float bloomThreshold = 1.0f;
+    float bloomIntensity = 0.5f;
+    int bloomRadius = 10;
+    float bloomSigma = 5.0f;
+
+    bool chromaticAberrationEnabled = false;
+    float chromaticAberrationIntensity = 0.003f;
+    bool vignetteEnabled = false;
+    float vignetteIntensity = 0.5f;
+    float vignetteExponent = 2.0f;
 };
 
-// ---------------------------------------------------------------------------
-// One timing measurement = one row in the per-iteration timing CSV
-// ---------------------------------------------------------------------------
-struct TimingRecord {
-    int         iteration;
-    int         bounce;
-    ProfilerOp  op;
-    float       time_ms;
-    int         num_active_paths;
+struct ProfilerConfig
+{
+    bool enabled = false;
+    int warmupIters = 3;
+    ProfilerMode mode = ProfilerMode::Detail;
+    bool collectCounters = false;
+    std::string outputDir = "profiler_output";
+    std::string runTag;
+
+    std::string sceneName = "unknown";
+    std::string sceneFile;
+    int width = 0;
+    int height = 0;
+    int iterations = 0;
+    int traceDepth = 0;
+    int rrMinBounces = 0;
+    int numObjects = 0;
+    int numMeshes = 0;
+    int numMaterials = 0;
+    int numTriangles = 0;
+    int numTextures = 0;
+    std::size_t texturePixels = 0;
+
+    ProfilerRuntimeConfig runtime;
 };
 
-// ---------------------------------------------------------------------------
-// Per-bounce path survival data point
-// ---------------------------------------------------------------------------
-struct PathCountRecord {
-    int iteration;
-    int bounce;
-    int num_paths;
+struct ProfilerMemoryStats
+{
+    std::size_t pathBuffersBytes = 0;
+    std::size_t sceneBuffersBytes = 0;
+    std::size_t bvhBytes = 0;
+    std::size_t lightSamplingBytes = 0;
+    std::size_t textureBytes = 0;
+    std::size_t postProcessBytes = 0;
+    std::size_t compactionWorkspaceBytes = 0;
+    std::size_t materialSortWorkspaceBytes = 0;
+    std::size_t counterBytes = 0;
+    std::size_t displayInteropBytes = 0;
 };
 
-// ---------------------------------------------------------------------------
-// Per-iteration render-frame time (full pathtrace() call: primary rays →
-// bounce loop → finalGather → sendImageToPBO → cudaMemcpy D2H).
-// This is the wall-clock cost of one rendered iteration.
-// ---------------------------------------------------------------------------
-struct FrameTimeRecord {
-    int   iteration;
-    float frame_time_ms;
+struct TimingRecord
+{
+    int epoch = 0;
+    int iteration = 0;
+    ProfilerScope scope = ProfilerScope::Frame;
+    int bounce = -1;
+    ProfilerOp op = ProfilerOp::FrameGpu;
+    ProfilerTimerDomain timerDomain = ProfilerTimerDomain::GPU;
+    float timeMs = 0.0f;
+    int workItems = 0;
 };
 
-// ---------------------------------------------------------------------------
-// Profiler singleton
-// ---------------------------------------------------------------------------
-class Profiler {
+struct BounceCounterRecord
+{
+    int epoch = 0;
+    int iteration = 0;
+    int bounce = 0;
+    int processedPaths = 0;
+    DeviceBounceCounters counters;
+};
+
+struct MaterialHitRecord
+{
+    int epoch = 0;
+    int iteration = 0;
+    int bounce = 0;
+    int materialId = 0;
+    unsigned int hitCount = 0;
+};
+
+struct FrameTimeRecord
+{
+    int epoch = 0;
+    int iteration = 0;
+    float endToEndMs = 0.0f;
+    float gpuPipelineMs = 0.0f;
+};
+
+struct EpochRecord
+{
+    int epoch = 0;
+    ProfilerRuntimeConfig runtime;
+};
+
+struct GuiDataContainer
+{
+    int TracedDepth = 0;
+    float perKernelMs[kProfilerOpCount] = {};
+    int perKernelCalls[kProfilerOpCount] = {};
+    int lastBounceCount = 0;
+};
+
+class Profiler
+{
 public:
     Profiler();
     ~Profiler();
 
-    // Non-copyable, non-movable
-    Profiler(const Profiler&)            = delete;
+    Profiler(const Profiler&) = delete;
     Profiler& operator=(const Profiler&) = delete;
 
-    // ---- Lifecycle ----
     void init(const ProfilerConfig& cfg);
-    void shutdown();   // writes CSVs, frees cudaEvents
-    void resetForNewAccumulation(); // discard samples from the previous camera/settings epoch
+    void shutdown();
+    void resetForNewAccumulation(const ProfilerRuntimeConfig& runtime);
 
-    // ---- Per-frame context ----
-    void beginIteration(int iter);
+    void beginIteration(int iteration);
     void endIteration();
-
-    // ---- GPU timing (cudaEvent) ----
-    void gpuStart(ProfilerOp op);
-    void gpuStop(ProfilerOp op);
-
-    // ---- CPU timing (std::chrono) ----
-    void cpuStart(ProfilerOp op);
-    void cpuStop(ProfilerOp op);
-
-    // ---- Per-bounce data ----
-    void recordBounce(int bounce, int num_paths);
-
-    // ---- Frame timing (bounce-loop wall time → FPS) ----
     void beginFrame();
     void endFrame();
 
-    // ---- Accessors ----
+    std::size_t gpuStart(
+        ProfilerOp op,
+        ProfilerScope scope,
+        int bounce = -1,
+        int workItems = 0);
+    void gpuStop(std::size_t token);
+
+    std::size_t cpuStart(
+        ProfilerOp op,
+        ProfilerScope scope,
+        int bounce = -1,
+        int workItems = 0);
+    void cpuStop(std::size_t token);
+
+    void recordBounceCounters(
+        int bounce,
+        int processedPaths,
+        const DeviceBounceCounters& counters);
+    void recordMaterialHits(
+        int bounce,
+        const std::vector<unsigned int>& hitCounts);
+    void recordMemoryStats(const ProfilerMemoryStats& stats) { m_memoryStats = stats; }
+
+    void updateGuiData();
+
     const ProfilerConfig& config() const { return m_cfg; }
     bool enabled() const { return m_cfg.enabled; }
-
-    // ---- GUI data ----
-    void updateGuiData();                            // sync internal timing → m_guiData
+    bool detailed() const { return m_cfg.enabled && m_cfg.mode == ProfilerMode::Detail; }
+    bool collectCounters() const { return m_cfg.enabled && m_cfg.collectCounters; }
+    const std::string& outputDirectory() const { return m_experimentDir; }
     GuiDataContainer& guiData() { return m_guiData; }
+    const GuiDataContainer& guiData() const { return m_guiData; }
 
 private:
+    struct GpuRangeState
+    {
+        cudaEvent_t start = nullptr;
+        cudaEvent_t stop = nullptr;
+        TimingRecord record;
+        bool stopped = false;
+    };
+
+    struct CpuRangeState
+    {
+        std::chrono::steady_clock::time_point start;
+        TimingRecord record;
+        bool stopped = false;
+    };
+
     ProfilerConfig m_cfg;
+    std::string m_runId;
+    std::string m_experimentDir;
 
-    cudaEvent_t m_eventStart = nullptr;
-    cudaEvent_t m_eventStop  = nullptr;
+    std::vector<GpuRangeState> m_gpuRanges;
+    std::vector<std::size_t> m_gpuStopOrder;
+    std::size_t m_gpuRangesUsed = 0;
+    std::vector<CpuRangeState> m_cpuRanges;
 
-    // CPU timing state (non-nesting; one op at a time)
-    std::chrono::high_resolution_clock::time_point m_cpuStartTime;
-    ProfilerOp m_pendingCpuOp;
-    bool       m_cpuTiming = false;
-
-    // Accumulated records
-    std::vector<TimingRecord>    m_timingRecords;
-    std::vector<PathCountRecord> m_pathCounts;
+    std::vector<TimingRecord> m_timingRecords;
+    std::vector<BounceCounterRecord> m_bounceCounters;
+    std::vector<MaterialHitRecord> m_materialHits;
     std::vector<FrameTimeRecord> m_frameTimes;
+    std::vector<EpochRecord> m_epochs;
+    ProfilerMemoryStats m_memoryStats;
 
-    // Current iteration context
+    int m_currentEpoch = 0;
     int m_currentIteration = 0;
+    float m_currentFrameGpuMs = 0.0f;
+    std::chrono::steady_clock::time_point m_frameStartTime;
+    bool m_frameTiming = false;
+    bool m_shutdown = false;
 
-    // Inline GUI data — read by main.cpp::RenderImGui.
-    // No external pointer needed; Profiler owns it directly.
     GuiDataContainer m_guiData;
 
-    // Frame timing state
-    std::chrono::high_resolution_clock::time_point m_frameStartTime;
-
-    // Timestamp for output filename deduplication
-    std::string m_timestamp;
-
-    // Internal helpers
-    void writeTimingCSV(const std::string& filepath);
-    void writePathSurvivalCSV(const std::string& filepath);
-    void writeSummaryCSV(const std::string& filepath);
-    void writeFrameTimesCSV(const std::string& filepath);
+    bool isWarmup(int iteration) const;
+    void resolveGpuRanges();
+    void destroyGpuEvents();
+    void writeTimingCSV(const std::string& filepath) const;
+    void writeBounceCountersCSV(const std::string& filepath) const;
+    void writeMaterialHitsCSV(const std::string& filepath) const;
+    void writeFrameTimesCSV(const std::string& filepath) const;
+    void writeEpochsCSV(const std::string& filepath) const;
+    void writeRunJson(const std::string& filepath) const;
 };
 
-// Global accessor (defined in profiler.cu)
 Profiler& g_profiler();

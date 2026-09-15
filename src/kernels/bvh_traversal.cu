@@ -14,7 +14,8 @@ __global__ void bvhTraverse(
     PathSegment* __restrict__ pathSegments,
     HitRecord* __restrict__ intersections,
     const TrianglePos* __restrict__ deviceTrianglePositions,
-    BvhNode* __restrict__ deviceBvhNodes)
+    BvhNode* __restrict__ deviceBvhNodes,
+    DeviceBounceCounters* profilerCounters)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (path_index >= num_paths) return;
@@ -35,9 +36,21 @@ __global__ void bvhTraverse(
     // ---- Single closest-hit traversal over the whole scene ----
     // Root is node 0; LARGE_T far plane (the traversal tightens it).  The
     // previous primitive is skipped only as a numerical self-hit guard.
-    const BvhHit hit = traverseBvhClosest(pathSegment.ray, deviceBvhNodes,
-                                          deviceTrianglePositions, LARGE_T,
-                                          pathSegment.previousTriangleIndex);
+    BvhTraversalStats stats{};
+    const BvhHit hit = profilerCounters != nullptr
+        ? traverseBvhClosestProfiled(
+            pathSegment.ray, deviceBvhNodes, deviceTrianglePositions, LARGE_T,
+            pathSegment.previousTriangleIndex, stats)
+        : traverseBvhClosest(
+            pathSegment.ray, deviceBvhNodes, deviceTrianglePositions, LARGE_T,
+            pathSegment.previousTriangleIndex);
+    if (profilerCounters != nullptr)
+    {
+        atomicAdd(&profilerCounters->closestBvhNodeTests,
+                  static_cast<unsigned long long>(stats.nodeTests));
+        atomicAdd(&profilerCounters->closestBvhTriangleTests,
+                  static_cast<unsigned long long>(stats.triangleTests));
+    }
 
     if (!hit.hit)
     {
